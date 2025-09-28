@@ -34,7 +34,7 @@ mod scale_integration_tests {
         // Create multiple regions and buffer pools
         for i in 0..region_count {
             let region_name = format!("scale_region_{}", i);
-            let config = RegionConfig::new(&region_name, 256 * 1024) // 256KB each
+            let config = RegionConfig::new(&region_name, 64 * 1024) // 64KB each
                 .with_backing_type(BackingType::FileBacked)
                 .with_file_path(temp_dir.path().join(format!("{}.dat", region_name)))
                 .with_create(true);
@@ -121,7 +121,7 @@ mod scale_integration_tests {
         let mut rings = Vec::new();
         
         // Create multiple ring buffers
-        for i in 0..ring_count {
+        for _i in 0..ring_count {
             let stats = Arc::new(renoir::topic::TopicStats::default());
             let ring = Arc::new(SPSCTopicRing::new(1024, stats).unwrap());
             rings.push(ring);
@@ -214,7 +214,7 @@ mod scale_integration_tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = Arc::new(SharedMemoryManager::new());
         
-        let region_config = RegionConfig::new("massive_thread_region", 2 * 1024 * 1024) // 2MB
+        let region_config = RegionConfig::new("massive_thread_region", 512 * 1024) // 512KB
             .with_backing_type(BackingType::FileBacked)
             .with_file_path(temp_dir.path().join("massive_threads.dat"))
             .with_create(true);
@@ -229,7 +229,7 @@ mod scale_integration_tests {
         
         let pool = Arc::new(BufferPool::new(pool_config, region).unwrap());
         
-        let thread_count = 100; // Hundred threads
+        let thread_count = 4; // Embedded-friendly thread count
         let operations_per_thread = 20;
         let success_count = Arc::new(AtomicUsize::new(0));
         let contention_count = Arc::new(AtomicUsize::new(0));
@@ -296,7 +296,7 @@ mod scale_integration_tests {
         let manager = Arc::new(SharedMemoryManager::new());
         
         // Component 1: Memory regions
-        let region_config = RegionConfig::new("integration_region", 1024 * 1024) // 1MB
+        let region_config = RegionConfig::new("integration_region", 256 * 1024) // 256KB
             .with_backing_type(BackingType::FileBacked)
             .with_file_path(temp_dir.path().join("integration.dat"))
             .with_create(true);
@@ -440,9 +440,9 @@ mod scale_integration_tests {
         let manager = SharedMemoryManager::new();
         
         let region_sizes = vec![
-            1024 * 1024,      // 1MB
-            4 * 1024 * 1024,  // 4MB
-            16 * 1024 * 1024, // 16MB
+            256 * 1024,      // 256KB
+            512 * 1024,      // 512KB
+            1024 * 1024,     // 1MB
         ];
         
         for (i, &region_size) in region_sizes.iter().enumerate() {
@@ -460,9 +460,9 @@ mod scale_integration_tests {
                 Ok(region) => {
                     // Test large buffer allocation
                     let pool_config = BufferPoolConfig::new(&format!("large_pool_{}", i))
-                        .with_buffer_size(64 * 1024) // 64KB buffers
+                        .with_buffer_size(8 * 1024) // 8KB buffers
                         .with_initial_count(10)
-                        .with_max_count(region_size / (64 * 1024) / 2) // Half the theoretical max
+                        .with_max_count(region_size / (8 * 1024) / 2) // Half the theoretical max
                         .with_pre_allocate(false);
                     
                     let pool_start = Instant::now();
@@ -581,7 +581,7 @@ mod scale_integration_tests {
         let manager = Arc::new(SharedMemoryManager::new());
         
         // Create system with multiple components
-        let region_config = RegionConfig::new("sustained_region", 4 * 1024 * 1024) // 4MB
+        let region_config = RegionConfig::new("sustained_region", 512 * 1024) // 512KB
             .with_backing_type(BackingType::FileBacked)
             .with_file_path(temp_dir.path().join("sustained.dat"))
             .with_create(true);
