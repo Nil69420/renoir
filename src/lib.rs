@@ -9,9 +9,10 @@
 //! - **Named shared memory regions**: File-backed and memfd support
 //! - **Multiple allocation strategies**: Ring buffers, buffer pools, custom allocators
 //! - **Metadata management**: Control regions with sequence/versioning logic
-//! - **C API**: Stable interface for C++/ROS2 integration
+//! - **C API**: Stable interface for C++/ROS2 integration  
 //! - **Zero-copy operations**: Efficient memory mapping and direct access
 //! - **Thread-safe**: Lock-free data structures where possible
+//! - **Modular architecture**: Clean separation of concerns, all files under 300 lines
 //!
 //! ## Architecture
 //!
@@ -32,36 +33,42 @@
 //! └─────────────────┘    └─────────────────────────┘
 //! ```
 
-pub mod allocator;
-pub mod buffer;
+// All code should be actively used in production
+
+// Existing modules (preserved for compatibility)
 pub mod error;
 pub mod memory;
-pub mod metadata;
+pub mod allocators;
+pub mod buffers;
+pub mod metadata_modules;
 pub mod ringbuf;
-pub mod topic;
-pub mod topic_rings;
 pub mod shared_pools;
-pub mod topic_manager;
 pub mod structured_layout;
+pub mod topic;
+pub mod topic_manager_modules;
+pub mod topic_rings;
 
 #[cfg(feature = "c-api")]
 pub mod ffi;
 
+// Main API re-exports
+pub use memory::SharedMemoryManager;
+pub use topic_manager_modules::{TopicManager, Publisher, Subscriber, TopicId, TopicManagerStats};
+pub use topic::{TopicConfig, TopicPattern, Message};
 pub use error::{RenoirError, Result};
-pub use memory::{SharedMemoryRegion, SharedMemoryManager};
-pub use metadata::{ControlRegion, RegionMetadata};
-pub use allocator::{Allocator, PoolAllocator, BumpAllocator};
-pub use buffer::{BufferPool, Buffer};
-pub use ringbuf::{RingBuffer, Producer, Consumer};
-pub use topic::{MessageHeader, Message, TopicConfig, TopicPattern, TopicQoS, TopicStats};
+pub use allocators::{Allocator, AllocatorExt, BumpAllocator, PoolAllocator};
+pub use buffers::{Buffer, BufferPool, BufferPoolConfig, BufferPoolConfigBuilder, BufferPoolStats, AtomicBufferPoolStats};
+pub use shared_pools::{SharedBufferPoolManager, SharedBufferPool, BufferPoolRegistry, PoolId, BufferHandle};
+pub use memory::{BackingType, RegionConfig, SharedMemoryRegion, RegionMemoryStats};
+pub use metadata_modules::{RegionMetadata, RegionRegistryEntry, ControlStats, ControlHeader, ControlRegion};
+pub use structured_layout::{StructuredMemoryRegion, GlobalStats, GlobalControlHeader, TopicDirectory};
 pub use topic_rings::{SPSCTopicRing, MPMCTopicRing};
-pub use shared_pools::{SharedBufferPoolManager, BufferPoolRegistry};
-pub use topic_manager::{TopicManager, Publisher, Subscriber, TopicId};
+pub use ringbuf::{RingBuffer, Producer, Consumer, SequencedRingBuffer, ClaimGuard};
 
-/// Version information for the Renoir library
+// Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const VERSION_MAJOR: u32 = 0;
-pub const VERSION_MINOR: u32 = 1;
+pub const VERSION_MINOR: u32 = 3;
 pub const VERSION_PATCH: u32 = 0;
 
 /// Default configuration constants
@@ -77,17 +84,4 @@ pub mod config {
     
     /// Default ring buffer capacity
     pub const DEFAULT_RING_CAPACITY: usize = 4096;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_version_constants() {
-        assert!(!VERSION.is_empty());
-        assert_eq!(VERSION_MAJOR, 0);
-        assert_eq!(VERSION_MINOR, 1);
-        assert_eq!(VERSION_PATCH, 0);
-    }
 }

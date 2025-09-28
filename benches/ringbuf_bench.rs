@@ -44,10 +44,10 @@ fn benchmark_different_data_types(c: &mut Criterion) {
         let consumer = buffer.consumer();
         
         b.iter(|| {
-            for i in 0..1000u8 {
+            for i in 0..255u8 {
                 producer.try_push(i).unwrap();
             }
-            for _ in 0..1000 {
+            for _ in 0..255 {
                 consumer.try_pop().unwrap();
             }
         });

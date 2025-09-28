@@ -1,8 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId};
 use renoir::{
-    allocator::{BumpAllocator, PoolAllocator, Allocator},
+    allocators::{BumpAllocator, PoolAllocator, Allocator},
     memory::{SharedMemoryManager, RegionConfig, BackingType},
-    buffer::{BufferPool, BufferPoolConfig},
+    buffers::{BufferPool, BufferPoolConfig},
 };
 use std::{sync::Arc, time::Duration};
 
@@ -50,7 +50,7 @@ fn benchmark_pool_allocator(c: &mut Criterion) {
                 
                 // Deallocate
                 for ptr in ptrs {
-                    let _ = allocator.deallocate(ptr, block_size, 8);
+                    let _ = allocator.deallocate(ptr, block_size);
                 }
             });
         });

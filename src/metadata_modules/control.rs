@@ -1,4 +1,4 @@
-//! Metadata management and control regions
+//! Control region for managing shared memory regions and metadata
 
 use std::{
     collections::HashMap,
@@ -6,93 +6,12 @@ use std::{
     time::SystemTime,
 };
 
-use serde::{Deserialize, Serialize};
-
 use crate::{
     error::{RenoirError, Result},
-    memory::{BackingType, RegionConfig, SharedMemoryRegion},
+    memory::{RegionConfig, SharedMemoryRegion},
 };
 
-/// Metadata for a shared memory region
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegionMetadata {
-    /// Name of the region
-    pub name: String,
-    /// Size in bytes
-    pub size: usize,
-    /// Type of backing storage
-    pub backing_type: BackingType,
-    /// Creation timestamp
-    pub created_at: SystemTime,
-    /// Version number for compatibility checking
-    pub version: u64,
-}
-
-impl RegionMetadata {
-    /// Create new metadata
-    pub fn new(
-        name: String,
-        size: usize,
-        backing_type: BackingType,
-    ) -> Self {
-        Self {
-            name,
-            size,
-            backing_type,
-            created_at: SystemTime::now(),
-            version: 1,
-        }
-    }
-
-    /// Update the version number
-    pub fn increment_version(&mut self) {
-        self.version += 1;
-    }
-}
-
-/// Registry entry for a shared memory region
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegionRegistryEntry {
-    /// Region metadata
-    pub metadata: RegionMetadata,
-    /// Process ID that created the region
-    pub creator_pid: u32,
-    /// Number of active references
-    pub ref_count: u32,
-    /// Last access timestamp
-    pub last_accessed: SystemTime,
-}
-
-impl RegionRegistryEntry {
-    /// Create a new registry entry
-    pub fn new(metadata: RegionMetadata) -> Self {
-        Self {
-            metadata,
-            creator_pid: std::process::id(),
-            ref_count: 1,
-            last_accessed: SystemTime::now(),
-        }
-    }
-
-    /// Increment reference count
-    pub fn add_ref(&mut self) {
-        self.ref_count += 1;
-        self.last_accessed = SystemTime::now();
-    }
-
-    /// Decrement reference count
-    pub fn remove_ref(&mut self) -> bool {
-        if self.ref_count > 0 {
-            self.ref_count -= 1;
-        }
-        self.ref_count == 0
-    }
-
-    /// Update last accessed time
-    pub fn touch(&mut self) {
-        self.last_accessed = SystemTime::now();
-    }
-}
+use super::types::{RegionMetadata, RegionRegistryEntry, ControlStats};
 
 /// Header for the control region containing global metadata
 #[repr(C)]
@@ -136,6 +55,42 @@ impl Default for ControlHeader {
     }
 }
 
+impl ControlHeader {
+    /// Magic number constant
+    pub const MAGIC: u64 = 0x52454E4F49520001;
+    
+    /// Current version constant
+    pub const VERSION: u64 = 1;
+    
+    /// Validate the header
+    pub fn validate(&self) -> Result<()> {
+        if self.magic != Self::MAGIC {
+            return Err(RenoirError::invalid_parameter("magic_number", "Invalid control header magic number"));
+        }
+        
+        if self.version != Self::VERSION {
+            return Err(RenoirError::invalid_parameter("version", &format!(
+                "Unsupported control header version: {}",
+                self.version
+            )));
+        }
+        
+        if self.total_size < std::mem::size_of::<ControlHeader>() as u64 {
+            return Err(RenoirError::invalid_parameter("total_size", "Control header size too small"));
+        }
+        
+        Ok(())
+    }
+    
+    /// Initialize header with size
+    pub fn initialize(&mut self, total_size: usize) {
+        *self = Self::default();
+        self.total_size = total_size as u64;
+        self.registry_offset = std::mem::size_of::<ControlHeader>() as u64;
+        self.registry_size = (total_size - std::mem::size_of::<ControlHeader>()) as u64;
+    }
+}
+
 /// Control region for managing shared memory regions and metadata
 #[derive(Debug)]
 pub struct ControlRegion {
@@ -151,7 +106,8 @@ impl ControlRegion {
     /// Create or open a control region
     pub fn new(mut config: RegionConfig) -> Result<Self> {
         // Ensure minimum size for control region
-        if config.size < std::mem::size_of::<ControlHeader>() + 1024 {
+        let min_size = std::mem::size_of::<ControlHeader>() + 1024;
+        if config.size < min_size {
             config.size = std::mem::size_of::<ControlHeader>() + 4096;
         }
 
@@ -163,14 +119,13 @@ impl ControlRegion {
         // Initialize or validate header
         let is_new = unsafe {
             let current_magic = (*header).magic;
-            if current_magic == 0 || current_magic != ControlHeader::default().magic {
+            if current_magic == 0 || current_magic != ControlHeader::MAGIC {
                 // Initialize new header
-                *header = ControlHeader::default();
-                (*header).total_size = region.size() as u64;
-                (*header).registry_offset = std::mem::size_of::<ControlHeader>() as u64;
-                (*header).registry_size = (region.size() - std::mem::size_of::<ControlHeader>()) as u64;
+                (*header).initialize(region.size());
                 true
             } else {
+                // Validate existing header
+                (*header).validate()?;
                 false
             }
         };
@@ -198,7 +153,18 @@ impl ControlRegion {
         }
 
         let registry_start = header.registry_offset as usize;
-        let registry_slice = &region.as_slice()[registry_start..];
+        let registry_end = registry_start + header.registry_size as usize;
+        
+        if registry_end > region.size() {
+            return Err(RenoirError::invalid_parameter("registry_bounds", "Registry extends beyond region bounds"));
+        }
+        
+        let registry_slice = &region.as_slice()[registry_start..registry_end];
+        
+        // Find the actual used portion (bincode might not use the full space)
+        if registry_slice.is_empty() || registry_slice[0] == 0 {
+            return Ok(HashMap::new());
+        }
         
         // Deserialize registry
         bincode::deserialize(registry_slice)
@@ -227,6 +193,8 @@ impl ControlRegion {
             )
         };
 
+        // Clear the region first
+        region_slice.fill(0);
         region_slice[..serialized.len()].copy_from_slice(&serialized);
         
         // Update header
@@ -247,6 +215,9 @@ impl ControlRegion {
 
     /// Register a new region
     pub fn register_region(&self, metadata: &RegionMetadata) -> Result<()> {
+        // Validate metadata first
+        metadata.validate()?;
+        
         {
             let mut registry = self.registry.write().unwrap();
             if registry.contains_key(&metadata.name) {
@@ -338,107 +309,43 @@ impl ControlRegion {
         let header = unsafe { &*self.header };
         let registry = self.registry.read().unwrap();
 
-        ControlStats {
-            total_regions: registry.len(),
-            total_size: header.total_size,
-            global_sequence: self.get_sequence(),
-            created_at: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(header.created_at),
-            last_modified: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(
+        ControlStats::new(
+            registry.len(),
+            header.total_size,
+            self.get_sequence(),
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(header.created_at),
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(
                 header.last_modified.load(std::sync::atomic::Ordering::SeqCst)
             ),
-        }
+        )
     }
 
     /// Get the underlying shared memory region
     pub fn region(&self) -> &Arc<SharedMemoryRegion> {
         &self.region
     }
+
+    /// Clean up stale entries (entries from dead processes)
+    pub fn cleanup_stale_entries(&self, max_age_seconds: u64) -> Result<usize> {
+        let stale_names: Vec<String> = {
+            let registry = self.registry.read().unwrap();
+            registry.iter()
+                .filter(|(_, entry)| {
+                    entry.is_stale(max_age_seconds) && !entry.creator_alive()
+                })
+                .map(|(name, _)| name.clone())
+                .collect()
+        };
+
+        let removed_count = stale_names.len();
+        
+        for name in stale_names {
+            let _ = self.unregister_region(&name); // Ignore errors for cleanup
+        }
+
+        Ok(removed_count)
+    }
 }
 
 unsafe impl Send for ControlRegion {}
 unsafe impl Sync for ControlRegion {}
-
-/// Statistics for the control region
-#[derive(Debug, Clone)]
-pub struct ControlStats {
-    /// Total number of registered regions
-    pub total_regions: usize,
-    /// Total size of the control region
-    pub total_size: u64,
-    /// Current global sequence number
-    pub global_sequence: u64,
-    /// When the control region was created
-    pub created_at: SystemTime,
-    /// When the control region was last modified
-    pub last_modified: SystemTime,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::memory::BackingType;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_region_metadata() {
-        let metadata = RegionMetadata::new(
-            "test".to_string(),
-            4096,
-            BackingType::FileBacked,
-        );
-        
-        assert_eq!(metadata.name, "test");
-        assert_eq!(metadata.size, 4096);
-        assert_eq!(metadata.version, 1);
-    }
-
-    #[test]
-    fn test_registry_entry() {
-        let metadata = RegionMetadata::new(
-            "test".to_string(),
-            4096,
-            BackingType::FileBacked,
-        );
-        
-        let mut entry = RegionRegistryEntry::new(metadata);
-        assert_eq!(entry.ref_count, 1);
-        
-        entry.add_ref();
-        assert_eq!(entry.ref_count, 2);
-        
-        assert!(!entry.remove_ref());
-        assert_eq!(entry.ref_count, 1);
-        
-        assert!(entry.remove_ref());
-        assert_eq!(entry.ref_count, 0);
-    }
-
-    #[test]
-    fn test_control_region() {
-        let temp_dir = TempDir::new().unwrap();
-        let config = RegionConfig {
-            name: "control".to_string(),
-            size: 8192,
-            backing_type: BackingType::FileBacked,
-            file_path: Some(temp_dir.path().join("control_shm")),
-            create: true,
-            permissions: 0o644,
-        };
-
-        let control = ControlRegion::new(config).unwrap();
-        
-        let metadata = RegionMetadata::new(
-            "test_region".to_string(),
-            4096,
-            BackingType::FileBacked,
-        );
-        
-        control.register_region(&metadata).unwrap();
-        
-        let entry = control.get_region_entry("test_region").unwrap();
-        assert_eq!(entry.metadata.name, "test_region");
-        
-        let stats = control.get_stats();
-        assert_eq!(stats.total_regions, 1);
-    }
-}

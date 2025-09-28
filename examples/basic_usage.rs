@@ -4,8 +4,8 @@
 
 use renoir::{
     memory::{SharedMemoryManager, RegionConfig, BackingType},
-    buffer::{BufferPool, BufferPoolConfig},
-    allocator::{BumpAllocator, Allocator},
+    buffers::{BufferPool, BufferPoolConfig},
+    allocators::{BumpAllocator, Allocator},
     Result,
 };
 use std::{path::PathBuf, time::Duration};
