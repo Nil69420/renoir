@@ -1,0 +1,82 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock file (for libraries, exclude this)
+# Uncomment if you want to include it:
+# Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# Log files
+*.log
+*.out
+
+# Shared memory files (if any are created during testing)
+/dev/shm/renoir_*
+*.shm
+
+# Build scripts output
+build/
+dist/
+
+# Documentation build
+/doc/
+
+# Coverage reports
+/coverage/
+*.profraw
+*.profdata
+
+# Flamegraph files
+flamegraph.svg
+perf.data*
+
+# Benchmark results
+criterion/
+
+# C FFI build artifacts
+*.so
+*.dll
+*.dylib
+*.a
+*.lib
+
+# CMake files (if using for C integration)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Python bytecode (if using Python for testing/integration)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node modules (if using JS for testing/integration)  
+node_modules/
+
+# Test artifacts
+*.test
+test_results/
