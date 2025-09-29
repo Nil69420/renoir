@@ -1,0 +1,97 @@
+name: Dependency Updates & Security
+
+on:
+  schedule:
+    # Run weekly on Mondays at 8 AM UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  # Update dependencies and create PR
+  update_dependencies:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-update
+      run: cargo install cargo-update
+
+    - name: Update dependencies
+      run: |
+        cargo update
+        cargo check
+
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update dependencies"
+        title: "Automated dependency updates"
+        body: |
+          ## Automated Dependency Updates
+          
+          This PR contains automated dependency updates.
+          
+          ### Changes:
+          - Updated Cargo.lock with latest compatible versions
+          - Verified that the project still builds successfully
+          
+          ### Testing:
+          - [ ] Run full test suite after merge
+          - [ ] Verify embedded system compatibility
+          - [ ] Check for any breaking changes in dependencies
+          
+          **Note:** This PR was created automatically. Please review carefully before merging.
+        branch: automated/dependency-updates
+        delete-branch: true
+
+  # Security monitoring
+  security_monitoring:
+    name: Security Monitoring
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install security tools
+      run: |
+        cargo install cargo-audit
+        cargo install cargo-geiger
+
+    - name: Run comprehensive security audit
+      run: |
+        echo "## Security Audit Results" >> security_report.md
+        echo "Generated on: $(date)" >> security_report.md
+        echo "" >> security_report.md
+        
+        echo "### Dependency Vulnerabilities" >> security_report.md
+        cargo audit --format json > audit_results.json || true
+        
+        echo "### Unsafe Code Analysis" >> security_report.md
+        cargo geiger --format GitHubMarkdown >> security_report.md || true
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: |
+          security_report.md
+          audit_results.json
+        retention-days: 30
+
+    - name: Create security issue if vulnerabilities found
+      run: |
+        if [ -s audit_results.json ] && grep -q "\"type\":\"warning\"" audit_results.json; then
+          echo "Security vulnerabilities detected!"
+          # This would create an issue (requires additional setup)
+        fi
