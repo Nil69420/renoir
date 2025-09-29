@@ -51,6 +51,9 @@ pub mod topic_rings;
 // New message format and schema strategy module
 pub mod message_formats;
 
+// Synchronization primitives for high-performance robotics patterns
+pub mod sync;
+
 #[cfg(feature = "c-api")]
 pub mod ffi;
 
@@ -67,6 +70,13 @@ pub use metadata_modules::{RegionMetadata, RegionRegistryEntry, ControlStats, Co
 pub use structured_layout::{StructuredMemoryRegion, GlobalStats, GlobalControlHeader, TopicDirectory};
 pub use topic_rings::{SPSCTopicRing, MPMCTopicRing};
 pub use ringbuf::{RingBuffer, Producer, Consumer, SequencedRingBuffer, ClaimGuard};
+pub use sync::{
+    sequence::{AtomicSequence, SequenceChecker, GlobalSequenceGenerator, SequenceNumber},
+    swmr::{SWMRRing, SharedSWMRRing, WriterHandle, ReaderHandle},
+    epoch::{EpochManager, SharedEpochManager, EpochReclaim, ReaderTracker},
+    notify::{EventNotifier, NotificationGroup, BatchNotifier, NotifyCondition},
+    SyncError, SyncResult
+};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

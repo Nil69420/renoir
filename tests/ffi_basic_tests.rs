@@ -45,27 +45,23 @@ mod ffi_tests {
 
     #[test]
     fn test_manager_lifecycle() {
-        unsafe {
-            // Create manager
-            let manager = renoir_manager_create();
-            assert!(!manager.is_null());
-            
-            // Destroy manager
-            renoir_manager_destroy(manager);
-        }
+        // Create manager
+        let manager = renoir_manager_create();
+        assert!(!manager.is_null());
+        
+        // Destroy manager
+        renoir_manager_destroy(manager);
     }
 
     #[test]
     fn test_null_pointer_safety() {
-        unsafe {
-            // Test that passing null pointers doesn't crash
-            
-            // Null manager operations
-            renoir_manager_destroy(ptr::null_mut()); // Should not crash
-            
-            // Null string operations
-            renoir_free_string(ptr::null_mut()); // Should not crash
-        }
+        // Test that passing null pointers doesn't crash
+        
+        // Null manager operations
+        renoir_manager_destroy(ptr::null_mut()); // Should not crash
+        
+        // Null string operations
+        renoir_free_string(ptr::null_mut()); // Should not crash
     }
 
     #[test]
@@ -88,29 +84,25 @@ mod ffi_tests {
     #[test]
     fn test_concurrent_safety_basic() {
         // This is a basic test - real concurrent testing would need multiple threads
-        unsafe {
-            let manager1 = renoir_manager_create();
-            let manager2 = renoir_manager_create();
+        let manager1 = renoir_manager_create();
+        let manager2 = renoir_manager_create();
+        
+        // Both should be valid (or both null if creation fails)
+        if !manager1.is_null() {
+            assert!(!manager2.is_null());
             
-            // Both should be valid (or both null if creation fails)
-            if !manager1.is_null() {
-                assert!(!manager2.is_null());
-                
-                renoir_manager_destroy(manager1);
-                renoir_manager_destroy(manager2);
-            }
+            renoir_manager_destroy(manager1);
+            renoir_manager_destroy(manager2);
         }
     }
 
     #[test]
     fn test_memory_management() {
-        unsafe {
-            // Create and destroy multiple managers to test memory management
-            for _ in 0..10 {
-                let manager = renoir_manager_create();
-                if !manager.is_null() {
-                    renoir_manager_destroy(manager);
-                }
+        // Create and destroy multiple managers to test memory management
+        for _ in 0..10 {
+            let manager = renoir_manager_create();
+            if !manager.is_null() {
+                renoir_manager_destroy(manager);
             }
         }
     }
@@ -128,20 +120,18 @@ mod ffi_tests {
 
     #[test]
     fn test_version_consistency() {
-        unsafe {
-            // Test that version functions return consistent values
-            let major1 = renoir_version_major();
-            let major2 = renoir_version_major();
-            assert_eq!(major1, major2);
-            
-            let minor1 = renoir_version_minor();
-            let minor2 = renoir_version_minor();
-            assert_eq!(minor1, minor2);
-            
-            let patch1 = renoir_version_patch();
-            let patch2 = renoir_version_patch();
-            assert_eq!(patch1, patch2);
-        }
+        // Test that version functions return consistent values
+        let major1 = renoir_version_major();
+        let major2 = renoir_version_major();
+        assert_eq!(major1, major2);
+        
+        let minor1 = renoir_version_minor();
+        let minor2 = renoir_version_minor();
+        assert_eq!(minor1, minor2);
+        
+        let patch1 = renoir_version_patch();
+        let patch2 = renoir_version_patch();
+        assert_eq!(patch1, patch2);
     }
 }
 

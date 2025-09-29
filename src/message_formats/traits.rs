@@ -208,6 +208,11 @@ impl ZeroCopyBuilder {
         }
     }
     
+    /// Get the format type of this builder
+    pub fn format_type(&self) -> FormatType {
+        self.format_type
+    }
+    
     /// Add a u32 field
     pub fn add_u32(&mut self, field_name: String, value: u32) -> Result<()> {
         let bytes = value.to_le_bytes();

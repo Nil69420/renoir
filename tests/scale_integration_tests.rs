@@ -2,7 +2,7 @@
 //! Tests focused on large-scale operations, system integration, and cross-component testing
 
 use std::{
-    sync::{Arc, atomic::{AtomicUsize, AtomicBool, Ordering}, Barrier},
+    sync::{Arc, atomic::{AtomicUsize, Ordering}, Barrier},
     thread,
     time::{Duration, Instant},
     collections::HashMap,

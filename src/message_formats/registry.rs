@@ -301,7 +301,7 @@ mod tests {
     
     #[test]
     fn test_format_registration() {
-        let mut registry = ZeroCopyFormatRegistry::new();
+        let registry = ZeroCopyFormatRegistry::new();
         
         // Should have default formats
         assert!(registry.get_format(&FormatType::FlatBuffers).is_some());
