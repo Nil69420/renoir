@@ -6,7 +6,7 @@ use std::{
         Arc,
     },
     ptr::NonNull,
-    os::fd::RawFd,
+    os::fd::{RawFd, AsRawFd},
 };
 
 use crate::{
@@ -31,9 +31,9 @@ pub struct SPSCTopicRing {
     cached_write_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
-    /// Notification eventfd (Linux only)
+    /// Notification file descriptor (Linux only)
     #[cfg(target_os = "linux")]
-    notify_fd: Option<RawFd>,
+    notify_fd: Option<std::os::fd::OwnedFd>,
     /// Whether notifications are enabled
     notification_enabled: AtomicBool,
 }
@@ -104,13 +104,11 @@ impl SPSCTopicRing {
     }
 
     #[cfg(target_os = "linux")]
-    fn create_eventfd() -> Result<Option<RawFd>> {
-        use libc::{eventfd, EFD_CLOEXEC, EFD_NONBLOCK};
+    fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
+        use nix::sys::eventfd::{eventfd, EfdFlags};
         
-        let fd = unsafe { eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK) };
-        if fd == -1 {
-            return Err(RenoirError::memory("Failed to create eventfd"));
-        }
+        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
+            .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
         Ok(Some(fd))
     }
 
@@ -221,7 +219,8 @@ impl SPSCTopicRing {
             return Ok(Some(message));
         }
 
-        if let Some(fd) = self.notify_fd {
+        if let Some(ref owned_fd) = self.notify_fd {
+            let fd = owned_fd.as_raw_fd();
             self.wait_on_eventfd(fd, timeout_ms)?;
             self.try_consume()
         } else {
@@ -231,21 +230,23 @@ impl SPSCTopicRing {
 
     #[cfg(target_os = "linux")]
     fn wait_on_eventfd(&self, fd: RawFd, timeout_ms: Option<u64>) -> Result<()> {
-        use libc::{poll, pollfd, POLLIN, read};
-        
-        let mut pfd = pollfd {
-            fd,
-            events: POLLIN,
-            revents: 0,
+        use nix::{
+            poll::{poll, PollFd, PollFlags},
+            unistd::read,
         };
-
-        let timeout = timeout_ms.map(|ms| ms as i32).unwrap_or(-1);
-        let result = unsafe { poll(&mut pfd, 1, timeout) };
         
-        if result > 0 && (pfd.revents & POLLIN) != 0 {
-            // Clear the eventfd
-            let mut buf = [0u8; 8];
-            unsafe { read(fd, buf.as_mut_ptr() as *mut libc::c_void, 8) };
+        use std::os::fd::BorrowedFd;
+        let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
+        let mut fds = [PollFd::new(&borrowed_fd, PollFlags::POLLIN)];
+        let timeout = timeout_ms.map(|ms| ms as i32).unwrap_or(-1);
+        
+        match poll(&mut fds, timeout) {
+            Ok(n) if n > 0 => {
+                // Clear the eventfd
+                let mut buf = [0u8; 8];
+                let _ = read(fd, &mut buf);
+            }
+            _ => {}
         }
 
         Ok(())
@@ -253,12 +254,12 @@ impl SPSCTopicRing {
 
     fn notify_readers(&self) -> Result<()> {
         #[cfg(target_os = "linux")]
-        if let Some(fd) = self.notify_fd {
-            use libc::write;
+        if let Some(ref owned_fd) = self.notify_fd {
+            use nix::unistd::write;
+            let fd = owned_fd.as_raw_fd();
             let value: u64 = 1;
-            unsafe {
-                write(fd, &value as *const u64 as *const libc::c_void, 8);
-            }
+            let buf = value.to_ne_bytes();
+            let _ = write(fd, &buf); // Ignore write errors for notifications
         }
         Ok(())
     }
@@ -326,7 +327,7 @@ impl SPSCTopicRing {
     /// Get the eventfd for external polling
     #[cfg(target_os = "linux")]
     pub fn notification_fd(&self) -> Option<RawFd> {
-        self.notify_fd
+        self.notify_fd.as_ref().map(|fd| fd.as_raw_fd())
     }
 
     /// Enable or disable notifications
@@ -353,10 +354,7 @@ impl SPSCTopicRing {
 
 impl Drop for SPSCTopicRing {
     fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
-        if let Some(fd) = self.notify_fd {
-            unsafe { libc::close(fd) };
-        }
+        // OwnedFd will automatically close on drop, no manual close needed
 
         // Deallocate buffer if we own it
         let layout = std::alloc::Layout::array::<u8>(self.capacity).unwrap();

@@ -17,11 +17,13 @@ use crate::error::Result;
 pub mod zero_copy;
 pub mod registry;
 pub mod traits;
+pub mod official_flatbuffers;
 
 // Export key traits and types for external use  
 pub use traits::{ZeroCopyFormat, ZeroCopyAccessor as ZeroCopyAccess, SchemaValidator, ZeroCopyBuilder as BufferBuilder, SchemaCompatibility, FieldType};
 pub use zero_copy::*;
 pub use registry::{ZeroCopyFormatRegistry, UseCase, SchemaInfo as RegistrySchemaInfo};
+pub use official_flatbuffers::OfficialFlatBufferFormat;
 
 /// Schema format type identifier (zero-copy only)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

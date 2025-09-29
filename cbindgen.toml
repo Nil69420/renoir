@@ -1,0 +1,77 @@
+# cbindgen.toml - Configuration for C++ header generation
+
+# The language to output bindings for.
+language = "C"
+
+# Options for how the generated header should be formatted.
+[cpp]
+  # Whether to use pragma once or include guards.
+  pragma_once = true
+  
+  # Whether to add include guards.
+  include_guard = "RENOIR_H"
+  
+  # Whether to enable C++ compatibility.
+  cpp_compat = true
+
+# Options for how the generated code is laid out.
+[style]
+  # The string to use for indentation. Can be a sequence of any character.
+  indent = "  "
+  
+  # The line ending to use for the generated file.
+  line_ending = "LF"
+
+# Options for what to generate bindings for.
+[export]
+  # A list of names of items to generate bindings for.
+  include = [
+    "SharedMemoryRegion",
+    "TopicBuffer", 
+    "SPSCTopicRing",
+    "MPMCTopicRing",
+    "EventNotification",
+    "RenoirError",
+    "RegionConfig",
+    "Message",
+    "MessageHeader"
+  ]
+  
+  # Exclude internal types and test utilities
+  exclude = [
+    "Test*",
+    "*Test",
+    "*_test_*"
+  ]
+
+# Options for renaming items.
+[rename]
+  # Rules for renaming enum variants.
+  "RenoirError" = "renoir_error_t"
+  "RegionConfig" = "renoir_region_config_t"
+  "Message" = "renoir_message_t"
+  "MessageHeader" = "renoir_message_header_t"
+
+# Documentation options.
+[documentation]
+  # Whether to include documentation.
+  enabled = true
+  
+  # The style of documentation to generate.
+  style = "c99"
+
+# Preprocessor options.
+[defines]
+  # Additional #defines to be included.
+  "RENOIR_VERSION_MAJOR" = "0"
+  "RENOIR_VERSION_MINOR" = "1"
+  "RENOIR_VERSION_PATCH" = "0"
+
+# Platform-specific configuration
+[target."cfg(target_os = \"linux\")"]
+  # Linux-specific exports
+  include = ["eventfd_support"]
+  
+[target."cfg(unix)"]
+  # Unix-specific exports
+  include = ["posix_support"]

@@ -27,9 +27,9 @@ pub struct MPMCTopicRing {
     read_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
-    /// Notification eventfd (Linux only)
+    /// Notification file descriptor (Linux only)
     #[cfg(target_os = "linux")]
-    notify_fd: Option<RawFd>,
+    notify_fd: Option<std::os::fd::OwnedFd>,
 }
 
 impl MPMCTopicRing {
@@ -65,13 +65,11 @@ impl MPMCTopicRing {
     }
 
     #[cfg(target_os = "linux")]
-    fn create_eventfd() -> Result<Option<RawFd>> {
-        use libc::{eventfd, EFD_CLOEXEC, EFD_NONBLOCK};
+    fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
+        use nix::sys::eventfd::{eventfd, EfdFlags};
         
-        let fd = unsafe { eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK) };
-        if fd == -1 {
-            return Err(RenoirError::memory("Failed to create eventfd"));
-        }
+        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
+            .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
         Ok(Some(fd))
     }
 
@@ -169,12 +167,13 @@ impl MPMCTopicRing {
 
     fn notify_readers(&self) -> Result<()> {
         #[cfg(target_os = "linux")]
-        if let Some(fd) = self.notify_fd {
-            use libc::write;
+        if let Some(ref owned_fd) = self.notify_fd {
+            use nix::unistd::write;
+            use std::os::fd::AsRawFd;
+            let fd = owned_fd.as_raw_fd();
             let value: u64 = 1;
-            unsafe {
-                write(fd, &value as *const u64 as *const libc::c_void, 8);
-            }
+            let buf = value.to_ne_bytes();
+            let _ = write(fd, &buf); // Ignore write errors for notifications
         }
         Ok(())
     }
@@ -239,16 +238,14 @@ impl MPMCTopicRing {
 
     #[cfg(target_os = "linux")]
     pub fn notification_fd(&self) -> Option<RawFd> {
-        self.notify_fd
+        use std::os::fd::AsRawFd;
+        self.notify_fd.as_ref().map(|fd| fd.as_raw_fd())
     }
 }
 
 impl Drop for MPMCTopicRing {
     fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
-        if let Some(fd) = self.notify_fd {
-            unsafe { libc::close(fd) };
-        }
+        // OwnedFd will automatically close on drop, no manual close needed
 
         let layout = std::alloc::Layout::array::<u8>(self.capacity).unwrap();
         unsafe {

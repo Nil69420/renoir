@@ -14,11 +14,13 @@ pub mod sequence;
 pub mod swmr;
 pub mod epoch;
 pub mod notify;
+pub mod mio_notify;
 
 pub use sequence::{AtomicSequence, SequenceNumber};
 pub use swmr::{SWMRRing, SWMRSlot, ReaderHandle, WriterHandle};
 pub use epoch::{EpochManager, EpochReclaim, ReaderTracker};
 pub use notify::{EventNotifier, NotificationGroup, NotifyCondition};
+pub use mio_notify::{MioEventNotification, MioConditionNotifier};
 
 /// Common synchronization error types
 #[derive(Debug, Clone, PartialEq)]

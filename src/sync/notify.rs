@@ -6,8 +6,15 @@
 
 use std::sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::collections::HashMap;
-use std::os::fd::RawFd;
+use std::os::fd::{RawFd, AsRawFd};
 use std::sync::Mutex;
+
+use nix::{
+    sys::eventfd::{eventfd, EfdFlags},
+    unistd::{write, read},
+    poll::{poll, PollFd, PollFlags},
+    errno::Errno,
+};
 
 use super::{SyncResult, SyncError};
 
@@ -29,9 +36,9 @@ pub enum NotifyCondition {
 /// Event-based notifier using eventfd (Linux) or alternatives
 #[derive(Debug)]
 pub struct EventNotifier {
-    /// The eventfd file descriptor (Linux only)
+    /// Event file descriptor for Linux eventfd notifications
     #[cfg(target_os = "linux")]
-    event_fd: Option<RawFd>,
+    event_fd: Option<std::os::fd::OwnedFd>,
     /// Fallback condition variable for non-Linux systems
     #[cfg(not(target_os = "linux"))]
     condvar: Arc<(Mutex<bool>, std::sync::Condvar)>,
@@ -63,15 +70,10 @@ impl EventNotifier {
     }
     
     #[cfg(target_os = "linux")]
-    fn create_eventfd() -> SyncResult<Option<RawFd>> {
-        use libc::{eventfd, EFD_CLOEXEC, EFD_NONBLOCK};
-        
-        let fd = unsafe { eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK) };
-        if fd == -1 {
-            Err(SyncError::NotificationFailed)
-        } else {
-            Ok(Some(fd))
-        }
+    fn create_eventfd() -> SyncResult<Option<std::os::fd::OwnedFd>> {
+        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
+            .map_err(|_| SyncError::NotificationFailed)?;
+        Ok(Some(fd))
     }
     
     /// Notify waiting readers
@@ -84,21 +86,14 @@ impl EventNotifier {
         
         #[cfg(target_os = "linux")]
         {
-            if let Some(fd) = self.event_fd {
-                unsafe {
-                    let value: u64 = 1;
-                    let result = libc::write(
-                        fd,
-                        &value as *const u64 as *const libc::c_void,
-                        8,
-                    );
-                    if result == -1 {
-                        let errno = *libc::__errno_location();
-                        // EAGAIN is OK for non-blocking eventfd
-                        if errno != libc::EAGAIN {
-                            return Err(SyncError::NotificationFailed);
-                        }
-                    }
+            if let Some(ref owned_fd) = self.event_fd {
+                let fd = owned_fd.as_raw_fd();
+                let value: u64 = 1;
+                let buf = value.to_ne_bytes();
+                match write(fd, &buf) {
+                    Ok(_) => {},
+                    Err(Errno::EAGAIN) => {}, // OK for non-blocking eventfd
+                    Err(_) => return Err(SyncError::NotificationFailed),
                 }
             }
         }
@@ -124,7 +119,8 @@ impl EventNotifier {
         
         #[cfg(target_os = "linux")]
         {
-            if let Some(fd) = self.event_fd {
+            if let Some(ref owned_fd) = self.event_fd {
+                let fd = owned_fd.as_raw_fd();
                 return self.wait_on_eventfd(fd, timeout_ms);
             }
         }
@@ -158,40 +154,28 @@ impl EventNotifier {
     
     #[cfg(target_os = "linux")]
     fn wait_on_eventfd(&self, fd: RawFd, timeout_ms: Option<u64>) -> SyncResult<()> {
-        use libc::{poll, pollfd, POLLIN};
+        use std::os::fd::BorrowedFd;
+        let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
+        let mut fds = [PollFd::new(&borrowed_fd, PollFlags::POLLIN)];
         
-        let mut fds = [pollfd {
-            fd,
-            events: POLLIN,
-            revents: 0,
-        }];
+        let timeout = timeout_ms.map(|ms| ms as i32).unwrap_or(-1);
         
-        let timeout = timeout_ms.map(|ms| ms as libc::c_int).unwrap_or(-1);
-        
-        let result = unsafe { poll(fds.as_mut_ptr(), 1, timeout) };
-        
-        match result {
-            -1 => Err(SyncError::NotificationFailed),
-            0 => Err(SyncError::NotificationFailed), // Timeout
-            _ => {
-                // Clear the eventfd
-                unsafe {
-                    let mut value: u64 = 0;
-                    libc::read(
-                        fd,
-                        &mut value as *mut u64 as *mut libc::c_void,
-                        8,
-                    );
-                }
+        match poll(&mut fds, timeout) {
+            Ok(0) => Err(SyncError::NotificationFailed), // Timeout
+            Ok(_) => {
+                // Clear the eventfd by reading from it
+                let mut buf = [0u8; 8];
+                let _ = read(fd, &mut buf); // Ignore result, just clearing
                 Ok(())
             }
+            Err(_) => Err(SyncError::NotificationFailed),
         }
     }
     
     /// Get the file descriptor for external polling (Linux only)
     #[cfg(target_os = "linux")]
     pub fn event_fd(&self) -> Option<RawFd> {
-        self.event_fd
+        self.event_fd.as_ref().map(|fd| fd.as_raw_fd())
     }
     
     /// Enable or disable notifications
@@ -216,12 +200,8 @@ impl EventNotifier {
 
 impl Drop for EventNotifier {
     fn drop(&mut self) {
-        #[cfg(target_os = "linux")]
-        if let Some(fd) = self.event_fd {
-            unsafe {
-                libc::close(fd);
-            }
-        }
+        // OwnedFd automatically closes the file descriptor when dropped
+        // No manual cleanup needed
     }
 }
 
