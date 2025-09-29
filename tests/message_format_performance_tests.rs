@@ -73,9 +73,9 @@ mod performance_tests {
         
         let start = Instant::now();
         for _ in 0..iterations {
-            let _format1 = registry.recommend_format(&UseCase::HighFrequency);
-            let _format2 = registry.recommend_format(&UseCase::LowLatency);
-            let _format3 = registry.recommend_format(&UseCase::RealTime);
+            let _format1 = registry.recommend_format(UseCase::HighFrequency);
+            let _format2 = registry.recommend_format(UseCase::LowLatency);
+            let _format3 = registry.recommend_format(UseCase::RealTime);
         }
         let elapsed = start.elapsed();
         
@@ -303,7 +303,7 @@ mod performance_tests {
         for use_case in test_cases {
             let start = Instant::now();
             for _ in 0..1000 {
-                let format = registry.recommend_format(&use_case);
+                let format = registry.recommend_format(use_case);
                 assert!(format.is_zero_copy());
             }
             let elapsed = start.elapsed();

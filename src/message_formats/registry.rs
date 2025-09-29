@@ -6,6 +6,7 @@ use crate::error::{Result, RenoirError};
 use super::traits::ZeroCopyFormat;
 use super::FormatType;
 use super::zero_copy::{FlatBufferFormat, CapnProtoFormat};
+use super::schema_evolution::{SchemaEvolutionManager, EvolutionAwareSchema, CompatibilityLevel};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, OnceLock};
 
@@ -19,6 +20,10 @@ pub struct ZeroCopyFormatRegistry {
     topic_formats: HashMap<String, FormatType>,
     /// Topic schema assignments
     topic_schemas: HashMap<String, SchemaInfo>,
+    /// Schema evolution management
+    evolution_manager: SchemaEvolutionManager,
+    /// Enhanced compatibility tracking
+    compatibility_cache: HashMap<(u64, u32, u32), CompatibilityLevel>,
 }
 
 impl Default for ZeroCopyFormatRegistry {
@@ -35,6 +40,8 @@ impl ZeroCopyFormatRegistry {
             schemas: HashMap::new(),
             topic_formats: HashMap::new(),
             topic_schemas: HashMap::new(),
+            evolution_manager: SchemaEvolutionManager::new(),
+            compatibility_cache: HashMap::new(),
         };
         
         // Register default zero-copy formats
@@ -158,16 +165,84 @@ impl ZeroCopyFormatRegistry {
     }
     
     /// Get format recommendations based on use case
-    pub fn recommend_format(&self, use_case: &UseCase) -> FormatType {
+    pub fn recommend_format(&self, use_case: UseCase) -> FormatType {
         match use_case {
-            UseCase::HighFrequency => FormatType::FlatBuffers, // Fastest zero-copy access
-            UseCase::LowLatency => FormatType::FlatBuffers,    // Minimal deserialization overhead
-            UseCase::LargeMessages => FormatType::FlatBuffers, // Efficient for large data
-            UseCase::CrossLanguage => FormatType::CapnProto,   // Good language support
-            UseCase::RealTime => FormatType::FlatBuffers,      // Predictable performance
-            UseCase::Streaming => FormatType::CapnProto,       // Good for continuous data
-            UseCase::Generic => FormatType::FlatBuffers,       // Default choice
+            UseCase::HighFrequency => FormatType::FlatBuffers, // Best performance
+            UseCase::LowLatency => FormatType::FlatBuffers,    // Lowest latency
+            UseCase::LargeMessages => FormatType::CapnProto,   // Better for large data
+            UseCase::CrossLanguage => FormatType::FlatBuffers, // Wider support
+            UseCase::RealTime => FormatType::FlatBuffers,      // Deterministic
+            UseCase::Streaming => FormatType::CapnProto,       // Stream-friendly
+            UseCase::GeneralPurpose => FormatType::FlatBuffers, // Good default
         }
+    }
+
+    /// Register an evolution-aware schema
+    pub fn register_evolution_schema(&mut self, schema: EvolutionAwareSchema) -> Result<()> {
+        // Register with evolution manager
+        self.evolution_manager.register_schema(schema.clone())?;
+        
+        // Also register in legacy system for compatibility
+        self.register_schema(schema.base)?;
+        
+        Ok(())
+    }
+
+    /// Check compatibility between two schemas using evolution rules
+    pub fn check_schema_compatibility(&mut self, reader_name: &str, writer_name: &str) -> Result<CompatibilityLevel> {
+        let reader_schema = self.evolution_manager.get_latest_schema(reader_name)
+            .ok_or_else(|| RenoirError::invalid_parameter("reader_name", "Schema not found"))?;
+        
+        let writer_schema = self.evolution_manager.get_latest_schema(writer_name)
+            .ok_or_else(|| RenoirError::invalid_parameter("writer_name", "Schema not found"))?;
+        
+        // Check cache first
+        let cache_key = (reader_schema.schema_id, reader_schema.base.schema_version, writer_schema.base.schema_version);
+        if let Some(cached) = self.compatibility_cache.get(&cache_key) {
+            return Ok(*cached);
+        }
+
+        // Compute compatibility
+        let compatibility = self.evolution_manager.check_compatibility(reader_schema, writer_schema)?;
+        
+        // Cache result
+        self.compatibility_cache.insert(cache_key, compatibility);
+        
+        Ok(compatibility)
+    }
+
+    /// Get migration plan for schema evolution
+    pub fn get_migration_plan(&self, from_schema_name: &str, to_schema_name: &str) -> Result<Vec<super::schema_evolution::MigrationStep>> {
+        let from_schema = self.evolution_manager.get_latest_schema(from_schema_name)
+            .ok_or_else(|| RenoirError::invalid_parameter("from_schema", "Schema not found"))?;
+        
+        let to_schema = self.evolution_manager.get_latest_schema(to_schema_name)
+            .ok_or_else(|| RenoirError::invalid_parameter("to_schema", "Schema not found"))?;
+        
+        self.evolution_manager.generate_migration_plan(from_schema, to_schema)
+    }
+
+    /// Validate backward compatibility for a schema update
+    pub fn validate_backward_compatibility(&mut self, old_name: &str, new_schema: &EvolutionAwareSchema) -> Result<bool> {
+        let old_schema = self.evolution_manager.get_latest_schema(old_name);
+        
+        if let Some(old) = old_schema {
+            let compatibility = self.evolution_manager.check_compatibility(old, new_schema)?;
+            Ok(matches!(compatibility, CompatibilityLevel::FullCompatible | CompatibilityLevel::BackwardCompatible))
+        } else {
+            // No previous version - always compatible
+            Ok(true)
+        }
+    }
+
+    /// Clear compatibility cache (useful after schema updates)
+    pub fn clear_compatibility_cache(&mut self) {
+        self.compatibility_cache.clear();
+    }
+
+    /// Generate a unique schema ID
+    pub fn generate_schema_id(&mut self) -> u64 {
+        self.evolution_manager.generate_schema_id()
     }
     
     /// List all registered formats
@@ -197,7 +272,7 @@ pub enum UseCase {
     /// Streaming data applications
     Streaming,
     /// General purpose usage
-    Generic,
+    GeneralPurpose,
 }
 
 /// Schema metadata that can be made public
@@ -263,7 +338,7 @@ pub fn get_global_format(format_type: &FormatType) -> Option<Arc<dyn ZeroCopyFor
 pub fn get_global_recommendation(use_case: &UseCase) -> FormatType {
     let registry = global_registry();
     let registry = registry.read().expect("Registry lock poisoned");
-    registry.recommend_format(use_case)
+    registry.recommend_format(*use_case)
 }
 
 /// Topic pattern matching helper

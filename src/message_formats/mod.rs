@@ -18,12 +18,18 @@ pub mod zero_copy;
 pub mod registry;
 pub mod traits;
 pub mod official_flatbuffers;
+pub mod schema_evolution;
+pub mod compatibility;
+pub mod migration;
 
 // Export key traits and types for external use  
 pub use traits::{ZeroCopyFormat, ZeroCopyAccessor as ZeroCopyAccess, SchemaValidator, ZeroCopyBuilder as BufferBuilder, SchemaCompatibility, FieldType};
 pub use zero_copy::*;
 pub use registry::{ZeroCopyFormatRegistry, UseCase, SchemaInfo as RegistrySchemaInfo};
 pub use official_flatbuffers::OfficialFlatBufferFormat;
+pub use schema_evolution::{SchemaEvolutionManager, EvolutionAwareSchema, CompatibilityLevel, SemanticVersion, SchemaBuilder, FieldChange};
+pub use compatibility::{SchemaCompatibilityValidator, ValidationResult};
+pub use migration::{SchemaMigrationExecutor, MigrationPlanner, MigrationFunction, MigrationContext, MigrationResult};
 
 /// Schema format type identifier (zero-copy only)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

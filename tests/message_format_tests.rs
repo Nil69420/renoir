@@ -111,15 +111,15 @@ mod zero_copy_integration_tests {
         let test_cases = vec![
             (UseCase::HighFrequency, FormatType::FlatBuffers),
             (UseCase::LowLatency, FormatType::FlatBuffers),
-            (UseCase::LargeMessages, FormatType::FlatBuffers),
-            (UseCase::CrossLanguage, FormatType::CapnProto),
+            (UseCase::LargeMessages, FormatType::CapnProto),
+            (UseCase::CrossLanguage, FormatType::FlatBuffers),
             (UseCase::RealTime, FormatType::FlatBuffers),
             (UseCase::Streaming, FormatType::CapnProto),
-            (UseCase::Generic, FormatType::FlatBuffers),
+            (UseCase::GeneralPurpose, FormatType::FlatBuffers),
         ];
         
         for (use_case, expected_format) in test_cases {
-            let recommended_format = registry.recommend_format(&use_case);
+            let recommended_format = registry.recommend_format(use_case);
             assert_eq!(recommended_format, expected_format);
             assert!(recommended_format.is_zero_copy());
         }
