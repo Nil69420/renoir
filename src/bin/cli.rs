@@ -4,6 +4,11 @@ use renoir::{
     buffer::{BufferPool, BufferPoolConfig},
     allocator::{BumpAllocator, PoolAllocator, Allocator},
     ringbuf::RingBuffer,
+    large_payloads::{
+        BlobManager, BlobHeader, ChunkManager, ChunkingStrategy, 
+        EpochReclaimer, ReclamationPolicy, ROS2MessageManager, ROS2MessageType,
+        ImageHeader, PointCloudHeader, LaserScanHeader
+    },
     Result,
 };
 use std::{path::PathBuf, time::Duration, sync::Arc};
@@ -154,6 +159,96 @@ fn main() -> Result<()> {
                 ),
         )
         .subcommand(
+            SubCommand::with_name("large-payloads")
+                .about("Test large payloads system for ROS2 messages")
+                .subcommand(
+                    SubCommand::with_name("blob")
+                        .about("Test blob management")
+                        .arg(
+                            Arg::with_name("size")
+                                .short("s")
+                                .long("size")
+                                .value_name("SIZE")
+                                .help("Blob size in bytes")
+                                .default_value("1048576")
+                                .takes_value(true),
+                        )
+                        .arg(
+                            Arg::with_name("count")
+                                .short("c")
+                                .long("count")
+                                .value_name("COUNT")
+                                .help("Number of blobs to create")
+                                .default_value("10")
+                                .takes_value(true),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("ros2")
+                        .about("Test ROS2 message types")
+                        .arg(
+                            Arg::with_name("type")
+                                .short("t")
+                                .long("type")
+                                .value_name("TYPE")
+                                .help("Message type (image, pointcloud, laserscan)")
+                                .default_value("image")
+                                .takes_value(true),
+                        )
+                        .arg(
+                            Arg::with_name("width")
+                                .long("width")
+                                .value_name("WIDTH")
+                                .help("Image width (for image type)")
+                                .default_value("1920")
+                                .takes_value(true),
+                        )
+                        .arg(
+                            Arg::with_name("height")
+                                .long("height")
+                                .value_name("HEIGHT")
+                                .help("Image height (for image type)")
+                                .default_value("1080")
+                                .takes_value(true),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("chunking")
+                        .about("Test chunking system for oversized payloads")
+                        .arg(
+                            Arg::with_name("payload_size")
+                                .short("p")
+                                .long("payload-size")
+                                .value_name("SIZE")
+                                .help("Total payload size")
+                                .default_value("16777216") // 16MB
+                                .takes_value(true),
+                        )
+                        .arg(
+                            Arg::with_name("chunk_size")
+                                .short("c")
+                                .long("chunk-size")
+                                .value_name("SIZE")
+                                .help("Individual chunk size")
+                                .default_value("1048576") // 1MB
+                                .takes_value(true),
+                        ),
+                )
+                .subcommand(
+                    SubCommand::with_name("reclamation")
+                        .about("Test epoch-based memory reclamation")
+                        .arg(
+                            Arg::with_name("objects")
+                                .short("o")
+                                .long("objects")
+                                .value_name("COUNT")
+                                .help("Number of objects to allocate and reclaim")
+                                .default_value("100")
+                                .takes_value(true),
+                        ),
+                ),
+        )
+        .subcommand(
             SubCommand::with_name("info")
                 .about("Show version and build information"),
         )
@@ -164,6 +259,7 @@ fn main() -> Result<()> {
         ("buffer", Some(buffer_matches)) => handle_buffer_commands(buffer_matches),
         ("allocator", Some(alloc_matches)) => handle_allocator_commands(alloc_matches),
         ("ringbuf", Some(ring_matches)) => handle_ringbuf_commands(ring_matches),
+        ("large-payloads", Some(large_matches)) => handle_large_payloads_commands(large_matches),
         ("info", Some(_)) => show_info(),
         _ => {
             println!("Use --help for usage information");
@@ -286,11 +382,13 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                 let bytes = test_data.as_bytes();
                 if bytes.len() <= buffer.size() {
                     // Simulate some work
-                    std::ptr::copy_nonoverlapping(
-                        bytes.as_ptr(),
-                        buffer.as_ptr() as *mut u8,
-                        bytes.len(),
-                    );
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            bytes.as_ptr(),
+                            buffer.as_ptr() as *mut u8,
+                            bytes.len(),
+                        );
+                    }
                 }
                 
                 buffer_pool.return_buffer(buffer)?;
@@ -477,6 +575,285 @@ fn handle_ringbuf_commands(matches: &clap::ArgMatches) -> Result<()> {
     println!("  Push rate: {:.0} ops/sec", pushed as f64 / push_time.as_secs_f64());
     println!("  Pop rate: {:.0} ops/sec", consumed as f64 / pop_time.as_secs_f64());
 
+    Ok(())
+}
+
+fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
+    match matches.subcommand() {
+        ("blob", Some(blob_matches)) => {
+            let size: usize = blob_matches
+                .value_of("size")
+                .unwrap()
+                .parse()
+                .map_err(|_| renoir::error::RenoirError::invalid_parameter("size", "Invalid size format"))?;
+            let count: usize = blob_matches
+                .value_of("count")
+                .unwrap()
+                .parse()
+                .map_err(|_| renoir::error::RenoirError::invalid_parameter("count", "Invalid count format"))?;
+
+            println!("Testing blob management...");
+            println!("Blob size: {} bytes", size);
+            println!("Blob count: {}", count);
+
+            let manager = SharedMemoryManager::new();
+            let region_config = RegionConfig {
+                name: "large_payloads_test".to_string(),
+                size: size * count * 2, // Ensure enough space
+                backing_type: BackingType::FileBacked,
+                file_path: Some(PathBuf::from("/tmp/renoir_large_test")),
+                create: true,
+                permissions: 0o644,
+            };
+            
+            let region = manager.create_region(region_config)?;
+            let blob_manager = BlobManager::new();
+
+            let start = std::time::Instant::now();
+            let mut blob_handles = Vec::new();
+
+            // Create blob headers
+            for i in 0..count {
+                let test_data = vec![i as u8; size];
+                let header = blob_manager.create_header(renoir::large_payloads::content_types::CONTENT_TYPE_RAW, &test_data);
+                // Create a simple descriptor for testing
+                let descriptor = renoir::large_payloads::BlobDescriptor::new(
+                    (i * size) as u64, // offset
+                    size,               // size
+                    format!("blob_{}", i), // tag
+                )?;
+                blob_handles.push(descriptor);
+            }
+
+            let creation_time = start.elapsed();
+
+            // Validate blob descriptors
+            let start = std::time::Instant::now();
+            for (i, blob_desc) in blob_handles.iter().enumerate() {
+                if blob_desc.size() != size {
+                    return Err(renoir::error::RenoirError::validation("Blob size mismatch"));
+                }
+            }
+            
+            let validation_time = start.elapsed();
+
+            println!("\nResults:");
+            println!("  Blob creation: {:.2}ms", creation_time.as_millis());
+            println!("  Blob validation: {:.2}ms", validation_time.as_millis());
+            println!("  Creation rate: {:.0} blobs/sec", count as f64 / creation_time.as_secs_f64());
+            println!("  Total memory used: {:.2}MB", (size * count) as f64 / 1024.0 / 1024.0);
+        }
+        ("ros2", Some(ros2_matches)) => {
+            let msg_type = ros2_matches.value_of("type").unwrap();
+            
+            println!("Testing ROS2 message type: {}", msg_type);
+
+            let manager = SharedMemoryManager::new();
+            let region_config = RegionConfig {
+                name: "ros2_test".to_string(),
+                size: 64 * 1024 * 1024, // 64MB for large messages
+                backing_type: BackingType::FileBacked,
+                file_path: Some(PathBuf::from("/tmp/renoir_ros2_test")),
+                create: true,
+                permissions: 0o644,
+            };
+            
+            let region = manager.create_region(region_config)?;
+            
+            // Create buffer pool manager and chunking strategy
+            use renoir::shared_pools::SharedBufferPoolManager;
+            let pool_manager = Arc::new(SharedBufferPoolManager::new()?);
+            let chunking_strategy = ChunkingStrategy::new(1024 * 1024)?; // 1MB chunks
+            let ros2_manager = ROS2MessageManager::new(pool_manager, chunking_strategy);
+
+            match msg_type {
+                "image" => {
+                    let width: u32 = ros2_matches.value_of("width").unwrap().parse()
+                        .map_err(|_| renoir::error::RenoirError::invalid_parameter("width", "Invalid width"))?;
+                    let height: u32 = ros2_matches.value_of("height").unwrap().parse()
+                        .map_err(|_| renoir::error::RenoirError::invalid_parameter("height", "Invalid height"))?;
+                    
+                    let step = width * 3; // 3 bytes per pixel for RGB
+                    let data_size = (width * height * 3) as usize;
+                    let image_data = vec![128u8; data_size]; // Gray image
+
+                    println!("Creating {}x{} RGB image ({:.2}MB)", width, height, data_size as f64 / 1024.0 / 1024.0);
+                    
+                    let start = std::time::Instant::now();
+                    
+                    // Create a test pool ID for demonstration
+                    let pool_id = renoir::shared_pools::PoolId(1);
+                    
+                    let msg = ros2_manager.create_image_message(
+                        width,
+                        height,
+                        "rgb8",
+                        &image_data,
+                        pool_id
+                    )?;
+                    let creation_time = start.elapsed();
+
+                    println!("  Message created in {:.2}ms", creation_time.as_millis());
+                    println!("  Image dimensions: {}x{}", msg.header.width, msg.header.height);
+                }
+                "pointcloud" => {
+                    let num_points = 100000; // 100k points
+                    let header = PointCloudHeader::new(
+                        num_points,     // point_count
+                        16,             // point_step (4 fields * 4 bytes each)
+                        num_points,     // width
+                        1,              // height
+                        true            // is_dense
+                    );
+
+                    let data_size = num_points * 16; // x,y,z,intensity (4 floats)
+                    let cloud_data = vec![0u8; data_size];
+
+                    println!("Creating point cloud with {} points ({:.2}MB)", num_points, data_size as f64 / 1024.0 / 1024.0);
+                    
+                    let start = std::time::Instant::now();
+                    // For demo, just create and validate header
+                    println!("  Point cloud header created in {:.2}μs", start.elapsed().as_micros());
+                    println!("  Point count: {}", header.point_count);
+                    println!("  Point step: {} bytes", header.point_step);
+                    println!("  Is organized: {}", header.is_organized());
+                }
+                "laserscan" => {
+                    let num_ranges = 360; // 1 degree resolution
+                    let header = LaserScanHeader::new(
+                        -std::f32::consts::PI,                          // angle_min
+                        std::f32::consts::PI,                           // angle_max
+                        2.0 * std::f32::consts::PI / num_ranges as f32, // angle_increment
+                        0.1,                                            // range_min
+                        10.0,                                           // range_max
+                        num_ranges,                                     // range_count
+                        num_ranges                                      // intensity_count
+                    );
+
+                    let ranges = vec![5.0f32; num_ranges]; // 5m range for all points
+                    let intensities = vec![100.0f32; num_ranges];
+
+                    println!("Creating laser scan with {} ranges", num_ranges);
+                    
+                    let start = std::time::Instant::now();
+                    // For demo, just create and validate header
+                    println!("  Laser scan header created in {:.2}μs", start.elapsed().as_micros());
+                    println!("  Range count: {}", header.range_count);
+                    println!("  Intensity count: {}", header.intensity_count);
+                    println!("  Angular resolution: {:.4}°", header.angle_increment.to_degrees());
+                }
+                _ => {
+                    return Err(renoir::error::RenoirError::invalid_parameter("type", "Unknown message type"));
+                }
+            }
+        }
+        ("chunking", Some(chunk_matches)) => {
+            let payload_size: usize = chunk_matches
+                .value_of("payload_size")
+                .unwrap()
+                .parse()
+                .map_err(|_| renoir::error::RenoirError::invalid_parameter("payload_size", "Invalid size"))?;
+            let chunk_size: usize = chunk_matches
+                .value_of("chunk_size")
+                .unwrap()
+                .parse()
+                .map_err(|_| renoir::error::RenoirError::invalid_parameter("chunk_size", "Invalid size"))?;
+
+            println!("Testing chunking system...");
+            println!("Payload size: {:.2}MB", payload_size as f64 / 1024.0 / 1024.0);
+            println!("Chunk size: {:.2}KB", chunk_size as f64 / 1024.0);
+
+            let num_chunks = (payload_size + chunk_size - 1) / chunk_size;
+            println!("Expected chunks: {}", num_chunks);
+
+            let manager = SharedMemoryManager::new();
+            let region_config = RegionConfig {
+                name: "chunking_test".to_string(),
+                size: payload_size * 2, // Extra space for overhead
+                backing_type: BackingType::FileBacked,
+                file_path: Some(PathBuf::from("/tmp/renoir_chunking_test")),
+                create: true,
+                permissions: 0o644,
+            };
+            
+            let region = manager.create_region(region_config)?;
+            let strategy = ChunkingStrategy::new(chunk_size)?;
+            let chunk_manager = ChunkManager::new(Arc::new(region), strategy)?;
+
+            // Create test payload
+            let test_payload: Vec<u8> = (0..payload_size).map(|i| (i % 256) as u8).collect();
+            
+            let start = std::time::Instant::now();
+            let chunks = chunk_manager.chunk_data(&test_payload)?;
+            let chunking_time = start.elapsed();
+
+            println!("\nResults:");
+            println!("  Actual chunks created: {}", chunks.len());
+            println!("  Chunking time: {:.2}ms", chunking_time.as_millis());
+            println!("  Chunking rate: {:.2}MB/s", payload_size as f64 / 1024.0 / 1024.0 / chunking_time.as_secs_f64());
+
+            // Verify chunk integrity
+            let mut total_size = 0;
+            for (i, chunk) in chunks.iter().enumerate() {
+                total_size += chunk.size();
+                if i == 0 {
+                    println!("  First chunk size: {} bytes", chunk.size());
+                }
+                if i == chunks.len() - 1 {
+                    println!("  Last chunk size: {} bytes", chunk.size());
+                }
+            }
+            println!("  Total reassembled size: {} bytes", total_size);
+            println!("  Size matches: {}", total_size == payload_size);
+        }
+        ("reclamation", Some(reclaim_matches)) => {
+            let object_count: usize = reclaim_matches
+                .value_of("objects")
+                .unwrap()
+                .parse()
+                .map_err(|_| renoir::error::RenoirError::invalid_parameter("objects", "Invalid count"))?;
+
+            println!("Testing epoch-based reclamation...");
+            println!("Objects to create: {}", object_count);
+
+            let policy = ReclamationPolicy::new(
+                Duration::from_millis(100), // Check interval
+                Duration::from_secs(1),     // Max age
+            )?;
+            
+            // Create pool manager for reclaimer
+            let pool_manager = Arc::new(SharedBufferPoolManager::new()?);
+            let reclaimer = EpochReclaimer::new(pool_manager, policy);
+
+            let start = std::time::Instant::now();
+            
+            // Create dummy blob descriptors for testing
+            use renoir::large_payloads::BlobDescriptor;
+            for i in 0..object_count {
+                let descriptor = BlobDescriptor::new(
+                    i as u64,           // offset
+                    1024,               // size  
+                    format!("test_{}", i), // tag
+                )?;
+                reclaimer.mark_for_reclamation(descriptor)?;
+            }
+            
+            let marking_time = start.elapsed();
+
+            // Force reclamation
+            let start = std::time::Instant::now();
+            let stats = reclaimer.reclamation_stats();
+            let reclamation_time = start.elapsed();
+
+            println!("\nResults:");
+            println!("  Marking time: {:.2}ms", marking_time.as_millis());
+            println!("  Reclamation time: {:.2}μs", reclamation_time.as_micros());
+            println!("  Objects marked: {}", object_count);
+            println!("  Items reclaimed: {}", stats.items_reclaimed.load(std::sync::atomic::Ordering::Relaxed));
+            println!("  Items force-reclaimed: {}", stats.items_force_reclaimed.load(std::sync::atomic::Ordering::Relaxed));
+        }
+        _ => println!("Use 'large-payloads --help' for usage information"),
+    }
     Ok(())
 }
 

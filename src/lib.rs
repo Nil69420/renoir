@@ -35,7 +35,7 @@
 
 // All code should be actively used in production
 
-// Existing modules (preserved for compatibility)
+// Core modules
 pub mod error;
 pub mod memory;
 pub mod allocators;
@@ -47,6 +47,9 @@ pub mod structured_layout;
 pub mod topic;
 pub mod topic_manager_modules;
 pub mod topic_rings;
+
+// Advanced features
+pub mod large_payloads;
 
 // New message format and schema strategy module
 pub mod message_formats;
