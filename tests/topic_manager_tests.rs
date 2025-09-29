@@ -29,6 +29,7 @@ mod tests {
             use_shared_pool: false,
             shared_pool_threshold: 4096,
             enable_notifications: true,
+            message_format: Default::default(),
             qos: TopicQoS {
                 durability: 1,
                 reliability: Reliability::BestEffort,

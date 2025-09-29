@@ -48,6 +48,9 @@ pub mod topic;
 pub mod topic_manager_modules;
 pub mod topic_rings;
 
+// New message format and schema strategy module
+pub mod message_formats;
+
 #[cfg(feature = "c-api")]
 pub mod ffi;
 

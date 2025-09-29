@@ -93,6 +93,7 @@ pub extern "C" fn renoir_topic_create(
         max_payload_size: message_size as usize,
         use_shared_pool: false,
         shared_pool_threshold: message_size as usize,
+        message_format: Default::default(), // Use default FlatBuffers format
         enable_notifications: false,
         qos: TopicQoS::default(),
     };
