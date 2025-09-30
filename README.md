@@ -1,4 +1,4 @@
-# RenoiA high-performance Rust library optimized for embedded systems and ROS2 applications, featuring zero-copy message formats with schema evolution capabilities. Specifically designed for ARM-based platforms like Raspberry Pi and NVIDIA Jetson AGX Xavier.
+# Renoir A high-performance Rust library optimized for embedded systems and ROS2 applications, featuring zero-copy message formats with schema evolution capabilities. Specifically designed for ARM-based platforms like Raspberry Pi and NVIDIA Jetson AGX Xavier.
 
 ## Key Features
 
