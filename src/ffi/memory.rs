@@ -1,14 +1,13 @@
 //! FFI functions for memory management
 
 use std::{
-    ffi::c_char,
+    ffi::{c_char, CString},
     ptr::null_mut,
     sync::Arc,
 };
 
 use crate::{
-    SharedMemoryManager,
-    memory::{RegionConfig, BackingType},
+    memory::{SharedMemoryManager, RegionConfig, BackingType},
     error::RenoirError,
 };
 
@@ -210,4 +209,414 @@ pub extern "C" fn renoir_region_name(handle: RenoirRegionHandle) -> *mut c_char 
     registry.get_region(id)
         .map(|region| string_to_c_str(region.name().to_string()))
         .unwrap_or(null_mut())
+}
+
+/// Open existing region by name
+#[no_mangle]
+pub extern "C" fn renoir_region_open(
+    manager: RenoirManagerHandle,
+    name: *const c_char,
+    region_handle: *mut RenoirRegionHandle,
+) -> RenoirErrorCode {
+    if manager.is_null() || name.is_null() || region_handle.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let name_str = match c_str_to_string(name) {
+        Ok(s) => s,
+        Err(_) => return RenoirErrorCode::InvalidParameter,
+    };
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    match mgr.get_region(&name_str) {
+        Ok(region) => {
+            drop(registry);
+            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let id = registry.store_region(region);
+            unsafe {
+                *region_handle = id as RenoirRegionHandle;
+            }
+            RenoirErrorCode::Success
+        }
+        Err(e) => e.into(),
+    }
+}
+
+/// Close region handle (decreases reference count)
+#[no_mangle]
+pub extern "C" fn renoir_region_close(handle: RenoirRegionHandle) -> RenoirErrorCode {
+    if handle.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let id = handle as usize;
+    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    if registry.regions.remove(&id).is_some() {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::InvalidParameter
+    }
+}
+
+/// Destroy region (admin operation - removes from all processes)
+#[no_mangle]
+pub extern "C" fn renoir_region_destroy(
+    manager: RenoirManagerHandle,
+    name: *const c_char,
+) -> RenoirErrorCode {
+    if manager.is_null() || name.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let name_str = match c_str_to_string(name) {
+        Ok(s) => s,
+        Err(_) => return RenoirErrorCode::InvalidParameter,
+    };
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    match mgr.remove_region(&name_str) {
+        Ok(_) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}
+
+/// Get region statistics
+#[no_mangle]
+pub extern "C" fn renoir_region_stats(
+    handle: RenoirRegionHandle,
+    stats: *mut super::types::RenoirRegionStats,
+) -> RenoirErrorCode {
+    if handle.is_null() || stats.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let id = handle as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let region = match registry.get_region(id) {
+        Some(r) => r,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    let _region_stats = region.memory_stats();
+    
+    unsafe {
+        (*stats).total_size = region.size();
+        (*stats).used_size = 0; // TODO: Track actual usage through allocator
+        (*stats).free_size = region.size(); // TODO: Track actual free space
+        (*stats).fragmentation_ratio = 0.0; // TODO: Calculate fragmentation
+        (*stats).topic_count = 0; // TODO: Track topic count
+        (*stats).allocation_count = 0; // TODO: Track allocation count
+    }
+
+    RenoirErrorCode::Success
+}
+
+/// List all regions managed by the manager
+#[no_mangle]
+pub extern "C" fn renoir_manager_list_regions(
+    manager: RenoirManagerHandle,
+    region_names: *mut *mut *mut c_char,
+    count: *mut usize,
+) -> RenoirErrorCode {
+    if manager.is_null() || region_names.is_null() || count.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    let regions = mgr.list_regions();
+    let region_count = regions.len();
+    
+    if region_count == 0 {
+        unsafe {
+            *region_names = std::ptr::null_mut();
+            *count = 0;
+        }
+        return RenoirErrorCode::Success;
+    }
+
+    // Allocate array of C strings
+    let names_array = unsafe {
+        libc::malloc(region_count * std::mem::size_of::<*mut c_char>()) as *mut *mut c_char
+    };
+    
+    if names_array.is_null() {
+        return RenoirErrorCode::OutOfMemory;
+    }
+
+    // Convert each region name to C string
+    for (i, name) in regions.iter().enumerate() {
+        let c_name = string_to_c_str(name.clone());
+        unsafe {
+            *names_array.add(i) = c_name;
+        }
+    }
+
+    unsafe {
+        *region_names = names_array;
+        *count = region_count;
+    }
+
+    RenoirErrorCode::Success
+}
+
+/// Free region names list allocated by renoir_manager_list_regions
+#[no_mangle]
+pub extern "C" fn renoir_free_region_names(
+    region_names: *mut *mut c_char,
+    count: usize,
+) {
+    if region_names.is_null() {
+        return;
+    }
+
+    // Free individual strings
+    for i in 0..count {
+        unsafe {
+            let name_ptr = *region_names.add(i);
+            if !name_ptr.is_null() {
+                let _ = CString::from_raw(name_ptr);
+            }
+        }
+    }
+
+    // Free the array
+    unsafe {
+        libc::free(region_names as *mut std::ffi::c_void);
+    }
+}
+
+/// Check if a region exists
+#[no_mangle]
+pub extern "C" fn renoir_manager_has_region(
+    manager: RenoirManagerHandle,
+    name: *const c_char,
+) -> bool {
+    if manager.is_null() || name.is_null() {
+        return false;
+    }
+
+    let name_str = match c_str_to_string(name) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return false,
+    };
+
+    mgr.has_region(&name_str)
+}
+
+/// Get total memory usage across all regions
+#[no_mangle]
+pub extern "C" fn renoir_manager_total_memory_usage(
+    manager: RenoirManagerHandle,
+    total_bytes: *mut usize,
+) -> RenoirErrorCode {
+    if manager.is_null() || total_bytes.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    unsafe {
+        *total_bytes = mgr.total_memory_usage();
+    }
+
+    RenoirErrorCode::Success
+}
+
+/// Get number of regions managed
+#[no_mangle]
+pub extern "C" fn renoir_manager_region_count(
+    manager: RenoirManagerHandle,
+    count: *mut usize,
+) -> RenoirErrorCode {
+    if manager.is_null() || count.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    unsafe {
+        *count = mgr.region_count();
+    }
+
+    RenoirErrorCode::Success
+}
+
+/// Flush all regions to persistent storage
+#[no_mangle]
+pub extern "C" fn renoir_manager_flush_all(
+    manager: RenoirManagerHandle,
+) -> RenoirErrorCode {
+    if manager.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    match mgr.flush_all() {
+        Ok(_) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}
+
+/// Clear all regions from manager
+#[no_mangle]
+pub extern "C" fn renoir_manager_clear_all(
+    manager: RenoirManagerHandle,
+) -> RenoirErrorCode {
+    if manager.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let manager_id = manager as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let mgr = match registry.get_manager(manager_id) {
+        Some(m) => m,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    match mgr.clear() {
+        Ok(_) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}
+
+/// Get region metadata
+#[no_mangle]
+pub extern "C" fn renoir_region_metadata(
+    handle: RenoirRegionHandle,
+    name: *mut *mut c_char,
+    size: *mut usize,
+    backing_type: *mut u32,
+) -> RenoirErrorCode {
+    if handle.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let id = handle as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let region = match registry.get_region(id) {
+        Some(r) => r,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    let metadata = region.metadata();
+    
+    if !name.is_null() {
+        unsafe {
+            *name = string_to_c_str(metadata.name.clone());
+        }
+    }
+
+    if !size.is_null() {
+        unsafe {
+            *size = metadata.size;
+        }
+    }
+
+    if !backing_type.is_null() {
+        unsafe {
+            *backing_type = match metadata.backing_type {
+                crate::memory::BackingType::FileBacked => 0,
+                #[cfg(target_os = "linux")]
+                crate::memory::BackingType::MemFd => 1,
+            };
+        }
+    }
+
+    RenoirErrorCode::Success
+}
+
+/// Create allocator for a region
+#[no_mangle]
+pub extern "C" fn renoir_region_create_bump_allocator(
+    handle: RenoirRegionHandle,
+    allocator_handle: *mut super::types::RenoirAllocatorHandle,
+) -> RenoirErrorCode {
+    if handle.is_null() || allocator_handle.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+
+    let id = handle as usize;
+    let registry = HANDLE_REGISTRY.lock().unwrap();
+    
+    let region = match registry.get_region(id) {
+        Some(r) => r,
+        None => return RenoirErrorCode::InvalidParameter,
+    };
+
+    // Get region memory as slice for allocator
+    // SAFETY: We're creating an allocator that will manage exclusive access
+    let memory_slice = unsafe { 
+        std::slice::from_raw_parts_mut(
+            region.as_mut_ptr_unsafe::<u8>(), 
+            region.size()
+        )
+    };
+    
+    match crate::allocators::BumpAllocator::new(memory_slice) {
+        Ok(allocator) => {
+            drop(registry);
+            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let alloc_id = registry.next_id;
+            registry.next_id += 1;
+            registry.allocators.insert(alloc_id, std::sync::Arc::new(allocator));
+            
+            unsafe {
+                *allocator_handle = alloc_id as super::types::RenoirAllocatorHandle;
+            }
+            RenoirErrorCode::Success
+        }
+        Err(e) => e.into(),
+    }
 }

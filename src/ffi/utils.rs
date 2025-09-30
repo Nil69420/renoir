@@ -30,9 +30,13 @@ pub struct HandleRegistry {
     pub allocators: HashMap<usize, Arc<dyn Allocator>>,
     #[allow(dead_code)]
     pub ring_buffers: HashMap<usize, Box<dyn std::any::Any + Send + Sync>>,
+    #[allow(dead_code)]
+    pub control_regions: HashMap<usize, Arc<crate::metadata_modules::ControlRegion>>,
     pub topic_managers: HashMap<usize, Arc<TopicManager>>,
     pub publishers: HashMap<usize, Publisher>,
     pub subscribers: HashMap<usize, Subscriber>,
+    pub reserved_buffers: HashMap<usize, Vec<u8>>,
+    pub received_messages: HashMap<usize, crate::topic::Message>,
     pub next_id: usize,
 }
 
@@ -45,9 +49,12 @@ impl HandleRegistry {
             buffers: HashMap::new(),
             allocators: HashMap::new(),
             ring_buffers: HashMap::new(),
+            control_regions: HashMap::new(),
             topic_managers: HashMap::new(),
             publishers: HashMap::new(),
             subscribers: HashMap::new(),
+            reserved_buffers: HashMap::new(),
+            received_messages: HashMap::new(),
             next_id: 1,
         }
     }
