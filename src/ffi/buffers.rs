@@ -1,12 +1,11 @@
 //! FFI functions for buffer management
 
 use std::ffi::c_char;
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::buffers::{BufferPool, BufferPoolConfig};
-use crate::ringbuf::{RingBuffer, SequencedRingBuffer, Producer, Consumer, ClaimGuard};
-use crate::metadata_modules::{RegionMetadata, RegionRegistryEntry, ControlStats, ControlRegion};
+use crate::ringbuf::RingBuffer;
+use crate::metadata_modules::{RegionMetadata, ControlRegion};
 
 use super::{
     types::*,
@@ -52,22 +51,24 @@ pub extern "C" fn renoir_buffer_pool_create(
         Err(e) => return e,
     };
 
-    // Get the manager and memory region
-    let registry = HANDLE_REGISTRY.lock().unwrap();
-    let manager = match registry.get_manager(manager_handle as usize) {
-        Some(mgr) => mgr,
-        None => return RenoirErrorCode::InvalidParameter,
-    };
-
     let region_name_str = match c_str_to_string(region_name) {
         Ok(name) => name,
         Err(_) => return RenoirErrorCode::InvalidParameter,
     };
 
-    let region = match manager.get_region(&region_name_str) {
-        Ok(region) => region,
-        Err(_) => return RenoirErrorCode::RegionNotFound,
-    };
+    // Get the manager and memory region - scope the lock to release it early
+    let region = {
+        let registry = HANDLE_REGISTRY.lock().unwrap();
+        let manager = match registry.get_manager(manager_handle as usize) {
+            Some(mgr) => mgr,
+            None => return RenoirErrorCode::InvalidParameter,
+        };
+
+        match manager.get_region(&region_name_str) {
+            Ok(region) => region,
+            Err(_) => return RenoirErrorCode::RegionNotFound,
+        }
+    }; // Lock is released here
 
     match BufferPool::new(rust_config, region) {
         Ok(pool) => {
@@ -939,7 +940,7 @@ pub extern "C" fn renoir_control_region_register_buffer_pool(
 
     match control_region.register_region(&metadata) {
         Ok(()) => RenoirErrorCode::Success,
-        Err(_) => RenoirErrorCode::InvalidParameter,
+        Err(e) => e.into(),
     }
 }
 
