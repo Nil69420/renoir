@@ -1,18 +1,9 @@
-# Build script for Renoir using CMake and Ninja
-
 #!/bin/bash
 
-set -e
+# Renoir Shared Memory Library Build Script
+# Supports Rust library building and C++ examples compilation
 
-# Configuration
-BUILD_TYPE="${BUILD_TYPE:-Release}"
-BUILD_DIR="${BUILD_DIR:-build}"
-INSTALL_PREFIX="${INSTALL_PREFIX:-/usr/local}"
-ENABLE_EXAMPLES="${ENABLE_EXAMPLES:-ON}"
-ENABLE_TESTS="${ENABLE_TESTS:-ON}"
-ENABLE_BENCHMARKS="${ENABLE_BENCHMARKS:-ON}"
-WITH_RUST_BACKEND="${WITH_RUST_BACKEND:-ON}"
-NINJA_JOBS="${NINJA_JOBS:-$(nproc)}"
+set -e  # Exit on any error
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,345 +12,256 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-print_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+# Configuration
+BUILD_TYPE=${BUILD_TYPE:-Release}
+RUST_TARGET=${RUST_TARGET:-release}
+EXAMPLES_BUILD_DIR="examples/build"
+NINJA_AVAILABLE=$(command -v ninja >/dev/null 2>&1 && echo "YES" || echo "NO")
+
+print_header() {
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE} Renoir Build System${NC}"
+    echo -e "${BLUE}================================${NC}"
 }
 
-print_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+print_section() {
+    echo -e "${GREEN}>>> $1${NC}"
 }
 
 print_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+    echo -e "${YELLOW}Warning: $1${NC}"
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}Error: $1${NC}"
 }
 
-# Function to check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
+show_help() {
+    cat << EOF
+Usage: $0 [COMMAND] [OPTIONS]
+
+Commands:
+    build-rust      Build the Rust library only
+    build-examples  Build C++ examples only  
+    build-all       Build Rust library and C++ examples (default)
+    clean           Clean all build artifacts
+    test            Run Rust tests
+    check           Run Rust check (fast compilation check)
+    clippy          Run Rust clippy linter
+    fmt             Format Rust code
+    headers         Generate C headers only
+    help            Show this help message
+
+Options:
+    --debug         Build in debug mode (default: release)
+    --verbose       Show verbose output
+    --no-ninja      Force use of make instead of ninja
+
+Examples:
+    $0                          # Build everything in release mode
+    $0 build-rust --debug       # Build Rust library in debug mode
+    $0 build-examples           # Build only C++ examples
+    $0 test                     # Run Rust tests
+    $0 clean                    # Clean everything
+
+EOF
 }
 
-# Check prerequisites
-check_prerequisites() {
-    print_info "Checking prerequisites..."
+build_rust() {
+    print_section "Building Rust Library ($RUST_TARGET)"
     
-    if ! command_exists cmake; then
-        print_error "CMake is not installed"
+    if [[ "$RUST_TARGET" == "debug" ]]; then
+        cargo build ${VERBOSE:+--verbose}
+    else
+        cargo build --release ${VERBOSE:+--verbose}
+    fi
+    
+    print_section "Generating C Headers"
+    # Headers are generated as part of build.rs, but let's ensure they exist
+    if [[ ! -f "target/include/renoir.h" ]]; then
+        print_error "C headers were not generated. Check build.rs configuration."
         exit 1
     fi
     
-    if ! command_exists ninja; then
-        print_warning "Ninja is not installed, falling back to make"
-        GENERATOR="Unix Makefiles"
-        PARALLEL_FLAG="-j${NINJA_JOBS}"
+    echo -e "${GREEN}✓ Rust library built successfully${NC}"
+    echo -e "${GREEN}✓ C headers available at: target/include/renoir.h${NC}"
+}
+
+setup_cmake() {
+    print_section "Setting up CMake Build System"
+    
+    mkdir -p "$EXAMPLES_BUILD_DIR"
+    cd "$EXAMPLES_BUILD_DIR"
+    
+    CMAKE_GENERATOR=""
+    if [[ "$NINJA_AVAILABLE" == "YES" && "$USE_MAKE" != "YES" ]]; then
+        CMAKE_GENERATOR="-G Ninja"
+        print_section "Using Ninja build system"
     else
-        GENERATOR="Ninja"
-        PARALLEL_FLAG="-j${NINJA_JOBS}"
-    fi
-    
-    if [[ "${WITH_RUST_BACKEND}" == "ON" ]]; then
-        if ! command_exists cargo; then
-            print_error "Rust/Cargo is not installed but WITH_RUST_BACKEND=ON"
-            exit 1
-        fi
-        print_info "Found Rust $(rustc --version)"
-    fi
-    
-    print_info "Found CMake $(cmake --version | head -n1 | cut -d' ' -f3)"
-    if command_exists ninja; then
-        print_info "Found Ninja $(ninja --version)"
-    fi
-}
-
-# Clean build directory
-clean_build() {
-    if [[ -d "${BUILD_DIR}" ]]; then
-        print_info "Cleaning existing build directory..."
-        rm -rf "${BUILD_DIR}"
-    fi
-}
-
-# Configure project
-configure_project() {
-    print_info "Configuring project..."
-    
-    mkdir -p "${BUILD_DIR}"
-    cd "${BUILD_DIR}"
-    
-    cmake .. \
-        -G "${GENERATOR}" \
-        -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-        -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
-        -DBUILD_EXAMPLES="${ENABLE_EXAMPLES}" \
-        -DBUILD_TESTS="${ENABLE_TESTS}" \
-        -DBUILD_BENCHMARKS="${ENABLE_BENCHMARKS}" \
-        -DWITH_RUST_BACKEND="${WITH_RUST_BACKEND}" \
-        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-    
-    cd ..
-}
-
-# Build project
-build_project() {
-    print_info "Building project..."
-    
-    cd "${BUILD_DIR}"
-    
-    if [[ "${GENERATOR}" == "Ninja" ]]; then
-        ninja ${PARALLEL_FLAG}
-    else
-        make ${PARALLEL_FLAG}
-    fi
-    
-    cd ..
-}
-
-# Run tests
-run_tests() {
-    if [[ "${ENABLE_TESTS}" == "ON" ]]; then
-        print_info "Running tests..."
-        cd "${BUILD_DIR}"
-        ctest --output-on-failure --parallel ${NINJA_JOBS}
-        cd ..
-    fi
-}
-
-# Install project
-install_project() {
-    print_info "Installing project..."
-    cd "${BUILD_DIR}"
-    
-    if [[ "${GENERATOR}" == "Ninja" ]]; then
-        ninja install
-    else
-        make install
-    fi
-    
-    cd ..
-}
-
-# Package project
-package_project() {
-    print_info "Creating package..."
-    cd "${BUILD_DIR}"
-    cpack
-    cd ..
-}
-
-# Build Rust components separately (for development)
-build_rust_dev() {
-    if [[ "${WITH_RUST_BACKEND}" == "ON" ]]; then
-        print_info "Building Rust components..."
-        
-        if [[ "${BUILD_TYPE}" == "Debug" ]]; then
-            cargo build --features c-api
+        print_section "Using Make build system"
+        if [[ "$USE_MAKE" == "YES" ]]; then
+            print_warning "Ninja forced disabled, using Make"
         else
-            cargo build --release --features c-api
+            print_warning "Ninja not available, falling back to Make"
         fi
-        
-        print_info "Running Rust tests..."
-        cargo test --all-features
-        
-        print_info "Running Rust benchmarks..."
-        cargo bench --all-features || true  # Don't fail if benchmarks fail
     fi
-}
-
-# Development build (faster iteration)
-dev_build() {
-    print_info "Development build mode..."
-    BUILD_TYPE="Debug"
-    configure_project
-    build_project
     
-    if [[ "${ENABLE_TESTS}" == "ON" ]]; then
-        run_tests
-    fi
-}
-
-# Release build (optimized)
-release_build() {
-    print_info "Release build mode..."
-    BUILD_TYPE="Release"
-    configure_project
-    build_project
+    cmake .. $CMAKE_GENERATOR \
+        -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        ${VERBOSE:+-DCMAKE_VERBOSE_MAKEFILE=ON}
     
-    if [[ "${ENABLE_TESTS}" == "ON" ]]; then
-        run_tests
+    cd - > /dev/null
+}
+
+build_examples() {
+    print_section "Building C++ Examples ($BUILD_TYPE)"
+    
+    # Ensure Rust library is built first
+    if [[ ! -f "target/${RUST_TARGET}/librenoir.so" && ! -f "target/${RUST_TARGET}/librenoir.a" ]]; then
+        print_section "Rust library not found, building it first..."
+        build_rust
     fi
+    
+    setup_cmake
+    
+    cd "$EXAMPLES_BUILD_DIR"
+    if [[ "$NINJA_AVAILABLE" == "YES" && "$USE_MAKE" != "YES" ]]; then
+        ninja ${VERBOSE:+-v}
+    else
+        make ${VERBOSE:+VERBOSE=1} -j$(nproc)
+    fi
+    cd - > /dev/null
+    
+    echo -e "${GREEN}✓ C++ examples built successfully${NC}"
+    echo -e "${GREEN}✓ Executables available in: $EXAMPLES_BUILD_DIR${NC}"
 }
 
-# Full build with packaging
-full_build() {
-    print_info "Full build with packaging..."
-    BUILD_TYPE="Release"
-    configure_project
-    build_project
-    run_tests
-    package_project
+run_tests() {
+    print_section "Running Rust Tests"
+    cargo test ${VERBOSE:+--verbose}
+    echo -e "${GREEN}✓ All tests passed${NC}"
 }
 
-# Print usage information
-usage() {
-    echo "Usage: $0 [OPTIONS] [COMMAND]"
-    echo ""
-    echo "Commands:"
-    echo "  dev        Development build (Debug, faster iteration)"
-    echo "  release    Release build (optimized)"
-    echo "  full       Full build with packaging"
-    echo "  clean      Clean build directory"
-    echo "  rust       Build only Rust components"
-    echo "  install    Install the project"
-    echo "  test       Run tests only"
-    echo ""
-    echo "Options:"
-    echo "  --build-dir DIR     Build directory (default: build)"
-    echo "  --install-prefix    Install prefix (default: /usr/local)"
-    echo "  --jobs N           Number of parallel jobs (default: $(nproc))"
-    echo "  --no-rust          Disable Rust backend"
-    echo "  --no-examples      Disable building examples"
-    echo "  --no-tests         Disable building tests"
-    echo "  --no-benchmarks    Disable building benchmarks"
-    echo ""
-    echo "Environment variables:"
-    echo "  BUILD_TYPE         Debug or Release (default: Release)"
-    echo "  BUILD_DIR          Build directory"
-    echo "  INSTALL_PREFIX     Installation prefix"
+run_check() {
+    print_section "Running Rust Check"
+    cargo check ${VERBOSE:+--verbose}
+    echo -e "${GREEN}✓ Code check passed${NC}"
+}
+
+run_clippy() {
+    print_section "Running Rust Clippy"
+    cargo clippy ${VERBOSE:+--verbose} -- -D warnings
+    echo -e "${GREEN}✓ Clippy check passed${NC}"
+}
+
+run_fmt() {
+    print_section "Formatting Rust Code"
+    cargo fmt ${VERBOSE:+--verbose}
+    echo -e "${GREEN}✓ Code formatted${NC}"
+}
+
+clean_all() {
+    print_section "Cleaning Build Artifacts"
+    
+    # Clean Rust artifacts
+    cargo clean
+    
+    # Clean C++ examples
+    if [[ -d "$EXAMPLES_BUILD_DIR" ]]; then
+        rm -rf "$EXAMPLES_BUILD_DIR"
+        echo "Removed $EXAMPLES_BUILD_DIR"
+    fi
+    
+    # Clean any other build artifacts
+    find . -name "*.o" -delete 2>/dev/null || true
+    find . -name "*.so" -delete 2>/dev/null || true
+    find . -name "*.a" -delete 2>/dev/null || true
+    find . -name "compile_commands.json" -delete 2>/dev/null || true
+    
+    echo -e "${GREEN}✓ All build artifacts cleaned${NC}"
+}
+
+generate_headers() {
+    print_section "Generating C Headers Only"
+    cargo build --release  # Headers are generated during build
+    echo -e "${GREEN}✓ Headers generated at: target/include/renoir.h${NC}"
 }
 
 # Parse command line arguments
+COMMAND=""
+VERBOSE=""
+USE_MAKE="NO"
+
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --build-dir)
-            BUILD_DIR="$2"
-            shift 2
+        build-rust|build-examples|build-all|clean|test|check|clippy|fmt|headers|help)
+            COMMAND="$1"
             ;;
-        --install-prefix)
-            INSTALL_PREFIX="$2"
-            shift 2
+        --debug)
+            BUILD_TYPE="Debug"
+            RUST_TARGET="debug"
             ;;
-        --jobs)
-            NINJA_JOBS="$2"
-            shift 2
+        --verbose)
+            VERBOSE="--verbose"
             ;;
-        --no-rust)
-            WITH_RUST_BACKEND="OFF"
-            shift
-            ;;
-        --no-examples)
-            ENABLE_EXAMPLES="OFF"
-            shift
-            ;;
-        --no-tests)
-            ENABLE_TESTS="OFF"
-            shift
-            ;;
-        --no-benchmarks)
-            ENABLE_BENCHMARKS="OFF"
-            shift
-            ;;
-        -h|--help)
-            usage
-            exit 0
-            ;;
-        dev)
-            COMMAND="dev"
-            shift
-            ;;
-        release)
-            COMMAND="release"
-            shift
-            ;;
-        full)
-            COMMAND="full"
-            shift
-            ;;
-        clean)
-            COMMAND="clean"
-            shift
-            ;;
-        rust)
-            COMMAND="rust"
-            shift
-            ;;
-        install)
-            COMMAND="install"
-            shift
-            ;;
-        test)
-            COMMAND="test"
-            shift
+        --no-ninja)
+            USE_MAKE="YES"
             ;;
         *)
             print_error "Unknown option: $1"
-            usage
+            show_help
             exit 1
             ;;
     esac
+    shift
 done
 
-# Default command
-COMMAND="${COMMAND:-release}"
+# Default command if none specified
+if [[ -z "$COMMAND" ]]; then
+    COMMAND="build-all"
+fi
 
 # Main execution
-print_info "Renoir Build System"
-print_info "=================="
-print_info "Build type: ${BUILD_TYPE}"
-print_info "Build directory: ${BUILD_DIR}"
-print_info "Install prefix: ${INSTALL_PREFIX}"
-print_info "Parallel jobs: ${NINJA_JOBS}"
-print_info "Command: ${COMMAND}"
-print_info ""
+print_header
 
-case "${COMMAND}" in
+case "$COMMAND" in
+    build-rust)
+        build_rust
+        ;;
+    build-examples)
+        build_examples
+        ;;
+    build-all)
+        build_rust
+        build_examples
+        ;;
     clean)
-        clean_build
-        print_success "Build directory cleaned"
-        ;;
-    dev)
-        check_prerequisites
-        clean_build
-        dev_build
-        print_success "Development build completed"
-        ;;
-    release)
-        check_prerequisites
-        clean_build
-        release_build
-        print_success "Release build completed"
-        ;;
-    full)
-        check_prerequisites
-        clean_build
-        full_build
-        print_success "Full build with packaging completed"
-        ;;
-    rust)
-        build_rust_dev
-        print_success "Rust components built"
-        ;;
-    install)
-        if [[ ! -d "${BUILD_DIR}" ]]; then
-            print_error "Build directory does not exist. Run build first."
-            exit 1
-        fi
-        install_project
-        print_success "Installation completed"
+        clean_all
         ;;
     test)
-        if [[ ! -d "${BUILD_DIR}" ]]; then
-            print_error "Build directory does not exist. Run build first."
-            exit 1
-        fi
         run_tests
-        print_success "Tests completed"
+        ;;
+    check)
+        run_check
+        ;;
+    clippy)
+        run_clippy
+        ;;
+    fmt)
+        run_fmt
+        ;;
+    headers)
+        generate_headers
+        ;;
+    help)
+        show_help
         ;;
     *)
-        print_error "Unknown command: ${COMMAND}"
-        usage
+        print_error "Unknown command: $COMMAND"
+        show_help
         exit 1
         ;;
 esac
+
+echo -e "${GREEN}✓ Build completed successfully!${NC}"
