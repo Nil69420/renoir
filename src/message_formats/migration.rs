@@ -257,8 +257,11 @@ impl SchemaMigrationExecutor {
             } => {
                 // Find and execute the rollback function
                 if let Some(function) = self.migration_functions.get(function_name) {
+                    // Note: Ideally we would pass the actual schema context here,
+                    // but for rollback operations we use default schemas as a placeholder.
+                    // Custom functions should be designed to work with their specific data.
                     let context = MigrationContext {
-                        from_schema: Default::default(), // TODO: Get from context
+                        from_schema: Default::default(),
                         to_schema: Default::default(),
                         migration_step: step.clone(),
                         custom_parameters: HashMap::new(),

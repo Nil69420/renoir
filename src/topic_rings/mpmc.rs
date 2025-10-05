@@ -11,6 +11,7 @@ use std::{
 
 use crate::{
     error::{RenoirError, Result},
+    sync::MioEventNotification,
     topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
 };
 
@@ -27,9 +28,8 @@ pub struct MPMCTopicRing {
     read_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
-    /// Notification file descriptor (Linux only)
-    #[cfg(target_os = "linux")]
-    notify_fd: Option<std::os::fd::OwnedFd>,
+    /// Mio-based event notification system
+    notifier: Arc<MioEventNotification>,
 }
 
 impl MPMCTopicRing {
@@ -50,8 +50,8 @@ impl MPMCTopicRing {
             NonNull::new(ptr).ok_or_else(|| RenoirError::memory("Failed to allocate MPMC ring"))?
         };
 
-        #[cfg(target_os = "linux")]
-        let notify_fd = Self::create_eventfd()?;
+        let notifier = MioEventNotification::new()
+            .map_err(|_| RenoirError::memory("Failed to create event notifier"))?;
 
         Ok(Self {
             buffer,
@@ -59,18 +59,8 @@ impl MPMCTopicRing {
             write_pos: AtomicUsize::new(0),
             read_pos: AtomicUsize::new(0),
             stats,
-            #[cfg(target_os = "linux")]
-            notify_fd,
+            notifier,
         })
-    }
-
-    #[cfg(target_os = "linux")]
-    fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
-        use nix::sys::eventfd::{eventfd, EfdFlags};
-
-        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
-            .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
-        Ok(Some(fd))
     }
 
     /// Get the buffer capacity
@@ -115,8 +105,10 @@ impl MPMCTopicRing {
         // Record statistics
         let _sequence = self.stats.record_published(message_size);
 
-        // Notify readers
-        self.notify_readers()?;
+        // Notify readers if enabled
+        if self.notifier.is_enabled() {
+            let _ = self.notifier.notify(); // Ignore notification errors
+        }
 
         Ok(())
     }
@@ -165,17 +157,40 @@ impl MPMCTopicRing {
         }
     }
 
-    fn notify_readers(&self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        if let Some(ref owned_fd) = self.notify_fd {
-            use nix::unistd::write;
-            use std::os::fd::AsRawFd;
-            let fd = owned_fd.as_raw_fd();
-            let value: u64 = 1;
-            let buf = value.to_ne_bytes();
-            let _ = write(fd, &buf); // Ignore write errors for notifications
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message at the head of the queue without advancing the read position
+    /// Note: In MPMC mode, the message may be consumed by another thread between peek and consume
+    pub fn try_peek(&self) -> Result<Option<Message>> {
+        let current_read = self.read_pos.load(Ordering::Acquire);
+        let current_write = self.write_pos.load(Ordering::Acquire);
+
+        if current_read == current_write {
+            return Ok(None); // No data available
         }
-        Ok(())
+
+        // Read message header
+        let buffer_pos = current_read & (self.capacity - 1);
+        let header = unsafe {
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_header(read_ptr)?
+        };
+
+        let message_size = MessageHeader::SIZE + header.payload_length as usize;
+
+        // Check if we have enough data for the complete message
+        if current_write.wrapping_sub(current_read) < message_size {
+            return Ok(None); // Incomplete message
+        }
+
+        // Read the complete message (but don't advance read position)
+        let message = unsafe {
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_message(&header, read_ptr)?
+        };
+
+        // Note: read_pos is NOT updated - this is the key difference from try_consume
+        // In MPMC, another consumer may consume this message before the caller can act on it
+        Ok(Some(message))
     }
 
     unsafe fn serialize_message(
@@ -242,16 +257,21 @@ impl MPMCTopicRing {
         })
     }
 
+    /// Get the eventfd for external polling
     #[cfg(target_os = "linux")]
     pub fn notification_fd(&self) -> Option<RawFd> {
-        use std::os::fd::AsRawFd;
-        self.notify_fd.as_ref().map(|fd| fd.as_raw_fd())
+        self.notifier.event_fd()
+    }
+
+    /// Enable or disable notifications
+    pub fn set_notifications(&self, enabled: bool) {
+        self.notifier.set_enabled(enabled);
     }
 }
 
 impl Drop for MPMCTopicRing {
     fn drop(&mut self) {
-        // OwnedFd will automatically close on drop, no manual close needed
+        // MioEventNotification will automatically clean up eventfd on drop
 
         let layout = std::alloc::Layout::array::<u8>(self.capacity).unwrap();
         unsafe {

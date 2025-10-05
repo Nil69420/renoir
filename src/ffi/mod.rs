@@ -5,6 +5,7 @@
 
 pub mod buffers;
 pub mod memory;
+pub mod topics;
 pub mod types;
 pub mod utils;
 pub mod version;
@@ -37,6 +38,22 @@ pub use buffers::{
     renoir_buffer_get, renoir_buffer_info, renoir_buffer_pool_create, renoir_buffer_pool_destroy,
     renoir_buffer_pool_stats, renoir_buffer_return,
 };
+
+// Topic management API
+pub use topics::{
+    renoir_message_release, renoir_publish, renoir_publish_commit, renoir_publish_reserve,
+    renoir_publish_try, renoir_publisher_create, renoir_publisher_destroy,
+    renoir_publisher_has_subscribers, renoir_publisher_stats, renoir_publisher_topic_name,
+    renoir_subscribe_drain, renoir_subscribe_peek, renoir_subscribe_read_next,
+    renoir_subscriber_create, renoir_subscriber_destroy, renoir_subscriber_has_messages,
+    renoir_subscriber_pending_count, renoir_subscriber_stats, renoir_subscriber_topic_name,
+    renoir_topic_count, renoir_topic_list, renoir_topic_list_free, renoir_topic_lookup,
+    renoir_topic_manager_create, renoir_topic_manager_destroy, renoir_topic_register,
+    renoir_topic_remove, renoir_topic_stats,
+};
+
+#[cfg(target_os = "linux")]
+pub use topics::{renoir_subscriber_get_event_fd, renoir_wait_event};
 
 // Version API
 pub use version::{

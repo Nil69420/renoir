@@ -9,6 +9,7 @@ use std::{
 use crate::{
     allocators::Allocator,
     buffers::{Buffer, BufferPool},
+    shared_pools::BufferPoolRegistry,
     topic_manager_modules::{Publisher, Subscriber, TopicManager},
     SharedMemoryManager,
 };
@@ -31,10 +32,15 @@ pub struct HandleRegistry {
     #[allow(dead_code)]
     pub control_regions: HashMap<usize, Arc<crate::metadata_modules::ControlRegion>>,
     pub topic_managers: HashMap<usize, Arc<TopicManager>>,
-    pub publishers: HashMap<usize, Publisher>,
-    pub subscribers: HashMap<usize, Subscriber>,
+    pub buffer_registries: HashMap<usize, Arc<BufferPoolRegistry>>, // Maps topic_manager_id -> BufferPoolRegistry
+    pub publishers: HashMap<usize, Arc<Publisher>>,
+    pub subscribers: HashMap<usize, Arc<Subscriber>>,
+    pub subscriber_to_manager: HashMap<usize, usize>, // Maps subscriber_id -> manager_id
+    pub publisher_to_manager: HashMap<usize, usize>, // Maps publisher_id -> manager_id
     pub reserved_buffers: HashMap<usize, Vec<u8>>,
     pub received_messages: HashMap<usize, crate::topic::Message>,
+    pub descriptor_buffers: HashMap<usize, Arc<Buffer>>, // Keeps descriptor buffers alive
+    pub message_to_descriptor_buffer: HashMap<usize, usize>, // Maps message_id -> descriptor_buffer_id
     pub next_id: usize,
 }
 
@@ -49,10 +55,15 @@ impl HandleRegistry {
             ring_buffers: HashMap::new(),
             control_regions: HashMap::new(),
             topic_managers: HashMap::new(),
+            buffer_registries: HashMap::new(),
             publishers: HashMap::new(),
             subscribers: HashMap::new(),
+            subscriber_to_manager: HashMap::new(),
+            publisher_to_manager: HashMap::new(),
             reserved_buffers: HashMap::new(),
             received_messages: HashMap::new(),
+            descriptor_buffers: HashMap::new(),
+            message_to_descriptor_buffer: HashMap::new(),
             next_id: 1,
         }
     }
@@ -92,6 +103,92 @@ impl HandleRegistry {
 
     pub fn get_buffer_pool(&self, id: usize) -> Option<Arc<BufferPool>> {
         self.buffer_pools.get(&id).cloned()
+    }
+
+    // Topic Manager methods
+    pub fn store_topic_manager(&mut self, manager: Arc<TopicManager>, registry: Arc<BufferPoolRegistry>) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.topic_managers.insert(id, manager);
+        self.buffer_registries.insert(id, registry);
+        id
+    }
+
+    pub fn get_topic_manager(&self, id: usize) -> Option<Arc<TopicManager>> {
+        self.topic_managers.get(&id).cloned()
+    }
+
+    pub fn get_buffer_registry(&self, manager_id: usize) -> Option<Arc<BufferPoolRegistry>> {
+        self.buffer_registries.get(&manager_id).cloned()
+    }
+
+    pub fn remove_topic_manager(&mut self, id: usize) -> bool {
+        self.buffer_registries.remove(&id);
+        self.topic_managers.remove(&id).is_some()
+    }
+
+    // Publisher methods
+    pub fn store_publisher(&mut self, publisher: Arc<Publisher>, manager_id: usize) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.publishers.insert(id, publisher);
+        self.publisher_to_manager.insert(id, manager_id);
+        id
+    }
+
+    pub fn get_publisher(&self, id: usize) -> Option<Arc<Publisher>> {
+        self.publishers.get(&id).cloned()
+    }
+
+    pub fn remove_publisher(&mut self, id: usize) -> bool {
+        self.publisher_to_manager.remove(&id);
+        self.publishers.remove(&id).is_some()
+    }
+
+    // Subscriber methods
+    pub fn store_subscriber(&mut self, subscriber: Arc<Subscriber>, manager_id: usize) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.subscribers.insert(id, subscriber);
+        self.subscriber_to_manager.insert(id, manager_id);
+        id
+    }
+
+    pub fn get_subscriber(&self, id: usize) -> Option<Arc<Subscriber>> {
+        self.subscribers.get(&id).cloned()
+    }
+
+    pub fn get_subscriber_manager_id(&self, id: usize) -> Option<usize> {
+        self.subscriber_to_manager.get(&id).copied()
+    }
+
+    pub fn remove_subscriber(&mut self, id: usize) -> bool {
+        self.subscriber_to_manager.remove(&id);
+        self.subscribers.remove(&id).is_some()
+    }
+
+    // Message methods
+    pub fn store_message(&mut self, message: Box<crate::topic::Message>) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.received_messages.insert(id, *message);
+        id
+    }
+
+    pub fn get_message(&self, id: usize) -> Option<&crate::topic::Message> {
+        self.received_messages.get(&id)
+    }
+
+    pub fn remove_message(&mut self, id: usize) -> bool {
+        // Clean up associated descriptor buffer if any
+        if let Some(buf_id) = self.message_to_descriptor_buffer.remove(&id) {
+            self.descriptor_buffers.remove(&buf_id);
+        }
+        self.received_messages.remove(&id).is_some()
+    }
+
+    pub fn associate_descriptor_buffer(&mut self, message_id: usize, buffer_id: usize) {
+        self.message_to_descriptor_buffer.insert(message_id, buffer_id);
     }
 }
 

@@ -286,9 +286,69 @@ impl SchemaEvolutionManager {
         &self,
         _schema: &EvolutionAwareSchema,
         _version: u32,
-        _rule: &SchemaEvolutionRule,
+        rule: &SchemaEvolutionRule,
     ) -> Result<()> {
-        // TODO: Implement detailed rule validation
+        // Validate that the evolution rule is well-formed
+        // Check if the rule is compatible based on its field changes
+        for change in &rule.field_changes {
+            match change {
+                FieldChange::OptionalFieldAdded { .. } => {
+                    // Always compatible - readers can ignore unknown fields
+                    continue;
+                }
+                FieldChange::RequiredFieldAdded { field_name, .. } => {
+                    // Breaking - old readers cannot handle required fields
+                    if !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                        return Err(RenoirError::invalid_parameter(
+                            "rule",
+                            &format!("Required field '{}' added but not marked as breaking", field_name),
+                        ));
+                    }
+                }
+                FieldChange::FieldRemoved { field_name, was_required } => {
+                    // Breaking if required, potentially compatible if optional
+                    if *was_required && !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                        return Err(RenoirError::invalid_parameter(
+                            "rule",
+                            &format!("Required field '{}' removed but not marked as breaking", field_name),
+                        ));
+                    }
+                }
+                FieldChange::FieldTypeChanged { field_name, is_compatible, .. } => {
+                    // Breaking if incompatible type change
+                    if !is_compatible && !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                        return Err(RenoirError::invalid_parameter(
+                            "rule",
+                            &format!("Incompatible type change for '{}' but not marked as breaking", field_name),
+                        ));
+                    }
+                }
+                FieldChange::FieldMadeRequired { field_name } => {
+                    // Always breaking - old data may not have values
+                    if !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                        return Err(RenoirError::invalid_parameter(
+                            "rule",
+                            &format!("Field '{}' made required but not marked as breaking", field_name),
+                        ));
+                    }
+                }
+                FieldChange::FieldMadeOptional { .. } | 
+                FieldChange::FieldDeprecated { .. } | 
+                FieldChange::FieldReordered { .. } => {
+                    // Generally compatible changes
+                    continue;
+                }
+            }
+        }
+
+        // If marked as breaking, ensure migration steps exist
+        if matches!(rule.compatibility, CompatibilityLevel::Breaking) && rule.migration_steps.is_empty() {
+            return Err(RenoirError::invalid_parameter(
+                "rule",
+                "Breaking change requires migration steps",
+            ));
+        }
+
         Ok(())
     }
 

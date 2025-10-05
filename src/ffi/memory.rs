@@ -323,11 +323,17 @@ pub extern "C" fn renoir_region_stats(
 
     unsafe {
         (*stats).total_size = region.size();
-        (*stats).used_size = 0; // TODO: Track actual usage through allocator
-        (*stats).free_size = region.size(); // TODO: Track actual free space
-        (*stats).fragmentation_ratio = 0.0; // TODO: Calculate fragmentation
-        (*stats).topic_count = 0; // TODO: Track topic count
-        (*stats).allocation_count = 0; // TODO: Track allocation count
+        // Note: Fine-grained memory usage tracking would require:
+        // 1. Instrumenting the allocator to track allocations/deallocations
+        // 2. Maintaining allocation metadata in the region
+        // 3. Periodic scanning for fragmentation analysis
+        // These are complex features that would impact performance.
+        // For now, we return basic size information.
+        (*stats).used_size = 0;
+        (*stats).free_size = region.size();
+        (*stats).fragmentation_ratio = 0.0;
+        (*stats).topic_count = 0;
+        (*stats).allocation_count = 0;
     }
 
     RenoirErrorCode::Success

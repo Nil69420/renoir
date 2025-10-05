@@ -177,6 +177,15 @@ impl TopicInstance {
         }
     }
 
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message without removing it from the queue
+    pub fn peek(&self) -> Result<Option<Message>> {
+        match &self.ring {
+            TopicRingType::SPSC(ring) => ring.try_peek(),
+            TopicRingType::MPMC(ring) => ring.try_peek(),
+        }
+    }
+
     /// Wait for a message with timeout (Linux only)
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {

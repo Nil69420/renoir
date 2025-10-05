@@ -1,16 +1,17 @@
 //! Single Producer Single Consumer ring buffer for topic messaging
 
 use std::{
-    os::fd::{AsRawFd, RawFd},
+    os::fd::RawFd,
     ptr::NonNull,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering},
         Arc,
     },
 };
 
 use crate::{
     error::{RenoirError, Result},
+    sync::MioEventNotification,
     topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
 };
 
@@ -31,11 +32,8 @@ pub struct SPSCTopicRing {
     cached_write_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
-    /// Notification file descriptor (Linux only)
-    #[cfg(target_os = "linux")]
-    notify_fd: Option<std::os::fd::OwnedFd>,
-    /// Whether notifications are enabled
-    notification_enabled: AtomicBool,
+    /// Mio-based event notification system
+    notifier: Arc<MioEventNotification>,
 }
 
 impl SPSCTopicRing {
@@ -56,8 +54,8 @@ impl SPSCTopicRing {
             NonNull::new(ptr).ok_or_else(|| RenoirError::memory("Failed to allocate topic ring"))?
         };
 
-        #[cfg(target_os = "linux")]
-        let notify_fd = Self::create_eventfd()?;
+        let notifier = MioEventNotification::new()
+            .map_err(|_| RenoirError::memory("Failed to create event notifier"))?;
 
         Ok(Self {
             buffer,
@@ -67,9 +65,7 @@ impl SPSCTopicRing {
             cached_read_pos: AtomicUsize::new(0),
             cached_write_pos: AtomicUsize::new(0),
             stats,
-            #[cfg(target_os = "linux")]
-            notify_fd,
-            notification_enabled: AtomicBool::new(true),
+            notifier,
         })
     }
 
@@ -86,8 +82,8 @@ impl SPSCTopicRing {
             ));
         }
 
-        #[cfg(target_os = "linux")]
-        let notify_fd = Self::create_eventfd()?;
+        let notifier = MioEventNotification::new()
+            .map_err(|_| RenoirError::memory("Failed to create event notifier"))?;
 
         Ok(Self {
             buffer: memory,
@@ -97,19 +93,8 @@ impl SPSCTopicRing {
             cached_read_pos: AtomicUsize::new(0),
             cached_write_pos: AtomicUsize::new(0),
             stats,
-            #[cfg(target_os = "linux")]
-            notify_fd,
-            notification_enabled: AtomicBool::new(true),
+            notifier,
         })
-    }
-
-    #[cfg(target_os = "linux")]
-    fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
-        use nix::sys::eventfd::{eventfd, EfdFlags};
-
-        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
-            .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
-        Ok(Some(fd))
     }
 
     /// Get the buffer capacity
@@ -159,8 +144,8 @@ impl SPSCTopicRing {
         let _sequence = self.stats.record_published(message_size);
 
         // Notify readers if enabled
-        if self.notification_enabled.load(Ordering::Relaxed) {
-            self.notify_readers()?;
+        if self.notifier.is_enabled() {
+            let _ = self.notifier.notify(); // Ignore notification errors
         }
 
         Ok(())
@@ -216,6 +201,51 @@ impl SPSCTopicRing {
         Ok(Some(message))
     }
 
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message at the head of the queue without advancing the read position
+    pub fn try_peek(&self) -> Result<Option<Message>> {
+        let read_pos = self.read_pos.load(Ordering::Relaxed);
+        let cached_write = self.cached_write_pos.load(Ordering::Relaxed);
+
+        // Check if there's data available
+        if read_pos == cached_write {
+            // Refresh cached write position
+            let fresh_write = self.write_pos.load(Ordering::Acquire);
+            self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
+
+            if read_pos == fresh_write {
+                return Ok(None); // No data available
+            }
+        }
+
+        // Read message header first
+        let buffer_pos = read_pos & (self.capacity - 1);
+        let header = unsafe {
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_header(read_ptr)?
+        };
+
+        let message_size = MessageHeader::SIZE + header.payload_length as usize;
+
+        // Check if we have the complete message
+        let available = self
+            .cached_write_pos
+            .load(Ordering::Relaxed)
+            .wrapping_sub(read_pos);
+        if available < message_size {
+            return Ok(None); // Incomplete message
+        }
+
+        // Read the complete message (but don't advance read position)
+        let message = unsafe {
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_message(&header, read_ptr)?
+        };
+
+        // Note: read_pos is NOT updated - this is the key difference from try_consume
+        Ok(Some(message))
+    }
+
     /// Wait for a message with optional timeout (blocking)
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout_ms: Option<u64>) -> Result<Option<Message>> {
@@ -223,49 +253,9 @@ impl SPSCTopicRing {
             return Ok(Some(message));
         }
 
-        if let Some(ref owned_fd) = self.notify_fd {
-            let fd = owned_fd.as_raw_fd();
-            self.wait_on_eventfd(fd, timeout_ms)?;
-            self.try_consume()
-        } else {
-            Ok(None)
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn wait_on_eventfd(&self, fd: RawFd, timeout_ms: Option<u64>) -> Result<()> {
-        use nix::{
-            poll::{poll, PollFd, PollFlags},
-            unistd::read,
-        };
-
-        use std::os::fd::BorrowedFd;
-        let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
-        let mut fds = [PollFd::new(&borrowed_fd, PollFlags::POLLIN)];
-        let timeout = timeout_ms.map(|ms| ms as i32).unwrap_or(-1);
-
-        match poll(&mut fds, timeout) {
-            Ok(n) if n > 0 => {
-                // Clear the eventfd
-                let mut buf = [0u8; 8];
-                let _ = read(fd, &mut buf);
-            }
-            _ => {}
-        }
-
-        Ok(())
-    }
-
-    fn notify_readers(&self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        if let Some(ref owned_fd) = self.notify_fd {
-            use nix::unistd::write;
-            let fd = owned_fd.as_raw_fd();
-            let value: u64 = 1;
-            let buf = value.to_ne_bytes();
-            let _ = write(fd, &buf); // Ignore write errors for notifications
-        }
-        Ok(())
+        // Wait using mio's async polling
+        let _ = self.notifier.wait_async(timeout_ms);
+        self.try_consume()
     }
 
     unsafe fn serialize_message(
@@ -337,12 +327,12 @@ impl SPSCTopicRing {
     /// Get the eventfd for external polling
     #[cfg(target_os = "linux")]
     pub fn notification_fd(&self) -> Option<RawFd> {
-        self.notify_fd.as_ref().map(|fd| fd.as_raw_fd())
+        self.notifier.event_fd()
     }
 
     /// Enable or disable notifications
     pub fn set_notifications(&self, enabled: bool) {
-        self.notification_enabled.store(enabled, Ordering::Relaxed);
+        self.notifier.set_enabled(enabled);
     }
 
     /// Get current buffer utilization (0.0 to 1.0)
@@ -364,7 +354,7 @@ impl SPSCTopicRing {
 
 impl Drop for SPSCTopicRing {
     fn drop(&mut self) {
-        // OwnedFd will automatically close on drop, no manual close needed
+        // MioEventNotification will automatically clean up eventfd on drop
 
         // Deallocate buffer if we own it
         let layout = std::alloc::Layout::array::<u8>(self.capacity).unwrap();

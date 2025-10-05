@@ -227,6 +227,12 @@ impl TopicManager {
         topic_ids.get(&topic_id).cloned()
     }
 
+    /// Get topic ID by name
+    pub fn get_topic_id(&self, topic_name: &str) -> Option<TopicId> {
+        let topics = self.topics.read().unwrap();
+        topics.get(topic_name).map(|topic| topic.topic_id)
+    }
+
     /// Get topic count
     pub fn topic_count(&self) -> usize {
         let topics = self.topics.read().unwrap();
@@ -240,8 +246,7 @@ impl TopicManager {
     }
 
     /// Get buffer registry (internal use)  
-    #[allow(dead_code)]
-    pub(super) fn buffer_registry(&self) -> &Arc<BufferPoolRegistry> {
+    pub fn buffer_registry(&self) -> &Arc<BufferPoolRegistry> {
         &self.buffer_registry
     }
 

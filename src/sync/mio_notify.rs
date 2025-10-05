@@ -22,6 +22,7 @@ use crate::sync::{SyncError, SyncResult};
 const EVENTFD_TOKEN: Token = Token(0);
 
 /// Mio-based async event notification system
+#[derive(Debug)]
 pub struct MioEventNotification {
     /// Whether notifications are enabled
     enabled: AtomicBool,

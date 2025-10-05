@@ -150,6 +150,14 @@ impl Subscriber {
         self.subscribe()
     }
 
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message without removing it from the queue
+    /// Note: In MPMC mode, the message may be consumed by another subscriber
+    /// between peek and the next subscribe call
+    pub fn peek(&self) -> Result<Option<Message>> {
+        self.topic.peek()
+    }
+
     /// Wait for a message with optional timeout
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {

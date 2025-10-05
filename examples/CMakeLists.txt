@@ -73,6 +73,7 @@ include_directories(${RENOIR_INCLUDE_DIR})
 if(ENABLE_EXAMPLES)
     add_subdirectory(region_manager)
     add_subdirectory(buffers)
+    add_subdirectory(topics)
 endif()
 
 # Print configuration summary
