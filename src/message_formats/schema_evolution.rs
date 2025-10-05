@@ -6,9 +6,9 @@
 //! - Migration framework for breaking changes
 //! - Automated compatibility validation
 
-use crate::error::{Result, RenoirError};
-use super::{FormatType, registry::SchemaInfo};
-use std::collections::{HashMap, BTreeMap, HashSet};
+use super::{registry::SchemaInfo, FormatType};
+use crate::error::{RenoirError, Result};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 /// Schema evolution compatibility levels
@@ -18,7 +18,7 @@ pub enum CompatibilityLevel {
     FullCompatible,
     /// Backward compatible only (older readers can read newer schemas)
     BackwardCompatible,
-    /// Forward compatible only (newer readers can read older schemas) 
+    /// Forward compatible only (newer readers can read older schemas)
     ForwardCompatible,
     /// No compatibility - breaking change requiring migration
     Breaking,
@@ -39,15 +39,24 @@ pub struct SchemaEvolutionRule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldChange {
     /// New optional field added (backward compatible)
-    OptionalFieldAdded { field_name: String, field_type: String },
+    OptionalFieldAdded {
+        field_name: String,
+        field_type: String,
+    },
     /// Required field added (breaking change)
-    RequiredFieldAdded { field_name: String, field_type: String },
+    RequiredFieldAdded {
+        field_name: String,
+        field_type: String,
+    },
     /// Field removed (potentially breaking)
-    FieldRemoved { field_name: String, was_required: bool },
+    FieldRemoved {
+        field_name: String,
+        was_required: bool,
+    },
     /// Field type changed (breaking if incompatible)
-    FieldTypeChanged { 
-        field_name: String, 
-        old_type: String, 
+    FieldTypeChanged {
+        field_name: String,
+        old_type: String,
         new_type: String,
         is_compatible: bool,
     },
@@ -58,22 +67,40 @@ pub enum FieldChange {
     /// Field deprecated (backward compatible)
     FieldDeprecated { field_name: String },
     /// Field order changed (format-specific compatibility)
-    FieldReordered { field_name: String, old_position: u32, new_position: u32 },
+    FieldReordered {
+        field_name: String,
+        old_position: u32,
+        new_position: u32,
+    },
 }
 
 /// Migration step for handling breaking changes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationStep {
     /// Default value assignment for new required fields
-    AssignDefaultValue { field_name: String, default_value: String },
+    AssignDefaultValue {
+        field_name: String,
+        default_value: String,
+    },
     /// Field mapping from old to new structure
-    MapField { old_field: String, new_field: String, transform: String },
+    MapField {
+        old_field: String,
+        new_field: String,
+        transform: String,
+    },
     /// Custom migration function call
-    CustomTransform { function_name: String, parameters: Vec<String> },
+    CustomTransform {
+        function_name: String,
+        parameters: Vec<String>,
+    },
     /// Data validation step
     ValidateData { validation_rule: String },
     /// Schema version bump
-    VersionBump { from_version: u32, to_version: u32, is_major: bool },
+    VersionBump {
+        from_version: u32,
+        to_version: u32,
+        is_major: bool,
+    },
 }
 
 /// Enhanced schema information with evolution metadata
@@ -170,7 +197,11 @@ impl SchemaEvolutionManager {
     }
 
     /// Get a specific schema version
-    pub fn get_schema_version(&self, name: &str, version: &SemanticVersion) -> Option<&EvolutionAwareSchema> {
+    pub fn get_schema_version(
+        &self,
+        name: &str,
+        version: &SemanticVersion,
+    ) -> Option<&EvolutionAwareSchema> {
         let schema_id = self.name_to_id.get(name)?;
         let versions = self.schemas.get(schema_id)?;
         versions.iter().find(|s| s.semantic_version == *version)
@@ -183,8 +214,9 @@ impl SchemaEvolutionManager {
         writer_schema: &EvolutionAwareSchema,
     ) -> Result<CompatibilityLevel> {
         // Same schema is always compatible
-        if reader_schema.schema_id == writer_schema.schema_id 
-            && reader_schema.semantic_version == writer_schema.semantic_version {
+        if reader_schema.schema_id == writer_schema.schema_id
+            && reader_schema.semantic_version == writer_schema.semantic_version
+        {
             return Ok(CompatibilityLevel::FullCompatible);
         }
 
@@ -194,7 +226,10 @@ impl SchemaEvolutionManager {
         }
 
         // Check semantic version compatibility
-        self.check_semantic_version_compatibility(&reader_schema.semantic_version, &writer_schema.semantic_version)
+        self.check_semantic_version_compatibility(
+            &reader_schema.semantic_version,
+            &writer_schema.semantic_version,
+        )
     }
 
     /// Generate migration plan for breaking schema changes
@@ -206,15 +241,15 @@ impl SchemaEvolutionManager {
         if from_schema.schema_id != to_schema.schema_id {
             return Err(RenoirError::invalid_parameter(
                 "schema",
-                "Cannot migrate between different schema types"
+                "Cannot migrate between different schema types",
             ));
         }
 
         let compatibility = self.check_compatibility(from_schema, to_schema)?;
-        
+
         match compatibility {
-            CompatibilityLevel::FullCompatible 
-            | CompatibilityLevel::BackwardCompatible 
+            CompatibilityLevel::FullCompatible
+            | CompatibilityLevel::BackwardCompatible
             | CompatibilityLevel::ForwardCompatible => {
                 // No migration needed
                 Ok(vec![])
@@ -234,7 +269,7 @@ impl SchemaEvolutionManager {
             if !positions.insert(field.position) {
                 return Err(RenoirError::invalid_parameter(
                     "schema",
-                    &format!("Duplicate field position {} in schema", field.position)
+                    &format!("Duplicate field position {} in schema", field.position),
                 ));
             }
         }
@@ -270,7 +305,7 @@ impl SchemaEvolutionManager {
         // Minor version increases are backward compatible
         match reader_version.minor.cmp(&writer_version.minor) {
             std::cmp::Ordering::Less => Ok(CompatibilityLevel::BackwardCompatible),
-            std::cmp::Ordering::Greater => Ok(CompatibilityLevel::ForwardCompatible), 
+            std::cmp::Ordering::Greater => Ok(CompatibilityLevel::ForwardCompatible),
             std::cmp::Ordering::Equal => {
                 // Same minor version, check patch level
                 if reader_version.patch == writer_version.patch {
@@ -288,13 +323,11 @@ impl SchemaEvolutionManager {
         from_schema: &EvolutionAwareSchema,
         to_schema: &EvolutionAwareSchema,
     ) -> Result<Vec<MigrationStep>> {
-        let mut steps = vec![
-            MigrationStep::VersionBump {
-                from_version: from_schema.base.schema_version,
-                to_version: to_schema.base.schema_version,
-                is_major: from_schema.semantic_version.major != to_schema.semantic_version.major,
-            }
-        ];
+        let mut steps = vec![MigrationStep::VersionBump {
+            from_version: from_schema.base.schema_version,
+            to_version: to_schema.base.schema_version,
+            is_major: from_schema.semantic_version.major != to_schema.semantic_version.major,
+        }];
 
         // Compare fields to determine migration steps
         for (field_name, new_field) in &to_schema.fields {
@@ -304,7 +337,10 @@ impl SchemaEvolutionManager {
                     steps.push(MigrationStep::MapField {
                         old_field: field_name.clone(),
                         new_field: field_name.clone(),
-                        transform: format!("convert_{}_to_{}", old_field.field_type, new_field.field_type),
+                        transform: format!(
+                            "convert_{}_to_{}",
+                            old_field.field_type, new_field.field_type
+                        ),
                     });
                 }
 
@@ -327,7 +363,7 @@ impl SchemaEvolutionManager {
                     } else {
                         return Err(RenoirError::invalid_parameter(
                             "schema",
-                            &format!("New required field '{}' needs a default value", field_name)
+                            &format!("New required field '{}' needs a default value", field_name),
                         ));
                     }
                 }
@@ -336,8 +372,10 @@ impl SchemaEvolutionManager {
 
         // Add validation step
         steps.push(MigrationStep::ValidateData {
-            validation_rule: format!("validate_migration_{}_{}", 
-                from_schema.semantic_version, to_schema.semantic_version),
+            validation_rule: format!(
+                "validate_migration_{}_{}",
+                from_schema.semantic_version, to_schema.semantic_version
+            ),
         });
 
         Ok(steps)
@@ -352,7 +390,11 @@ impl Default for SchemaEvolutionManager {
 
 impl SemanticVersion {
     pub fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 
     /// Check if this version is compatible with another version
@@ -450,10 +492,12 @@ impl SchemaBuilder {
     }
 
     pub fn build(self, manager: &mut SchemaEvolutionManager) -> Result<EvolutionAwareSchema> {
-        let schema_id = self.schema_id.unwrap_or_else(|| manager.generate_schema_id());
-        let schema_version = self.semantic_version.major * 10000 + 
-                            self.semantic_version.minor * 100 + 
-                            self.semantic_version.patch;
+        let schema_id = self
+            .schema_id
+            .unwrap_or_else(|| manager.generate_schema_id());
+        let schema_version = self.semantic_version.major * 10000
+            + self.semantic_version.minor * 100
+            + self.semantic_version.patch;
 
         let base = SchemaInfo::new(
             self.format_type,
@@ -485,17 +529,32 @@ mod tests {
         let v1_0_1 = SemanticVersion::new(1, 0, 1);
         let v2_0_0 = SemanticVersion::new(2, 0, 0);
 
-        assert_eq!(v1_0_0.is_compatible_with(&v1_0_0), CompatibilityLevel::FullCompatible);
-        assert_eq!(v1_0_0.is_compatible_with(&v1_1_0), CompatibilityLevel::BackwardCompatible);
-        assert_eq!(v1_1_0.is_compatible_with(&v1_0_0), CompatibilityLevel::ForwardCompatible);
-        assert_eq!(v1_0_0.is_compatible_with(&v2_0_0), CompatibilityLevel::Breaking);
-        assert_eq!(v1_0_0.is_compatible_with(&v1_0_1), CompatibilityLevel::FullCompatible);
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_0_0),
+            CompatibilityLevel::FullCompatible
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_1_0),
+            CompatibilityLevel::BackwardCompatible
+        );
+        assert_eq!(
+            v1_1_0.is_compatible_with(&v1_0_0),
+            CompatibilityLevel::ForwardCompatible
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v2_0_0),
+            CompatibilityLevel::Breaking
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_0_1),
+            CompatibilityLevel::FullCompatible
+        );
     }
 
     #[test]
     fn test_schema_evolution_manager() -> Result<()> {
         let mut manager = SchemaEvolutionManager::new();
-        
+
         let schema = SchemaBuilder::new("test_schema".to_string(), FormatType::FlatBuffers)
             .version(1, 0, 0)
             .add_field(FieldDefinition::new(
@@ -508,10 +567,13 @@ mod tests {
             .build(&mut manager)?;
 
         manager.register_schema(schema)?;
-        
+
         let retrieved = manager.get_latest_schema("test_schema");
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().semantic_version, SemanticVersion::new(1, 0, 0));
+        assert_eq!(
+            retrieved.unwrap().semantic_version,
+            SemanticVersion::new(1, 0, 0)
+        );
 
         Ok(())
     }
@@ -543,19 +605,18 @@ mod tests {
                 1,
                 0,
             ))
-            .add_field(FieldDefinition::new(
-                "new_field".to_string(),
-                "string".to_string(),
-                true,
-                2,
-                1,
-            ).with_default("default_value".to_string()))
+            .add_field(
+                FieldDefinition::new("new_field".to_string(), "string".to_string(), true, 2, 1)
+                    .with_default("default_value".to_string()),
+            )
             .build(&mut manager)?;
 
         let migration_plan = manager.generate_migration_plan(&v1_schema, &v2_schema)?;
-        
+
         assert!(!migration_plan.is_empty());
-        assert!(migration_plan.iter().any(|step| matches!(step, MigrationStep::VersionBump { is_major: true, .. })));
+        assert!(migration_plan
+            .iter()
+            .any(|step| matches!(step, MigrationStep::VersionBump { is_major: true, .. })));
 
         Ok(())
     }

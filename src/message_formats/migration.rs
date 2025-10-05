@@ -7,15 +7,15 @@
 //! - Rollback capabilities for failed migrations
 //! - Custom migration function registration
 
-use crate::error::{Result, RenoirError};
 use super::schema_evolution::{
-    EvolutionAwareSchema, MigrationStep, SemanticVersion, SchemaEvolutionManager
+    EvolutionAwareSchema, MigrationStep, SchemaEvolutionManager, SemanticVersion,
 };
+use crate::error::{RenoirError, Result};
 // Compatibility validation is handled by the evolution manager
 use super::FormatType;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::fmt;
+use std::sync::{Arc, Mutex};
 
 /// Migration executor for handling schema transformations
 pub struct SchemaMigrationExecutor {
@@ -87,11 +87,12 @@ impl SchemaMigrationExecutor {
     }
 
     /// Register a custom migration function
-    pub fn register_migration_function<F>(&mut self, function: F) 
-    where 
-        F: MigrationFunction + Send + Sync + 'static 
+    pub fn register_migration_function<F>(&mut self, function: F)
+    where
+        F: MigrationFunction + Send + Sync + 'static,
     {
-        self.migration_functions.insert(function.name().to_string(), Box::new(function));
+        self.migration_functions
+            .insert(function.name().to_string(), Box::new(function));
     }
 
     /// Execute a complete migration plan
@@ -104,10 +105,10 @@ impl SchemaMigrationExecutor {
     ) -> Result<MigrationResult> {
         let start_time = std::time::Instant::now();
         let migration_id = self.generate_migration_id();
-        
+
         let mut current_data = data.to_vec();
         let mut executed_steps = Vec::new();
-        
+
         // Validate migration plan
         self.validate_migration_plan(&migration_plan, from_schema, to_schema)?;
 
@@ -128,11 +129,11 @@ impl SchemaMigrationExecutor {
                     // Migration failed - record failure and return error
                     let error_msg = e.to_string();
                     self.record_migration_failure(
-                        migration_id, 
-                        from_schema, 
-                        to_schema, 
+                        migration_id,
+                        from_schema,
+                        to_schema,
                         executed_steps,
-                        error_msg
+                        error_msg,
                     );
                     return Err(e);
                 }
@@ -140,7 +141,7 @@ impl SchemaMigrationExecutor {
         }
 
         let duration = start_time.elapsed();
-        
+
         // Record successful migration
         let record = MigrationRecord {
             migration_id,
@@ -169,18 +170,23 @@ impl SchemaMigrationExecutor {
     }
 
     /// Rollback a migration by ID
-    pub fn rollback_migration(&mut self, migration_id: u64, current_data: &[u8]) -> Result<Vec<u8>> {
-        let record = self.migration_history.iter()
+    pub fn rollback_migration(
+        &mut self,
+        migration_id: u64,
+        current_data: &[u8],
+    ) -> Result<Vec<u8>> {
+        let record = self
+            .migration_history
+            .iter()
             .find(|r| r.migration_id == migration_id)
-            .ok_or_else(|| RenoirError::invalid_parameter(
-                "migration_id", 
-                "Migration record not found"
-            ))?;
+            .ok_or_else(|| {
+                RenoirError::invalid_parameter("migration_id", "Migration record not found")
+            })?;
 
         if !record.success {
             return Err(RenoirError::invalid_parameter(
-                "migration_id", 
-                "Cannot rollback failed migration"
+                "migration_id",
+                "Cannot rollback failed migration",
             ));
         }
 
@@ -194,26 +200,34 @@ impl SchemaMigrationExecutor {
     }
 
     fn execute_migration_step(
-        &self, 
-        data: &[u8], 
+        &self,
+        data: &[u8],
         step: &MigrationStep,
         context: &MigrationContext,
     ) -> Result<Vec<u8>> {
         match step {
-            MigrationStep::AssignDefaultValue { field_name, default_value } => {
-                self.assign_default_value(data, field_name, default_value, context)
-            }
-            MigrationStep::MapField { old_field, new_field, transform } => {
-                self.map_field(data, old_field, new_field, transform, context)
-            }
-            MigrationStep::CustomTransform { function_name, parameters } => {
-                self.execute_custom_transform(data, function_name, parameters, context)
-            }
+            MigrationStep::AssignDefaultValue {
+                field_name,
+                default_value,
+            } => self.assign_default_value(data, field_name, default_value, context),
+            MigrationStep::MapField {
+                old_field,
+                new_field,
+                transform,
+            } => self.map_field(data, old_field, new_field, transform, context),
+            MigrationStep::CustomTransform {
+                function_name,
+                parameters,
+            } => self.execute_custom_transform(data, function_name, parameters, context),
             MigrationStep::ValidateData { validation_rule } => {
                 self.validate_migrated_data(data, validation_rule, context)?;
                 Ok(data.to_vec()) // Validation doesn't change data
             }
-            MigrationStep::VersionBump { from_version: _, to_version: _, is_major: _ } => {
+            MigrationStep::VersionBump {
+                from_version: _,
+                to_version: _,
+                is_major: _,
+            } => {
                 // Version bumps don't change data structure
                 Ok(data.to_vec())
             }
@@ -222,15 +236,25 @@ impl SchemaMigrationExecutor {
 
     fn execute_rollback_step(&self, data: &[u8], step: &MigrationStep) -> Result<Vec<u8>> {
         match step {
-            MigrationStep::AssignDefaultValue { field_name, default_value: _ } => {
+            MigrationStep::AssignDefaultValue {
+                field_name,
+                default_value: _,
+            } => {
                 // Remove the field that was added
                 self.remove_field(data, field_name)
             }
-            MigrationStep::MapField { old_field, new_field, transform } => {
+            MigrationStep::MapField {
+                old_field,
+                new_field,
+                transform,
+            } => {
                 // Reverse the field mapping
                 self.reverse_map_field(data, new_field, old_field, transform)
             }
-            MigrationStep::CustomTransform { function_name, parameters: _ } => {
+            MigrationStep::CustomTransform {
+                function_name,
+                parameters: _,
+            } => {
                 // Find and execute the rollback function
                 if let Some(function) = self.migration_functions.get(function_name) {
                     let context = MigrationContext {
@@ -243,7 +267,7 @@ impl SchemaMigrationExecutor {
                 } else {
                     Err(RenoirError::invalid_parameter(
                         "function_name",
-                        &format!("Migration function '{}' not found", function_name)
+                        &format!("Migration function '{}' not found", function_name),
                     ))
                 }
             }
@@ -252,11 +276,11 @@ impl SchemaMigrationExecutor {
     }
 
     fn assign_default_value(
-        &self, 
-        data: &[u8], 
-        field_name: &str, 
-        default_value: &str, 
-        context: &MigrationContext
+        &self,
+        data: &[u8],
+        field_name: &str,
+        default_value: &str,
+        context: &MigrationContext,
     ) -> Result<Vec<u8>> {
         match context.to_schema.base.format_type {
             FormatType::FlatBuffers => {
@@ -265,12 +289,10 @@ impl SchemaMigrationExecutor {
             FormatType::CapnProto => {
                 self.assign_default_value_capnproto(data, field_name, default_value, context)
             }
-            FormatType::Custom => {
-                Err(RenoirError::invalid_parameter(
-                    "format_type",
-                    "Custom format migration not implemented"
-                ))
-            }
+            FormatType::Custom => Err(RenoirError::invalid_parameter(
+                "format_type",
+                "Custom format migration not implemented",
+            )),
         }
     }
 
@@ -284,11 +306,11 @@ impl SchemaMigrationExecutor {
         // This would integrate with the FlatBuffers library to add a field with default value
         // For now, return a placeholder implementation
         let mut new_data = data.to_vec();
-        
+
         // Add metadata about the default value assignment
         let metadata = format!("{}={}", field_name, default_value);
         new_data.extend(metadata.as_bytes());
-        
+
         Ok(new_data)
     }
 
@@ -338,16 +360,19 @@ impl SchemaMigrationExecutor {
         parameters: &[String],
         context: &MigrationContext,
     ) -> Result<Vec<u8>> {
-        let function = self.migration_functions.get(function_name)
-            .ok_or_else(|| RenoirError::invalid_parameter(
+        let function = self.migration_functions.get(function_name).ok_or_else(|| {
+            RenoirError::invalid_parameter(
                 "function_name",
-                &format!("Migration function '{}' not found", function_name)
-            ))?;
+                &format!("Migration function '{}' not found", function_name),
+            )
+        })?;
 
         let mut custom_context = context.clone();
         for param in parameters {
             if let Some((key, value)) = param.split_once('=') {
-                custom_context.custom_parameters.insert(key.to_string(), value.to_string());
+                custom_context
+                    .custom_parameters
+                    .insert(key.to_string(), value.to_string());
             }
         }
 
@@ -364,7 +389,7 @@ impl SchemaMigrationExecutor {
         if data.is_empty() {
             return Err(RenoirError::invalid_parameter(
                 "data",
-                "Migrated data is empty"
+                "Migrated data is empty",
             ));
         }
         Ok(())
@@ -379,7 +404,7 @@ impl SchemaMigrationExecutor {
         if from_schema.schema_id != to_schema.schema_id {
             return Err(RenoirError::invalid_parameter(
                 "schema",
-                "Cannot migrate between different schema types"
+                "Cannot migrate between different schema types",
             ));
         }
 
@@ -398,19 +423,25 @@ impl SchemaMigrationExecutor {
         to_schema: &EvolutionAwareSchema,
     ) -> Result<()> {
         match step {
-            MigrationStep::AssignDefaultValue { field_name, default_value: _ } => {
+            MigrationStep::AssignDefaultValue {
+                field_name,
+                default_value: _,
+            } => {
                 if !to_schema.fields.contains_key(field_name) {
                     return Err(RenoirError::invalid_parameter(
                         "field_name",
-                        &format!("Field '{}' not found in target schema", field_name)
+                        &format!("Field '{}' not found in target schema", field_name),
                     ));
                 }
             }
-            MigrationStep::CustomTransform { function_name, parameters: _ } => {
+            MigrationStep::CustomTransform {
+                function_name,
+                parameters: _,
+            } => {
                 if !self.migration_functions.contains_key(function_name) {
                     return Err(RenoirError::invalid_parameter(
                         "function_name",
-                        &format!("Migration function '{}' not registered", function_name)
+                        &format!("Migration function '{}' not registered", function_name),
                     ));
                 }
             }
@@ -445,15 +476,17 @@ impl SchemaMigrationExecutor {
 
     fn update_statistics(&mut self, success: bool, data_size: usize, duration_ms: f64) {
         self.statistics.total_migrations += 1;
-        
+
         if success {
             self.statistics.successful_migrations += 1;
             self.statistics.total_data_migrated_bytes += data_size as u64;
-            
+
             // Update average migration time
             let total_successful = self.statistics.successful_migrations as f64;
-            self.statistics.average_migration_time_ms = 
-                (self.statistics.average_migration_time_ms * (total_successful - 1.0) + duration_ms) / total_successful;
+            self.statistics.average_migration_time_ms = (self.statistics.average_migration_time_ms
+                * (total_successful - 1.0)
+                + duration_ms)
+                / total_successful;
         } else {
             self.statistics.failed_migrations += 1;
         }
@@ -510,9 +543,10 @@ impl MigrationPlanner {
     ) -> Result<Vec<MigrationStep>> {
         // Check if migration is needed
         let compatibility = {
-            let manager = self.evolution_manager.lock().map_err(|_| {
-                RenoirError::platform("Failed to acquire evolution manager lock")
-            })?;
+            let manager = self
+                .evolution_manager
+                .lock()
+                .map_err(|_| RenoirError::platform("Failed to acquire evolution manager lock"))?;
             manager.check_compatibility(from_schema, to_schema)?
         };
 
@@ -521,8 +555,8 @@ impl MigrationPlanner {
                 // No migration needed
                 Ok(vec![])
             }
-            super::schema_evolution::CompatibilityLevel::BackwardCompatible | 
-            super::schema_evolution::CompatibilityLevel::ForwardCompatible => {
+            super::schema_evolution::CompatibilityLevel::BackwardCompatible
+            | super::schema_evolution::CompatibilityLevel::ForwardCompatible => {
                 // Minor migration may be needed
                 self.generate_compatible_migration_plan(from_schema, to_schema)
             }
@@ -558,14 +592,21 @@ struct DefaultValueAssigner;
 
 impl MigrationFunction for DefaultValueAssigner {
     fn migrate(&self, data: &[u8], context: &MigrationContext) -> Result<Vec<u8>> {
-        if let MigrationStep::AssignDefaultValue { field_name, default_value } = &context.migration_step {
+        if let MigrationStep::AssignDefaultValue {
+            field_name,
+            default_value,
+        } = &context.migration_step
+        {
             // Simplified implementation - would integrate with format-specific libraries
             let mut result = data.to_vec();
             let assignment = format!("{}={};", field_name, default_value);
             result.extend(assignment.as_bytes());
             Ok(result)
         } else {
-            Err(RenoirError::invalid_parameter("step", "Expected AssignDefaultValue step"))
+            Err(RenoirError::invalid_parameter(
+                "step",
+                "Expected AssignDefaultValue step",
+            ))
         }
     }
 
@@ -633,7 +674,8 @@ impl MigrationFunction for FieldReorderer {
 
 impl fmt::Display for MigrationStatistics {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, 
+        write!(
+            f,
             "Migration Statistics:\n\
              Total: {}\n\
              Successful: {} ({:.1}%)\n\
@@ -642,13 +684,17 @@ impl fmt::Display for MigrationStatistics {
              Avg Time: {:.2}ms",
             self.total_migrations,
             self.successful_migrations,
-            if self.total_migrations > 0 { 
-                (self.successful_migrations as f64 / self.total_migrations as f64) * 100.0 
-            } else { 0.0 },
+            if self.total_migrations > 0 {
+                (self.successful_migrations as f64 / self.total_migrations as f64) * 100.0
+            } else {
+                0.0
+            },
             self.failed_migrations,
-            if self.total_migrations > 0 { 
-                (self.failed_migrations as f64 / self.total_migrations as f64) * 100.0 
-            } else { 0.0 },
+            if self.total_migrations > 0 {
+                (self.failed_migrations as f64 / self.total_migrations as f64) * 100.0
+            } else {
+                0.0
+            },
             self.total_data_migrated_bytes,
             self.average_migration_time_ms
         )
@@ -683,7 +729,9 @@ mod tests {
     #[test]
     fn test_migration_executor_creation() {
         let executor = SchemaMigrationExecutor::new();
-        assert!(executor.migration_functions.contains_key("default_value_assigner"));
+        assert!(executor
+            .migration_functions
+            .contains_key("default_value_assigner"));
         assert!(executor.migration_functions.contains_key("type_converter"));
         assert!(executor.migration_functions.contains_key("field_reorderer"));
     }
@@ -702,21 +750,14 @@ mod tests {
             .version(2, 0, 0)
             .build(&mut manager)?;
 
-        let plan = vec![
-            MigrationStep::VersionBump { 
-                from_version: 1, 
-                to_version: 2, 
-                is_major: true 
-            }
-        ];
+        let plan = vec![MigrationStep::VersionBump {
+            from_version: 1,
+            to_version: 2,
+            is_major: true,
+        }];
 
         let test_data = b"test data";
-        let result = executor.execute_migration_plan(
-            test_data, 
-            plan, 
-            &from_schema, 
-            &to_schema
-        )?;
+        let result = executor.execute_migration_plan(test_data, plan, &from_schema, &to_schema)?;
 
         assert!(!result.migrated_data.is_empty());
         assert_eq!(result.executed_steps.len(), 1);

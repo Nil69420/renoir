@@ -1,17 +1,17 @@
 //! Multi Producer Multi Consumer ring buffer for topic messaging
 
 use std::{
+    os::fd::RawFd,
+    ptr::NonNull,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    ptr::NonNull,
-    os::fd::RawFd,
 };
 
 use crate::{
     error::{RenoirError, Result},
-    topic::{Message, MessageHeader, TopicStats, MessageDescriptor},
+    topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
 };
 
 /// Multi-Producer Multi-Consumer ring buffer for topics with multiple writers/readers
@@ -23,7 +23,7 @@ pub struct MPMCTopicRing {
     capacity: usize,
     /// Write position (atomic for multiple producers)
     write_pos: AtomicUsize,
-    /// Read position (atomic for multiple consumers) 
+    /// Read position (atomic for multiple consumers)
     read_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
@@ -38,7 +38,7 @@ impl MPMCTopicRing {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -67,7 +67,7 @@ impl MPMCTopicRing {
     #[cfg(target_os = "linux")]
     fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
         use nix::sys::eventfd::{eventfd, EfdFlags};
-        
+
         let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
             .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
         Ok(Some(fd))
@@ -81,18 +81,18 @@ impl MPMCTopicRing {
     /// Try to publish a message (thread-safe for multiple producers)
     pub fn try_publish(&self, message: &Message) -> Result<()> {
         let message_size = message.total_size();
-        
+
         // Atomic allocation of write space
         let write_start = loop {
             let current_write = self.write_pos.load(Ordering::Relaxed);
             let current_read = self.read_pos.load(Ordering::Acquire);
-            
+
             // Check if we have enough space
             if current_write.wrapping_sub(current_read) + message_size > self.capacity {
                 self.stats.record_dropped();
                 return Err(RenoirError::buffer_full("MPMC ring is full"));
             }
-            
+
             // Try to atomically reserve space
             match self.write_pos.compare_exchange_weak(
                 current_write,
@@ -126,7 +126,7 @@ impl MPMCTopicRing {
         loop {
             let current_read = self.read_pos.load(Ordering::Relaxed);
             let current_write = self.write_pos.load(Ordering::Acquire);
-            
+
             if current_read == current_write {
                 return Ok(None); // No data available
             }
@@ -142,7 +142,7 @@ impl MPMCTopicRing {
             };
 
             let message_size = MessageHeader::SIZE + header.payload_length as usize;
-            
+
             // Try to atomically reserve the message
             match self.read_pos.compare_exchange_weak(
                 current_read,
@@ -156,7 +156,7 @@ impl MPMCTopicRing {
                         let read_ptr = self.buffer.as_ptr().add(buffer_pos);
                         self.deserialize_message(&header, read_ptr)?
                     };
-                    
+
                     self.stats.record_consumed();
                     return Ok(Some(message));
                 }
@@ -178,7 +178,12 @@ impl MPMCTopicRing {
         Ok(())
     }
 
-    unsafe fn serialize_message(&self, message: &Message, ptr: *mut u8, _size: usize) -> Result<()> {
+    unsafe fn serialize_message(
+        &self,
+        message: &Message,
+        ptr: *mut u8,
+        _size: usize,
+    ) -> Result<()> {
         // Write header
         std::ptr::copy_nonoverlapping(
             &message.header as *const MessageHeader as *const u8,
@@ -190,11 +195,7 @@ impl MPMCTopicRing {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
         match &message.payload {
             crate::topic::MessagePayload::Inline(data) => {
-                std::ptr::copy_nonoverlapping(
-                    data.as_ptr(),
-                    payload_ptr,
-                    data.len(),
-                );
+                std::ptr::copy_nonoverlapping(data.as_ptr(), payload_ptr, data.len());
             }
             crate::topic::MessagePayload::Descriptor(desc) => {
                 std::ptr::copy_nonoverlapping(
@@ -214,11 +215,16 @@ impl MPMCTopicRing {
         Ok(header)
     }
 
-    unsafe fn deserialize_message(&self, header: &MessageHeader, ptr: *const u8) -> Result<Message> {
+    unsafe fn deserialize_message(
+        &self,
+        header: &MessageHeader,
+        ptr: *const u8,
+    ) -> Result<Message> {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
-        
+
         let payload = if header.payload_length <= std::mem::size_of::<MessageDescriptor>() as u32 {
-            let desc: MessageDescriptor = std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
+            let desc: MessageDescriptor =
+                std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
             crate::topic::MessagePayload::Descriptor(desc)
         } else {
             let mut data = vec![0u8; header.payload_length as usize];

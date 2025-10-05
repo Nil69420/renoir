@@ -1,9 +1,9 @@
 //! Multi-producer multi-consumer ring buffer with sequence numbers
 
 use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    ptr::NonNull,
     marker::PhantomData,
+    ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::error::{RenoirError, Result};
@@ -33,13 +33,13 @@ impl<T> SequencedRingBuffer<T> {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
         let buffer_layout = std::alloc::Layout::array::<T>(capacity)
             .map_err(|_| RenoirError::memory("Failed to create layout for buffer"))?;
-        
+
         let seq_layout = std::alloc::Layout::array::<AtomicUsize>(capacity)
             .map_err(|_| RenoirError::memory("Failed to create layout for sequences"))?;
 
@@ -78,11 +78,11 @@ impl<T> SequencedRingBuffer<T> {
     pub fn try_claim(&self) -> Result<ClaimGuard<'_, T>> {
         let seq = self.producer_seq.fetch_add(1, Ordering::Relaxed);
         let index = seq & self.mask;
-        
+
         // Wait for the slot to be available
         let expected_seq = seq.wrapping_sub(self.capacity);
         let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
-        
+
         // Spin until slot is available
         while slot_seq.load(Ordering::Acquire) != expected_seq {
             if slot_seq.load(Ordering::Acquire) == expected_seq {
@@ -104,21 +104,21 @@ impl<T> SequencedRingBuffer<T> {
     pub fn try_read(&self) -> Result<T> {
         let seq = self.consumer_seq.load(Ordering::Relaxed);
         let index = seq & self.mask;
-        
+
         let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
         let expected_seq = seq + 1;
-        
+
         // Check if data is available
         if slot_seq.load(Ordering::Acquire) != expected_seq {
             return Err(RenoirError::buffer_empty("SequencedRingBuffer"));
         }
 
         let item = unsafe { std::ptr::read(self.buffer.as_ptr().add(index)) };
-        
+
         // Mark slot as consumed
         slot_seq.store(seq.wrapping_add(self.capacity), Ordering::Release);
         self.consumer_seq.store(seq + 1, Ordering::Release);
-        
+
         Ok(item)
     }
 
@@ -133,7 +133,7 @@ impl<T> Drop for SequencedRingBuffer<T> {
         // Deallocate buffers
         let buffer_layout = std::alloc::Layout::array::<T>(self.capacity).unwrap();
         let seq_layout = std::alloc::Layout::array::<AtomicUsize>(self.capacity).unwrap();
-        
+
         unsafe {
             std::alloc::dealloc(self.buffer.as_ptr() as *mut u8, buffer_layout);
             std::alloc::dealloc(self.sequences.as_ptr() as *mut u8, seq_layout);

@@ -1,7 +1,7 @@
 //! Zero-Copy Message Schema Strategy
-//! 
+//!
 //! Provides a unified interface for zero-copy message serialization:
-//! 
+//!
 //! **Zero-copy Schema (High Performance)**: For FlatBuffers/Cap'n Proto
 //! - Direct field access without deserialization
 //! - Schema-aware with compile-time validation  
@@ -14,22 +14,30 @@
 use crate::error::Result;
 
 // Re-export format modules
-pub mod zero_copy;
-pub mod registry;
-pub mod traits;
-pub mod official_flatbuffers;
-pub mod schema_evolution;
 pub mod compatibility;
 pub mod migration;
+pub mod official_flatbuffers;
+pub mod registry;
+pub mod schema_evolution;
+pub mod traits;
+pub mod zero_copy;
 
-// Export key traits and types for external use  
-pub use traits::{ZeroCopyFormat, ZeroCopyAccessor as ZeroCopyAccess, SchemaValidator, ZeroCopyBuilder as BufferBuilder, SchemaCompatibility, FieldType};
-pub use zero_copy::*;
-pub use registry::{ZeroCopyFormatRegistry, UseCase, SchemaInfo as RegistrySchemaInfo};
-pub use official_flatbuffers::OfficialFlatBufferFormat;
-pub use schema_evolution::{SchemaEvolutionManager, EvolutionAwareSchema, CompatibilityLevel, SemanticVersion, SchemaBuilder, FieldChange};
+// Export key traits and types for external use
 pub use compatibility::{SchemaCompatibilityValidator, ValidationResult};
-pub use migration::{SchemaMigrationExecutor, MigrationPlanner, MigrationFunction, MigrationContext, MigrationResult};
+pub use migration::{
+    MigrationContext, MigrationFunction, MigrationPlanner, MigrationResult, SchemaMigrationExecutor,
+};
+pub use official_flatbuffers::OfficialFlatBufferFormat;
+pub use registry::{SchemaInfo as RegistrySchemaInfo, UseCase, ZeroCopyFormatRegistry};
+pub use schema_evolution::{
+    CompatibilityLevel, EvolutionAwareSchema, FieldChange, SchemaBuilder, SchemaEvolutionManager,
+    SemanticVersion,
+};
+pub use traits::{
+    FieldType, SchemaCompatibility, SchemaValidator, ZeroCopyAccessor as ZeroCopyAccess,
+    ZeroCopyBuilder as BufferBuilder, ZeroCopyFormat,
+};
+pub use zero_copy::*;
 
 /// Schema format type identifier (zero-copy only)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,12 +56,12 @@ impl FormatType {
     pub fn is_zero_copy(self) -> bool {
         true
     }
-    
+
     /// Zero-copy formats never require deserialization
     pub fn requires_deserialization(self) -> bool {
         false
     }
-    
+
     /// Get format name for debugging/logging
     pub fn name(self) -> &'static str {
         match self {
@@ -77,12 +85,12 @@ impl FormattedMessage {
     pub fn new(schema: registry::SchemaInfo, buffer: Vec<u8>) -> Self {
         Self { schema, buffer }
     }
-    
+
     /// Get the underlying buffer for zero-copy access
     pub fn buffer(&self) -> &[u8] {
         &self.buffer
     }
-    
+
     /// Check if the message format matches expected schema
     pub fn validate_schema(&self, expected: &registry::SchemaInfo) -> Result<()> {
         if self.schema.is_compatible(expected) {
@@ -92,9 +100,11 @@ impl FormattedMessage {
                 "schema",
                 &format!(
                     "Schema mismatch: expected {} v{}, got {} v{}",
-                    expected.schema_name, expected.schema_version,
-                    self.schema.schema_name, self.schema.schema_version
-                )
+                    expected.schema_name,
+                    expected.schema_version,
+                    self.schema.schema_name,
+                    self.schema.schema_version
+                ),
             ))
         }
     }

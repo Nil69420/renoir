@@ -1,13 +1,13 @@
 //! ROS2-specific message types for variable-sized payloads
-//! 
+//!
 //! Specialized handling for common ROS2 message types that can have
 //! highly variable sizes: images, point clouds, laser scans, etc.
 
-use std::sync::Arc;
 use crate::error::{RenoirError, Result};
 use crate::shared_pools::{PoolId, SharedBufferPoolManager};
+use std::sync::Arc;
 
-use super::blob::{BlobHeader, BlobDescriptor, BlobManager, content_types};
+use super::blob::{content_types, BlobDescriptor, BlobHeader, BlobManager};
 use super::chunking::{ChunkManager, ChunkingStrategy};
 
 /// Common ROS2 message type identifier
@@ -39,19 +39,19 @@ impl ROS2MessageType {
             Self::Custom(code) => *code,
         }
     }
-    
+
     /// Get typical size class for pool allocation
     pub fn typical_size_class(&self) -> usize {
         match self {
-            Self::Image => 1920 * 1080 * 3, // HD RGB image
-            Self::PointCloud2 => 100_000 * 16, // 100k points with XYZ + intensity
-            Self::LaserScan => 1440 * 4, // 1440 points (0.25° resolution)
+            Self::Image => 1920 * 1080 * 3,     // HD RGB image
+            Self::PointCloud2 => 100_000 * 16,  // 100k points with XYZ + intensity
+            Self::LaserScan => 1440 * 4,        // 1440 points (0.25° resolution)
             Self::OccupancyGrid => 1000 * 1000, // 1000x1000 grid
-            Self::Polygon => 1000 * 8, // 1000 points * (x,y)
-            Self::Custom(_) => 64 * 1024, // 64KB default
+            Self::Polygon => 1000 * 8,          // 1000 points * (x,y)
+            Self::Custom(_) => 64 * 1024,       // 64KB default
         }
     }
-    
+
     /// Check if this message type typically needs chunking
     pub fn needs_chunking_typically(&self, max_buffer_size: usize) -> bool {
         self.typical_size_class() > max_buffer_size
@@ -79,14 +79,14 @@ pub struct ImageHeader {
 impl ImageHeader {
     /// Size of image header in bytes
     pub const SIZE: usize = std::mem::size_of::<ImageHeader>();
-    
+
     /// Create new image header
     pub fn new(width: u32, height: u32, encoding: &str, step: u32) -> Self {
         let mut encoding_bytes = [0u8; 16];
         let encoding_str = encoding.as_bytes();
         let copy_len = std::cmp::min(encoding_str.len(), 15); // Leave space for null terminator
         encoding_bytes[..copy_len].copy_from_slice(&encoding_str[..copy_len]);
-        
+
         Self {
             width,
             height,
@@ -96,14 +96,14 @@ impl ImageHeader {
             reserved: [0; 3],
         }
     }
-    
+
     /// Get encoding as string
     pub fn encoding_str(&self) -> &str {
         // Find null terminator
         let len = self.encoding.iter().position(|&b| b == 0).unwrap_or(16);
         std::str::from_utf8(&self.encoding[..len]).unwrap_or("unknown")
     }
-    
+
     /// Calculate expected data size
     pub fn data_size(&self) -> usize {
         (self.height * self.step) as usize
@@ -133,7 +133,7 @@ pub struct PointCloudHeader {
 impl PointCloudHeader {
     /// Size of point cloud header in bytes
     pub const SIZE: usize = std::mem::size_of::<PointCloudHeader>();
-    
+
     /// Create new point cloud header
     pub fn new(point_count: u32, point_step: u32, width: u32, height: u32, is_dense: bool) -> Self {
         Self {
@@ -146,12 +146,12 @@ impl PointCloudHeader {
             reserved: [0; 7],
         }
     }
-    
+
     /// Calculate expected data size
     pub fn data_size(&self) -> usize {
         self.row_step as usize
     }
-    
+
     /// Check if cloud is organized
     pub fn is_organized(&self) -> bool {
         self.width > 1 && self.height > 1
@@ -183,7 +183,7 @@ pub struct LaserScanHeader {
 impl LaserScanHeader {
     /// Size of laser scan header in bytes
     pub const SIZE: usize = std::mem::size_of::<LaserScanHeader>();
-    
+
     /// Create new laser scan header
     pub fn new(
         angle_min: f32,
@@ -205,7 +205,7 @@ impl LaserScanHeader {
             reserved: [0; 8],
         }
     }
-    
+
     /// Calculate expected data size
     pub fn data_size(&self) -> usize {
         (self.range_count * 4) as usize + // ranges as f32
@@ -258,14 +258,14 @@ impl ROS2MessageManager {
         chunking_strategy: ChunkingStrategy,
     ) -> Self {
         let chunk_manager = ChunkManager::new(pool_manager.clone(), chunking_strategy);
-        
+
         Self {
             pool_manager,
             blob_manager: BlobManager::new(),
             chunk_manager,
         }
     }
-    
+
     /// Create an image message
     pub fn create_image_message(
         &self,
@@ -282,21 +282,26 @@ impl ROS2MessageManager {
             "rgba8" | "bgra8" => 4,
             "mono16" => 2,
             "rgb16" | "bgr16" => 6,
-            _ => return Err(RenoirError::invalid_parameter("encoding", "Unsupported image encoding")),
+            _ => {
+                return Err(RenoirError::invalid_parameter(
+                    "encoding",
+                    "Unsupported image encoding",
+                ))
+            }
         };
         let step = width * channels;
-        
+
         let header = ImageHeader::new(width, height, encoding, step);
-        
+
         // Validate data size
         let expected_size = header.data_size();
         if image_data.len() != expected_size {
             return Err(RenoirError::invalid_parameter(
-                "image_data", 
-                "Image data size doesn't match header dimensions"
+                "image_data",
+                "Image data size doesn't match header dimensions",
             ));
         }
-        
+
         // Create combined payload (header + data)
         let mut combined_payload = Vec::with_capacity(ImageHeader::SIZE + image_data.len());
         combined_payload.extend_from_slice(unsafe {
@@ -306,17 +311,16 @@ impl ROS2MessageManager {
             )
         });
         combined_payload.extend_from_slice(image_data);
-        
+
         // Create blob
-        let blob_header = self.blob_manager.create_header(
-            ROS2MessageType::Image.content_type(),
-            &combined_payload,
-        );
+        let blob_header = self
+            .blob_manager
+            .create_header(ROS2MessageType::Image.content_type(), &combined_payload);
         let blob = self.store_blob(blob_header, &combined_payload, pool_id)?;
-        
+
         Ok(ImageMessage { header, blob })
     }
-    
+
     /// Create a point cloud message
     pub fn create_point_cloud_message(
         &self,
@@ -329,16 +333,16 @@ impl ROS2MessageManager {
         pool_id: PoolId,
     ) -> Result<PointCloudMessage> {
         let header = PointCloudHeader::new(point_count, point_step, width, height, is_dense);
-        
+
         // Validate data size
         let expected_size = header.data_size();
         if point_data.len() != expected_size {
             return Err(RenoirError::invalid_parameter(
                 "point_data",
-                "Point cloud data size doesn't match header"
+                "Point cloud data size doesn't match header",
             ));
         }
-        
+
         // Create combined payload
         let mut combined_payload = Vec::with_capacity(PointCloudHeader::SIZE + point_data.len());
         combined_payload.extend_from_slice(unsafe {
@@ -348,16 +352,16 @@ impl ROS2MessageManager {
             )
         });
         combined_payload.extend_from_slice(point_data);
-        
+
         let blob_header = self.blob_manager.create_header(
             ROS2MessageType::PointCloud2.content_type(),
             &combined_payload,
         );
         let blob = self.store_blob(blob_header, &combined_payload, pool_id)?;
-        
+
         Ok(PointCloudMessage { header, blob })
     }
-    
+
     /// Create a laser scan message
     pub fn create_laser_scan_message(
         &self,
@@ -372,27 +376,27 @@ impl ROS2MessageManager {
     ) -> Result<LaserScanMessage> {
         let header = LaserScanHeader::new(
             angle_min,
-            angle_max, 
+            angle_max,
             angle_increment,
             range_min,
             range_max,
             ranges.len() as u32,
             intensities.len() as u32,
         );
-        
+
         // Create combined data payload
         let mut data_payload = Vec::with_capacity(header.data_size());
-        
+
         // Add ranges as bytes
         for &range in ranges {
             data_payload.extend_from_slice(&range.to_le_bytes());
         }
-        
-        // Add intensities as bytes  
+
+        // Add intensities as bytes
         for &intensity in intensities {
             data_payload.extend_from_slice(&intensity.to_le_bytes());
         }
-        
+
         // Create combined payload (header + data)
         let mut combined_payload = Vec::with_capacity(LaserScanHeader::SIZE + data_payload.len());
         combined_payload.extend_from_slice(unsafe {
@@ -402,16 +406,15 @@ impl ROS2MessageManager {
             )
         });
         combined_payload.extend_from_slice(&data_payload);
-        
-        let blob_header = self.blob_manager.create_header(
-            ROS2MessageType::LaserScan.content_type(),
-            &combined_payload,
-        );
+
+        let blob_header = self
+            .blob_manager
+            .create_header(ROS2MessageType::LaserScan.content_type(), &combined_payload);
         let blob = self.store_blob(blob_header, &combined_payload, pool_id)?;
-        
+
         Ok(LaserScanMessage { header, blob })
     }
-    
+
     /// Store blob in buffer pool (with potential chunking)
     fn store_blob(
         &self,
@@ -423,10 +426,10 @@ impl ROS2MessageManager {
         let test_buffer = self.pool_manager.get_buffer(pool_id)?;
         let buffer_data = self.pool_manager.get_buffer_data(&test_buffer)?;
         let max_buffer_size = buffer_data.as_slice().len() - BlobHeader::SIZE;
-        
+
         // Return test buffer
         self.pool_manager.return_buffer(&test_buffer)?;
-        
+
         if payload.len() <= max_buffer_size {
             // Fits in single buffer
             self.store_single_blob(blob_header, payload, pool_id)
@@ -435,7 +438,7 @@ impl ROS2MessageManager {
             self.store_chunked_blob(blob_header, payload, pool_id)
         }
     }
-    
+
     /// Store single blob in buffer
     fn store_single_blob(
         &self,
@@ -445,18 +448,18 @@ impl ROS2MessageManager {
     ) -> Result<BlobDescriptor> {
         let buffer_desc = self.pool_manager.get_buffer(pool_id)?;
         let buffer_data = self.pool_manager.get_buffer_data(&buffer_desc)?;
-        
+
         // Write blob header + payload to buffer
         unsafe {
             let buffer_ptr = buffer_data.as_ptr() as *mut u8;
-            
+
             // Write header
             std::ptr::copy_nonoverlapping(
                 &blob_header as *const BlobHeader as *const u8,
                 buffer_ptr,
                 BlobHeader::SIZE,
             );
-            
+
             // Write payload
             std::ptr::copy_nonoverlapping(
                 payload.as_ptr(),
@@ -464,10 +467,14 @@ impl ROS2MessageManager {
                 payload.len(),
             );
         }
-        
-        Ok(BlobDescriptor::new(pool_id, buffer_desc.buffer_handle, blob_header))
+
+        Ok(BlobDescriptor::new(
+            pool_id,
+            buffer_desc.buffer_handle,
+            blob_header,
+        ))
     }
-    
+
     /// Store chunked blob across multiple buffers
     fn store_chunked_blob(
         &self,
@@ -478,13 +485,14 @@ impl ROS2MessageManager {
         // Update blob header for chunking
         let sequence_id = self.blob_manager.next_sequence_id();
         blob_header.sequence_id = sequence_id;
-        
+
         // Create chunks
-        let _chunk_descriptors = self.chunk_manager.chunk_payload(payload, &blob_header, pool_id)?;
-        
+        let _chunk_descriptors =
+            self.chunk_manager
+                .chunk_payload(payload, &blob_header, pool_id)?;
+
         // For chunked messages, we store the blob header separately
         // and use the sequence_id to reassemble
         self.store_single_blob(blob_header, &[], pool_id)
     }
 }
-

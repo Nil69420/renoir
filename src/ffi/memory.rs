@@ -7,38 +7,42 @@ use std::{
 };
 
 use crate::{
-    memory::{SharedMemoryManager, RegionConfig, BackingType},
     error::RenoirError,
+    memory::{BackingType, RegionConfig, SharedMemoryManager},
 };
 
 use super::{
-    types::{RenoirErrorCode, RenoirManagerHandle, RenoirRegionHandle, RenoirRegionConfig},
-    utils::{HANDLE_REGISTRY, c_str_to_string, string_to_c_str},
+    types::{RenoirErrorCode, RenoirManagerHandle, RenoirRegionConfig, RenoirRegionHandle},
+    utils::{c_str_to_string, string_to_c_str, HANDLE_REGISTRY},
 };
 
 /// Convert C region config to Rust config
 fn convert_region_config(config: &RenoirRegionConfig) -> Result<RegionConfig, RenoirError> {
-    let name = c_str_to_string(config.name)
-        .map_err(|_| RenoirError::InvalidParameter {
-            parameter: "name".to_string(),
-            message: "Invalid string".to_string(),
-        })?;
+    let name = c_str_to_string(config.name).map_err(|_| RenoirError::InvalidParameter {
+        parameter: "name".to_string(),
+        message: "Invalid string".to_string(),
+    })?;
 
     let backing_type = match config.backing_type {
         0 => BackingType::FileBacked,
         1 => BackingType::MemFd,
-        _ => return Err(RenoirError::InvalidParameter {
-            parameter: "backing_type".to_string(),
-            message: "Must be 0 (FileBacked) or 1 (MemFd)".to_string(),
-        }),
+        _ => {
+            return Err(RenoirError::InvalidParameter {
+                parameter: "backing_type".to_string(),
+                message: "Must be 0 (FileBacked) or 1 (MemFd)".to_string(),
+            })
+        }
     };
 
     let file_path = if !config.file_path.is_null() {
-        Some(c_str_to_string(config.file_path)
-            .map_err(|_| RenoirError::InvalidParameter {
-                parameter: "file_path".to_string(),
-                message: "Invalid string".to_string(),
-            })?.into())
+        Some(
+            c_str_to_string(config.file_path)
+                .map_err(|_| RenoirError::InvalidParameter {
+                    parameter: "file_path".to_string(),
+                    message: "Invalid string".to_string(),
+                })?
+                .into(),
+        )
     } else {
         None
     };
@@ -63,7 +67,7 @@ pub extern "C" fn renoir_manager_create_with_control(
     }
 
     let config = unsafe { &*config };
-    
+
     let rust_config = match convert_region_config(config) {
         Ok(cfg) => cfg,
         Err(_) => return null_mut(),
@@ -97,7 +101,7 @@ pub extern "C" fn renoir_manager_destroy(handle: RenoirManagerHandle) -> RenoirE
 
     let id = handle as usize;
     let mut registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     if registry.remove_manager(id).is_some() {
         RenoirErrorCode::Success
     } else {
@@ -118,7 +122,7 @@ pub extern "C" fn renoir_region_create(
 
     let manager_id = manager as usize;
     let config = unsafe { &*config };
-    
+
     let registry = HANDLE_REGISTRY.lock().unwrap();
     let manager = match registry.get_manager(manager_id) {
         Some(mgr) => mgr,
@@ -190,8 +194,9 @@ pub extern "C" fn renoir_region_size(handle: RenoirRegionHandle) -> usize {
 
     let id = handle as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
-    registry.get_region(id)
+
+    registry
+        .get_region(id)
         .map(|region| region.size())
         .unwrap_or(0)
 }
@@ -205,8 +210,9 @@ pub extern "C" fn renoir_region_name(handle: RenoirRegionHandle) -> *mut c_char 
 
     let id = handle as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
-    registry.get_region(id)
+
+    registry
+        .get_region(id)
         .map(|region| string_to_c_str(region.name().to_string()))
         .unwrap_or(null_mut())
 }
@@ -229,7 +235,7 @@ pub extern "C" fn renoir_region_open(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -258,7 +264,7 @@ pub extern "C" fn renoir_region_close(handle: RenoirRegionHandle) -> RenoirError
 
     let id = handle as usize;
     let mut registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     if registry.regions.remove(&id).is_some() {
         RenoirErrorCode::Success
     } else {
@@ -283,7 +289,7 @@ pub extern "C" fn renoir_region_destroy(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -307,14 +313,14 @@ pub extern "C" fn renoir_region_stats(
 
     let id = handle as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let region = match registry.get_region(id) {
         Some(r) => r,
         None => return RenoirErrorCode::InvalidParameter,
     };
 
     let _region_stats = region.memory_stats();
-    
+
     unsafe {
         (*stats).total_size = region.size();
         (*stats).used_size = 0; // TODO: Track actual usage through allocator
@@ -340,7 +346,7 @@ pub extern "C" fn renoir_manager_list_regions(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -348,7 +354,7 @@ pub extern "C" fn renoir_manager_list_regions(
 
     let regions = mgr.list_regions();
     let region_count = regions.len();
-    
+
     if region_count == 0 {
         unsafe {
             *region_names = std::ptr::null_mut();
@@ -361,7 +367,7 @@ pub extern "C" fn renoir_manager_list_regions(
     let names_array = unsafe {
         libc::malloc(region_count * std::mem::size_of::<*mut c_char>()) as *mut *mut c_char
     };
-    
+
     if names_array.is_null() {
         return RenoirErrorCode::OutOfMemory;
     }
@@ -384,10 +390,7 @@ pub extern "C" fn renoir_manager_list_regions(
 
 /// Free region names list allocated by renoir_manager_list_regions
 #[no_mangle]
-pub extern "C" fn renoir_free_region_names(
-    region_names: *mut *mut c_char,
-    count: usize,
-) {
+pub extern "C" fn renoir_free_region_names(region_names: *mut *mut c_char, count: usize) {
     if region_names.is_null() {
         return;
     }
@@ -425,7 +428,7 @@ pub extern "C" fn renoir_manager_has_region(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return false,
@@ -446,7 +449,7 @@ pub extern "C" fn renoir_manager_total_memory_usage(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -471,7 +474,7 @@ pub extern "C" fn renoir_manager_region_count(
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -486,16 +489,14 @@ pub extern "C" fn renoir_manager_region_count(
 
 /// Flush all regions to persistent storage
 #[no_mangle]
-pub extern "C" fn renoir_manager_flush_all(
-    manager: RenoirManagerHandle,
-) -> RenoirErrorCode {
+pub extern "C" fn renoir_manager_flush_all(manager: RenoirManagerHandle) -> RenoirErrorCode {
     if manager.is_null() {
         return RenoirErrorCode::InvalidParameter;
     }
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -509,16 +510,14 @@ pub extern "C" fn renoir_manager_flush_all(
 
 /// Clear all regions from manager
 #[no_mangle]
-pub extern "C" fn renoir_manager_clear_all(
-    manager: RenoirManagerHandle,
-) -> RenoirErrorCode {
+pub extern "C" fn renoir_manager_clear_all(manager: RenoirManagerHandle) -> RenoirErrorCode {
     if manager.is_null() {
         return RenoirErrorCode::InvalidParameter;
     }
 
     let manager_id = manager as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
         None => return RenoirErrorCode::InvalidParameter,
@@ -544,14 +543,14 @@ pub extern "C" fn renoir_region_metadata(
 
     let id = handle as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let region = match registry.get_region(id) {
         Some(r) => r,
         None => return RenoirErrorCode::InvalidParameter,
     };
 
     let metadata = region.metadata();
-    
+
     if !name.is_null() {
         unsafe {
             *name = string_to_c_str(metadata.name.clone());
@@ -589,7 +588,7 @@ pub extern "C" fn renoir_region_create_bump_allocator(
 
     let id = handle as usize;
     let registry = HANDLE_REGISTRY.lock().unwrap();
-    
+
     let region = match registry.get_region(id) {
         Some(r) => r,
         None => return RenoirErrorCode::InvalidParameter,
@@ -597,21 +596,19 @@ pub extern "C" fn renoir_region_create_bump_allocator(
 
     // Get region memory as slice for allocator
     // SAFETY: We're creating an allocator that will manage exclusive access
-    let memory_slice = unsafe { 
-        std::slice::from_raw_parts_mut(
-            region.as_mut_ptr_unsafe::<u8>(), 
-            region.size()
-        )
-    };
-    
+    let memory_slice =
+        unsafe { std::slice::from_raw_parts_mut(region.as_mut_ptr_unsafe::<u8>(), region.size()) };
+
     match crate::allocators::BumpAllocator::new(memory_slice) {
         Ok(allocator) => {
             drop(registry);
             let mut registry = HANDLE_REGISTRY.lock().unwrap();
             let alloc_id = registry.next_id;
             registry.next_id += 1;
-            registry.allocators.insert(alloc_id, std::sync::Arc::new(allocator));
-            
+            registry
+                .allocators
+                .insert(alloc_id, std::sync::Arc::new(allocator));
+
             unsafe {
                 *allocator_handle = alloc_id as super::types::RenoirAllocatorHandle;
             }

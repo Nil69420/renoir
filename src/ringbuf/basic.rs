@@ -1,9 +1,9 @@
 //! Basic lock-free single-producer single-consumer ring buffer
 
 use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    ptr::NonNull,
     marker::PhantomData,
+    ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::error::{RenoirError, Result};
@@ -31,7 +31,7 @@ impl<T> RingBuffer<T> {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -40,7 +40,8 @@ impl<T> RingBuffer<T> {
 
         let buffer = unsafe {
             let ptr = std::alloc::alloc(layout) as *mut T;
-            NonNull::new(ptr).ok_or_else(|| RenoirError::memory("Failed to allocate ring buffer"))?
+            NonNull::new(ptr)
+                .ok_or_else(|| RenoirError::memory("Failed to allocate ring buffer"))?
         };
 
         Ok(Self {
@@ -58,7 +59,7 @@ impl<T> RingBuffer<T> {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -137,12 +138,13 @@ impl<T> Drop for RingBuffer<T> {
         while !self.is_empty() {
             let read_pos = self.read_pos.load(Ordering::Acquire);
             let index = read_pos & self.mask;
-            
+
             unsafe {
                 std::ptr::drop_in_place(self.buffer.as_ptr().add(index));
             }
-            
-            self.read_pos.store(read_pos.wrapping_add(1), Ordering::Release);
+
+            self.read_pos
+                .store(read_pos.wrapping_add(1), Ordering::Release);
         }
 
         // Deallocate buffer
@@ -172,22 +174,23 @@ impl<'a, T: Clone> Producer<'a, T> {
     pub fn try_push(&self, item: T) -> Result<()> {
         let write_pos = self.write_pos.load(Ordering::Relaxed);
         let read_pos = self.read_pos.load(Ordering::Acquire);
-        
+
         // Check if buffer is full
         if write_pos.wrapping_sub(read_pos) >= self.capacity {
             return Err(RenoirError::buffer_full("RingBuffer"));
         }
-        
+
         let index = write_pos & self.mask;
-        
+
         unsafe {
             // Write the item
             std::ptr::write(self.buffer.as_ptr().add(index), item);
         }
-        
+
         // Update write position
-        self.write_pos.store(write_pos.wrapping_add(1), Ordering::Release);
-        
+        self.write_pos
+            .store(write_pos.wrapping_add(1), Ordering::Release);
+
         Ok(())
     }
 
@@ -234,22 +237,23 @@ impl<'a, T> Consumer<'a, T> {
     pub fn try_pop(&self) -> Result<T> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let write_pos = self.write_pos.load(Ordering::Acquire);
-        
+
         // Check if buffer is empty
         if read_pos == write_pos {
             return Err(RenoirError::buffer_empty("RingBuffer"));
         }
-        
+
         let index = read_pos & self.mask;
-        
+
         let item = unsafe {
             // Read the item
             std::ptr::read(self.buffer.as_ptr().add(index))
         };
-        
+
         // Update read position
-        self.read_pos.store(read_pos.wrapping_add(1), Ordering::Release);
-        
+        self.read_pos
+            .store(read_pos.wrapping_add(1), Ordering::Release);
+
         Ok(item)
     }
 
@@ -272,14 +276,14 @@ impl<'a, T> Consumer<'a, T> {
     pub fn peek(&self) -> Result<&T> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let write_pos = self.write_pos.load(Ordering::Acquire);
-        
+
         // Check if buffer is empty
         if read_pos == write_pos {
             return Err(RenoirError::buffer_empty("RingBuffer"));
         }
-        
+
         let index = read_pos & self.mask;
-        
+
         Ok(unsafe { &*self.buffer.as_ptr().add(index) })
     }
 

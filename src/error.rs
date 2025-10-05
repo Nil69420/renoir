@@ -1,7 +1,5 @@
 //! Error types and handling for Renoir
 
-
-
 /// Result type alias for Renoir operations
 pub type Result<T> = std::result::Result<T, RenoirError>;
 
@@ -10,7 +8,7 @@ pub type Result<T> = std::result::Result<T, RenoirError>;
 pub enum RenoirError {
     /// I/O related errors (file operations, mmap, etc.)
     #[error("I/O error: {message}")]
-    Io { 
+    Io {
         message: String,
         #[source]
         source: Option<std::io::Error>,
@@ -91,16 +89,12 @@ impl RenoirError {
 
     /// Create a region not found error
     pub fn region_not_found(name: impl Into<String>) -> Self {
-        Self::RegionNotFound {
-            name: name.into(),
-        }
+        Self::RegionNotFound { name: name.into() }
     }
 
     /// Create a region exists error
     pub fn region_exists(name: impl Into<String>) -> Self {
-        Self::RegionExists {
-            name: name.into(),
-        }
+        Self::RegionExists { name: name.into() }
     }
 
     /// Create an insufficient space error

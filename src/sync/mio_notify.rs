@@ -4,19 +4,19 @@
 //! It replaces manual poll() calls with mio's efficient event polling system.
 
 use std::{
-    sync::{Arc, atomic::{AtomicBool, AtomicU64, Ordering}, Mutex},
     collections::HashMap,
+    os::fd::{AsRawFd, OwnedFd, RawFd},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
-    os::fd::{RawFd, AsRawFd, OwnedFd},
 };
 
-use mio::{
-    Events, Interest, Poll, Token,
-    unix::SourceFd,
-};
+use mio::{unix::SourceFd, Events, Interest, Poll, Token};
 
-use crate::sync::{SyncResult, SyncError};
 use super::NotifyCondition;
+use crate::sync::{SyncError, SyncResult};
 
 /// Token for eventfd events in mio
 const EVENTFD_TOKEN: Token = Token(0);
@@ -54,7 +54,7 @@ impl MioEventNotification {
     #[cfg(target_os = "linux")]
     fn create_eventfd() -> SyncResult<Option<std::os::fd::OwnedFd>> {
         use nix::sys::eventfd::{eventfd, EfdFlags};
-        
+
         let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
             .map_err(|_| SyncError::NotificationFailed)?;
         Ok(Some(fd))
@@ -68,7 +68,7 @@ impl MioEventNotification {
     /// Create mio Poll instance and register eventfd
     fn create_poll_instance(event_fd: &Option<OwnedFd>) -> SyncResult<Option<Mutex<Poll>>> {
         let poll = Poll::new().map_err(|_| SyncError::NotificationFailed)?;
-        
+
         if let Some(owned_fd) = event_fd {
             let fd = owned_fd.as_raw_fd();
             let mut source = SourceFd(&fd);
@@ -85,9 +85,9 @@ impl MioEventNotification {
         if !self.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
-        
+
         self.notify_count.fetch_add(1, Ordering::Relaxed);
-        
+
         #[cfg(target_os = "linux")]
         {
             if let Some(ref owned_fd) = self.event_fd {
@@ -96,13 +96,13 @@ impl MioEventNotification {
                 let value: u64 = 1;
                 let buf = value.to_ne_bytes();
                 match write(fd, &buf) {
-                    Ok(_) => {},
-                    Err(nix::errno::Errno::EAGAIN) => {}, // OK for non-blocking eventfd
+                    Ok(_) => {}
+                    Err(nix::errno::Errno::EAGAIN) => {} // OK for non-blocking eventfd
                     Err(_) => return Err(SyncError::NotificationFailed),
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -111,18 +111,20 @@ impl MioEventNotification {
         if !self.enabled.load(Ordering::Relaxed) {
             return Ok(());
         }
-        
+
         self.wait_count.fetch_add(1, Ordering::Relaxed);
-        
+
         #[cfg(target_os = "linux")]
         {
             if let (Some(poll_mutex), Some(ref owned_fd)) = (&self.poll, &self.event_fd) {
-                let mut poll = poll_mutex.lock().map_err(|_| SyncError::NotificationFailed)?;
+                let mut poll = poll_mutex
+                    .lock()
+                    .map_err(|_| SyncError::NotificationFailed)?;
                 let fd = owned_fd.as_raw_fd();
                 return self.wait_on_mio_poll(&mut *poll, fd, timeout_ms);
             }
         }
-        
+
         // Fallback for non-Linux or if mio setup failed
         std::thread::sleep(Duration::from_millis(1));
         Ok(())
@@ -130,10 +132,15 @@ impl MioEventNotification {
 
     /// Wait using mio's efficient event polling
     #[cfg(target_os = "linux")]
-    fn wait_on_mio_poll(&self, poll: &mut Poll, _fd: RawFd, timeout_ms: Option<u64>) -> SyncResult<()> {
+    fn wait_on_mio_poll(
+        &self,
+        poll: &mut Poll,
+        _fd: RawFd,
+        timeout_ms: Option<u64>,
+    ) -> SyncResult<()> {
         let mut events = Events::with_capacity(1);
         let timeout = timeout_ms.map(Duration::from_millis);
-        
+
         match poll.poll(&mut events, timeout) {
             Ok(()) => {
                 for event in events.iter() {
@@ -166,7 +173,7 @@ impl MioEventNotification {
     pub fn get_stats(&self) -> (u64, u64) {
         (
             self.notify_count.load(Ordering::Relaxed),
-            self.wait_count.load(Ordering::Relaxed)
+            self.wait_count.load(Ordering::Relaxed),
         )
     }
 
@@ -219,22 +226,23 @@ impl MioConditionNotifier {
     /// Wait for any condition with async polling
     pub fn wait_any_async(&self, timeout_ms: Option<u64>) -> SyncResult<Vec<String>> {
         let mut triggered = Vec::new();
-        
+
         // This is a simplified implementation - a full async version would use
         // a single mio Poll instance to wait for multiple eventfds
         for (name, notification) in &self.notifications {
-            match notification.wait_async(Some(1)) { // Very short timeout for each
+            match notification.wait_async(Some(1)) {
+                // Very short timeout for each
                 Ok(()) => {
                     triggered.push(name.clone());
                 }
                 Err(_) => continue,
             }
         }
-        
+
         if triggered.is_empty() && timeout_ms.is_some() {
             std::thread::sleep(Duration::from_millis(timeout_ms.unwrap_or(0).min(100)));
         }
-        
+
         Ok(triggered)
     }
 
@@ -261,7 +269,7 @@ mod tests {
     fn test_mio_notification_creation() {
         let notification = MioEventNotification::new();
         assert!(notification.is_ok());
-        
+
         if let Ok(notif) = notification {
             assert!(notif.is_enabled());
             let (notify_count, wait_count) = notif.get_stats();
@@ -273,13 +281,10 @@ mod tests {
     #[test]
     fn test_mio_condition_notifier() {
         let mut notifier = MioConditionNotifier::new();
-        
-        let result = notifier.add_condition(
-            "test_condition".to_string(), 
-            NotifyCondition::Always
-        );
+
+        let result = notifier.add_condition("test_condition".to_string(), NotifyCondition::Always);
         assert!(result.is_ok());
-        
+
         let notify_result = notifier.notify_condition("test_condition");
         assert!(notify_result.is_ok());
     }
@@ -287,12 +292,12 @@ mod tests {
     #[test]
     fn test_mio_notification_enable_disable() {
         let notification = MioEventNotification::new().unwrap();
-        
+
         assert!(notification.is_enabled());
-        
+
         notification.set_enabled(false);
         assert!(!notification.is_enabled());
-        
+
         notification.set_enabled(true);
         assert!(notification.is_enabled());
     }

@@ -3,7 +3,7 @@
 use std::{
     ffi::CString,
     fs::{File, OpenOptions},
-    os::fd::{AsRawFd, RawFd, OwnedFd},
+    os::fd::{AsRawFd, OwnedFd, RawFd},
     os::unix::fs::OpenOptionsExt,
 };
 
@@ -64,20 +64,18 @@ impl SharedMemoryRegion {
     /// Create the backing storage for the region
     fn create_backing(config: &RegionConfig) -> Result<(Option<File>, Option<OwnedFd>, RawFd)> {
         match config.backing_type {
-            BackingType::FileBacked => {
-                Self::create_file_backing(config)
-            }
+            BackingType::FileBacked => Self::create_file_backing(config),
             #[cfg(target_os = "linux")]
-            BackingType::MemFd => {
-                Self::create_memfd_backing(config)
-            }
+            BackingType::MemFd => Self::create_memfd_backing(config),
         }
     }
 
     /// Create file-backed storage
-    fn create_file_backing(config: &RegionConfig) -> Result<(Option<File>, Option<OwnedFd>, RawFd)> {
+    fn create_file_backing(
+        config: &RegionConfig,
+    ) -> Result<(Option<File>, Option<OwnedFd>, RawFd)> {
         let path = config.default_file_path();
-        
+
         let file = if config.create {
             OpenOptions::new()
                 .read(true)
@@ -104,10 +102,12 @@ impl SharedMemoryRegion {
 
     /// Create memfd-backed storage
     #[cfg(target_os = "linux")]
-    fn create_memfd_backing(config: &RegionConfig) -> Result<(Option<File>, Option<OwnedFd>, RawFd)> {
+    fn create_memfd_backing(
+        config: &RegionConfig,
+    ) -> Result<(Option<File>, Option<OwnedFd>, RawFd)> {
         let name_cstr = CString::new(config.name.clone())
             .map_err(|_| RenoirError::invalid_parameter("name", "Name contains null bytes"))?;
-        
+
         let owned_fd = memfd_create(&name_cstr, MemFdCreateFlag::MFD_CLOEXEC)
             .map_err(|e| RenoirError::platform(&format!("Failed to create memfd: {}", e)))?;
 
@@ -115,15 +115,18 @@ impl SharedMemoryRegion {
 
         // Set size using ftruncate
         ftruncate(&owned_fd, config.size as i64)
-            .map_err(|e| {
-                RenoirError::platform(&format!("Failed to set memfd size: {}", e))
-            })?;
+            .map_err(|e| RenoirError::platform(&format!("Failed to set memfd size: {}", e)))?;
 
         Ok((None, Some(owned_fd), raw_fd))
     }
 
     /// Create memory mapping for the backing storage
-    fn create_mapping(file: &Option<File>, owned_fd: &Option<OwnedFd>, _fd: RawFd, size: usize) -> Result<MmapMut> {
+    fn create_mapping(
+        file: &Option<File>,
+        owned_fd: &Option<OwnedFd>,
+        _fd: RawFd,
+        size: usize,
+    ) -> Result<MmapMut> {
         match file {
             Some(f) => {
                 // For file-backed regions, use the File reference
@@ -144,7 +147,9 @@ impl SharedMemoryRegion {
                             .map_err(|e| RenoirError::from_io(e, "Failed to create memory mapping"))
                     }
                 } else {
-                    return Err(RenoirError::platform("No file or owned fd available for mapping"));
+                    return Err(RenoirError::platform(
+                        "No file or owned fd available for mapping",
+                    ));
                 }
             }
         }
@@ -176,7 +181,7 @@ impl SharedMemoryRegion {
     }
 
     /// Get a mutable typed pointer safely (for use in Arc contexts)
-    /// 
+    ///
     /// # Safety
     /// Caller must ensure exclusive access to the memory region
     pub unsafe fn as_mut_ptr_unsafe<T>(&self) -> *mut T {
@@ -195,13 +200,15 @@ impl SharedMemoryRegion {
 
     /// Flush changes to persistent storage (for file-backed regions)
     pub fn flush(&self) -> Result<()> {
-        self.mmap.flush()
+        self.mmap
+            .flush()
             .map_err(|e| RenoirError::from_io(e, "Failed to flush memory mapping"))
     }
 
     /// Flush changes asynchronously
     pub fn flush_async(&self) -> Result<()> {
-        self.mmap.flush_async()
+        self.mmap
+            .flush_async()
             .map_err(|e| RenoirError::from_io(e, "Failed to flush memory mapping asynchronously"))
     }
 

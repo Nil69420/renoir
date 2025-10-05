@@ -46,7 +46,7 @@ impl TopicManagerStats {
         if published == 0 {
             return 1.0;
         }
-        
+
         let consumed = self.total_consumed();
         consumed as f64 / published as f64
     }
@@ -59,7 +59,7 @@ impl TopicManagerStats {
     /// Update peak message rate if necessary
     pub fn update_peak_rate(&self, current_rate: usize) {
         let mut peak = self.peak_message_rate.load(Ordering::Relaxed);
-        
+
         while current_rate > peak {
             match self.peak_message_rate.compare_exchange_weak(
                 peak,
@@ -75,7 +75,8 @@ impl TopicManagerStats {
 
     /// Record a message publication
     pub fn record_publish(&self) {
-        self.total_messages_published.fetch_add(1, Ordering::Relaxed);
+        self.total_messages_published
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a message consumption

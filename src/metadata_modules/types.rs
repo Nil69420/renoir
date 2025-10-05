@@ -1,7 +1,7 @@
 //! Metadata types and data structures
 
-use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 
 use crate::memory::BackingType;
 
@@ -22,11 +22,7 @@ pub struct RegionMetadata {
 
 impl RegionMetadata {
     /// Create new metadata
-    pub fn new(
-        name: String,
-        size: usize,
-        backing_type: BackingType,
-    ) -> Self {
+    pub fn new(name: String, size: usize, backing_type: BackingType) -> Self {
         Self {
             name,
             size,
@@ -56,19 +52,28 @@ impl RegionMetadata {
     /// Validate the metadata
     pub fn validate(&self) -> crate::Result<()> {
         use crate::error::RenoirError;
-        
+
         if self.name.is_empty() {
-            return Err(RenoirError::invalid_parameter("name", "Region name cannot be empty"));
+            return Err(RenoirError::invalid_parameter(
+                "name",
+                "Region name cannot be empty",
+            ));
         }
-        
+
         if self.size == 0 {
-            return Err(RenoirError::invalid_parameter("size", "Region size must be greater than 0"));
+            return Err(RenoirError::invalid_parameter(
+                "size",
+                "Region size must be greater than 0",
+            ));
         }
-        
+
         if self.version == 0 {
-            return Err(RenoirError::invalid_parameter("version", "Version must be greater than 0"));
+            return Err(RenoirError::invalid_parameter(
+                "version",
+                "Version must be greater than 0",
+            ));
         }
-        
+
         Ok(())
     }
 }
@@ -133,7 +138,7 @@ impl RegionRegistryEntry {
     #[cfg(unix)]
     pub fn creator_alive(&self) -> bool {
         use std::process::{Command, Stdio};
-        
+
         Command::new("kill")
             .arg("-0")
             .arg(self.creator_pid.to_string())

@@ -1,23 +1,21 @@
 //! FFI utilities and handle management
 
 use std::{
-    ffi::{CStr, CString, c_char},
     collections::HashMap,
+    ffi::{c_char, CStr, CString},
     sync::Arc,
 };
 
 use crate::{
-    SharedMemoryManager,
     allocators::Allocator,
     buffers::{Buffer, BufferPool},
-    topic_manager_modules::{TopicManager, Publisher, Subscriber},
+    topic_manager_modules::{Publisher, Subscriber, TopicManager},
+    SharedMemoryManager,
 };
-
-
 
 // Global handle management
 lazy_static::lazy_static! {
-    pub static ref HANDLE_REGISTRY: std::sync::Mutex<HandleRegistry> = 
+    pub static ref HANDLE_REGISTRY: std::sync::Mutex<HandleRegistry> =
         std::sync::Mutex::new(HandleRegistry::new());
 }
 
@@ -102,7 +100,7 @@ pub fn c_str_to_string(c_str: *const c_char) -> Result<String, Box<dyn std::erro
     if c_str.is_null() {
         return Ok(String::new());
     }
-    
+
     unsafe {
         CStr::from_ptr(c_str)
             .to_str()

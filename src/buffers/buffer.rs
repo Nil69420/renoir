@@ -1,16 +1,10 @@
 //! Buffer implementation for memory management
 
-use std::{
-    ptr::NonNull,
-    sync::Arc,
-    time::SystemTime,
-    collections::HashMap,
-    slice,
-};
+use std::{collections::HashMap, ptr::NonNull, slice, sync::Arc, time::SystemTime};
 
 use crate::{
-    error::{RenoirError, Result},
     allocators::Allocator,
+    error::{RenoirError, Result},
 };
 
 /// A reference-counted buffer with metadata
@@ -36,7 +30,10 @@ impl Buffer {
     /// Create a new buffer from an allocator
     pub fn new(allocator: Arc<dyn Allocator>, size: usize, align: usize) -> Result<Self> {
         if size == 0 {
-            return Err(RenoirError::invalid_parameter("size", "Buffer size cannot be zero"));
+            return Err(RenoirError::invalid_parameter(
+                "size",
+                "Buffer size cannot be zero",
+            ));
         }
 
         let capacity = size;
@@ -54,7 +51,7 @@ impl Buffer {
     }
 
     /// Create a buffer from existing data pointer (unsafe)
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - `data` points to valid memory of at least `capacity` bytes
@@ -192,11 +189,7 @@ impl Buffer {
 
         let mut data = vec![0u8; len];
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                self.data.as_ptr().add(offset),
-                data.as_mut_ptr(),
-                len,
-            );
+            std::ptr::copy_nonoverlapping(self.data.as_ptr().add(offset), data.as_mut_ptr(), len);
         }
 
         Ok(data)

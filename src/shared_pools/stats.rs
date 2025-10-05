@@ -23,18 +23,19 @@ impl SharedPoolStats {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Get current pool count (created - destroyed)
     pub fn active_pools(&self) -> usize {
         let created = self.pools_created.load(Ordering::Relaxed);
         let destroyed = self.pools_destroyed.load(Ordering::Relaxed);
         created.saturating_sub(destroyed)
     }
-    
+
     /// Update memory statistics
     pub fn update_memory_usage(&self, bytes_allocated: usize) {
-        self.total_bytes_allocated.fetch_add(bytes_allocated, Ordering::Relaxed);
-        
+        self.total_bytes_allocated
+            .fetch_add(bytes_allocated, Ordering::Relaxed);
+
         // Update peak if necessary
         let current = self.total_bytes_allocated.load(Ordering::Relaxed);
         let mut peak = self.peak_memory_usage.load(Ordering::Relaxed);
@@ -50,12 +51,12 @@ impl SharedPoolStats {
             }
         }
     }
-    
+
     /// Get total memory allocated
     pub fn total_memory_allocated(&self) -> usize {
         self.total_bytes_allocated.load(Ordering::Relaxed)
     }
-    
+
     /// Get peak memory usage
     pub fn peak_memory(&self) -> usize {
         self.peak_memory_usage.load(Ordering::Relaxed)
@@ -87,28 +88,28 @@ impl SharedPoolBufferStats {
             ..Default::default()
         }
     }
-    
+
     /// Get allocation efficiency (returned / allocated)
     pub fn allocation_efficiency(&self) -> f64 {
         let allocated = self.buffers_allocated.load(Ordering::Relaxed);
         if allocated == 0 {
             return 1.0;
         }
-        
+
         let returned = self.buffers_returned.load(Ordering::Relaxed);
         returned as f64 / allocated as f64
     }
-    
+
     /// Get current active buffer count
     pub fn active_count(&self) -> usize {
         self.current_active.load(Ordering::Relaxed)
     }
-    
+
     /// Update peak active count if necessary
     pub fn update_peak_active(&self) {
         let current = self.current_active.load(Ordering::Relaxed);
         let mut peak = self.peak_active.load(Ordering::Relaxed);
-        
+
         while current > peak {
             match self.peak_active.compare_exchange_weak(
                 peak,
@@ -121,7 +122,7 @@ impl SharedPoolBufferStats {
             }
         }
     }
-    
+
     /// Get pool age in seconds
     pub fn age_seconds(&self) -> Option<u64> {
         self.created_at?.elapsed().ok().map(|d| d.as_secs())

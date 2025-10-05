@@ -1,14 +1,17 @@
 //! Epoch-based reclamation for variable-sized message memory management
-//! 
+//!
 //! Provides efficient garbage collection for large payloads using epoch-based
 //! reclamation with per-reader watermarks.
 
-use std::sync::{Arc, Mutex, RwLock, atomic::{AtomicU64, AtomicUsize, Ordering}};
-use std::collections::HashMap;
-use std::time::{SystemTime, Duration};
+use super::blob::BlobDescriptor;
 use crate::error::{RenoirError, Result};
 use crate::shared_pools::SharedBufferPoolManager;
-use super::blob::BlobDescriptor;
+use std::collections::HashMap;
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    Arc, Mutex, RwLock,
+};
+use std::time::{Duration, SystemTime};
 
 /// Unique identifier for readers in the epoch reclamation system
 pub type ReaderId = u64;
@@ -37,14 +40,38 @@ pub struct ReclamationStats {
 impl Clone for ReclamationStats {
     fn clone(&self) -> Self {
         Self {
-            readers_registered: AtomicUsize::new(self.readers_registered.load(std::sync::atomic::Ordering::Relaxed)),
-            readers_unregistered: AtomicUsize::new(self.readers_unregistered.load(std::sync::atomic::Ordering::Relaxed)),
-            items_marked_for_reclamation: AtomicUsize::new(self.items_marked_for_reclamation.load(std::sync::atomic::Ordering::Relaxed)),
-            items_reclaimed: AtomicUsize::new(self.items_reclaimed.load(std::sync::atomic::Ordering::Relaxed)),
-            items_force_reclaimed: AtomicUsize::new(self.items_force_reclaimed.load(std::sync::atomic::Ordering::Relaxed)),
-            reclamation_errors: AtomicUsize::new(self.reclamation_errors.load(std::sync::atomic::Ordering::Relaxed)),
-            epochs_advanced: AtomicUsize::new(self.epochs_advanced.load(std::sync::atomic::Ordering::Relaxed)),
-            stale_readers_cleaned: AtomicUsize::new(self.stale_readers_cleaned.load(std::sync::atomic::Ordering::Relaxed)),
+            readers_registered: AtomicUsize::new(
+                self.readers_registered
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            readers_unregistered: AtomicUsize::new(
+                self.readers_unregistered
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            items_marked_for_reclamation: AtomicUsize::new(
+                self.items_marked_for_reclamation
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            items_reclaimed: AtomicUsize::new(
+                self.items_reclaimed
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            items_force_reclaimed: AtomicUsize::new(
+                self.items_force_reclaimed
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            reclamation_errors: AtomicUsize::new(
+                self.reclamation_errors
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            epochs_advanced: AtomicUsize::new(
+                self.epochs_advanced
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
+            stale_readers_cleaned: AtomicUsize::new(
+                self.stale_readers_cleaned
+                    .load(std::sync::atomic::Ordering::Relaxed),
+            ),
         }
     }
 }
@@ -107,12 +134,12 @@ impl ReaderState {
             is_active: AtomicU64::new(1),
         }
     }
-    
+
     fn update_activity(&self) {
         let mut last_activity = self.last_activity.lock().unwrap();
         *last_activity = SystemTime::now();
     }
-    
+
     fn is_stale(&self, timeout: Duration) -> bool {
         let last_activity = self.last_activity.lock().unwrap();
         last_activity.elapsed().unwrap_or(timeout) >= timeout
@@ -154,66 +181,85 @@ impl EpochReclaimer {
             stats: ReclamationStats::default(),
         }
     }
-    
+
     /// Register a new reader
     pub fn register_reader(&self) -> ReaderId {
         let reader_id = self.next_reader_id.fetch_add(1, Ordering::SeqCst);
         let reader_state = Arc::new(ReaderState::new());
-        
+
         // Set initial epoch to current global epoch
         let current_epoch = self.global_epoch.load(Ordering::SeqCst);
-        reader_state.current_epoch.store(current_epoch, Ordering::SeqCst);
-        
+        reader_state
+            .current_epoch
+            .store(current_epoch, Ordering::SeqCst);
+
         let mut readers = self.readers.write().unwrap();
         readers.insert(reader_id, reader_state);
-        
-        self.stats.readers_registered.fetch_add(1, Ordering::Relaxed);
+
+        self.stats
+            .readers_registered
+            .fetch_add(1, Ordering::Relaxed);
         reader_id
     }
-    
+
     /// Unregister a reader
     pub fn unregister_reader(&self, reader_id: ReaderId) -> Result<()> {
         let mut readers = self.readers.write().unwrap();
         if readers.remove(&reader_id).is_some() {
-            self.stats.readers_unregistered.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .readers_unregistered
+                .fetch_add(1, Ordering::Relaxed);
             Ok(())
         } else {
-            Err(RenoirError::invalid_parameter("reader_id", "Reader not found"))
+            Err(RenoirError::invalid_parameter(
+                "reader_id",
+                "Reader not found",
+            ))
         }
     }
-    
+
     /// Update reader epoch (call when reader accesses data)
     pub fn update_reader_epoch(&self, reader_id: ReaderId) -> Result<Epoch> {
         let readers = self.readers.read().unwrap();
         if let Some(reader_state) = readers.get(&reader_id) {
             reader_state.update_activity();
             let current_epoch = self.global_epoch.load(Ordering::SeqCst);
-            reader_state.current_epoch.store(current_epoch, Ordering::SeqCst);
+            reader_state
+                .current_epoch
+                .store(current_epoch, Ordering::SeqCst);
             Ok(current_epoch)
         } else {
-            Err(RenoirError::invalid_parameter("reader_id", "Reader not found"))
+            Err(RenoirError::invalid_parameter(
+                "reader_id",
+                "Reader not found",
+            ))
         }
     }
-    
+
     /// Mark blob descriptor for reclamation
     pub fn mark_for_reclamation(&self, descriptor: BlobDescriptor) -> Result<()> {
         if !descriptor.release() {
             // Still has references, don't reclaim yet
             return Ok(());
         }
-        
+
         let current_epoch = self.global_epoch.load(Ordering::SeqCst);
         let pending = PendingReclamation {
             descriptor,
             reclaim_epoch: current_epoch,
             marked_at: SystemTime::now(),
         };
-        
+
         let mut reclamations = self.pending_reclamations.lock().unwrap();
-        reclamations.entry(current_epoch).or_insert_with(Vec::new).push(pending);
-        
-        self.stats.items_marked_for_reclamation.fetch_add(1, Ordering::Relaxed);
-        
+        reclamations
+            .entry(current_epoch)
+            .or_insert_with(Vec::new)
+            .push(pending);
+
+        self.stats
+            .items_marked_for_reclamation
+            .fetch_add(1, Ordering::Relaxed);
+
         // Check if we need to trigger reclamation
         let total_pending: usize = reclamations.values().map(|v| v.len()).sum();
         if total_pending > self.policy.max_pending_reclamations {
@@ -221,41 +267,42 @@ impl EpochReclaimer {
             self.try_advance_epoch()?;
             self.reclaim_eligible()?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Try to advance the global epoch
     pub fn try_advance_epoch(&self) -> Result<bool> {
         let mut last_advance = self.last_epoch_advance.lock().unwrap();
-        let should_advance = last_advance.elapsed().unwrap_or_default() >= self.policy.epoch_advance_interval;
-        
+        let should_advance =
+            last_advance.elapsed().unwrap_or_default() >= self.policy.epoch_advance_interval;
+
         if !should_advance {
             return Ok(false);
         }
-        
+
         *last_advance = SystemTime::now();
         drop(last_advance);
-        
+
         // Advance epoch
         let _new_epoch = self.global_epoch.fetch_add(1, Ordering::SeqCst) + 1;
-        
+
         // Clean up stale readers
         self.cleanup_stale_readers()?;
-        
+
         self.stats.epochs_advanced.fetch_add(1, Ordering::Relaxed);
-        
+
         Ok(true)
     }
-    
+
     /// Reclaim eligible items based on reader watermarks
     pub fn reclaim_eligible(&self) -> Result<usize> {
         let min_reader_epoch = self.get_min_reader_epoch();
         let mut reclaimed_count = 0;
-        
+
         let mut reclamations = self.pending_reclamations.lock().unwrap();
         let mut epochs_to_remove = Vec::new();
-        
+
         for (&epoch, pending_list) in reclamations.iter() {
             if epoch < min_reader_epoch {
                 // This epoch is safe to reclaim
@@ -268,73 +315,78 @@ impl EpochReclaimer {
                         Err(e) => {
                             // Log error but continue with other reclamations
                             eprintln!("Failed to reclaim buffer: {}", e);
-                            self.stats.reclamation_errors.fetch_add(1, Ordering::Relaxed);
+                            self.stats
+                                .reclamation_errors
+                                .fetch_add(1, Ordering::Relaxed);
                         }
                     }
                 }
                 epochs_to_remove.push(epoch);
             }
         }
-        
+
         // Remove reclaimed epochs
         for epoch in epochs_to_remove {
             reclamations.remove(&epoch);
         }
-        
+
         Ok(reclaimed_count)
     }
-    
+
     /// Force reclamation of old items (emergency cleanup)
     pub fn force_reclaim_old(&self) -> Result<usize> {
         let mut reclaimed_count = 0;
         let cutoff_time = SystemTime::now() - self.policy.max_age;
-        
+
         let mut reclamations = self.pending_reclamations.lock().unwrap();
         let mut epochs_to_remove = Vec::new();
-        
+
         for (&epoch, pending_list) in reclamations.iter_mut() {
             pending_list.retain(|pending| {
                 if pending.marked_at < cutoff_time {
                     // Force reclaim this item
                     if let Ok(()) = self.reclaim_buffer(&pending.descriptor) {
                         reclaimed_count += 1;
-                        self.stats.items_force_reclaimed.fetch_add(1, Ordering::Relaxed);
+                        self.stats
+                            .items_force_reclaimed
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     false // Remove from pending list
                 } else {
                     true // Keep in pending list
                 }
             });
-            
+
             if pending_list.is_empty() {
                 epochs_to_remove.push(epoch);
             }
         }
-        
+
         // Remove empty epochs
         for epoch in epochs_to_remove {
             reclamations.remove(&epoch);
         }
-        
+
         Ok(reclaimed_count)
     }
-    
+
     /// Get minimum reader epoch (watermark)
     fn get_min_reader_epoch(&self) -> Epoch {
         let readers = self.readers.read().unwrap();
-        readers.values()
+        readers
+            .values()
             .filter(|state| state.is_active.load(Ordering::SeqCst) == 1)
             .map(|state| state.current_epoch.load(Ordering::SeqCst))
             .min()
             .unwrap_or_else(|| self.global_epoch.load(Ordering::SeqCst))
     }
-    
+
     /// Clean up stale readers
     fn cleanup_stale_readers(&self) -> Result<()> {
         let reader_timeout = self.policy.max_age;
         let mut readers = self.readers.write().unwrap();
         let initial_count = readers.len();
-        
+
         readers.retain(|_, state| {
             if state.is_stale(reader_timeout) {
                 state.is_active.store(0, Ordering::SeqCst);
@@ -343,13 +395,15 @@ impl EpochReclaimer {
                 true
             }
         });
-        
+
         let cleaned_count = initial_count - readers.len();
-        self.stats.stale_readers_cleaned.fetch_add(cleaned_count, Ordering::Relaxed);
-        
+        self.stats
+            .stale_readers_cleaned
+            .fetch_add(cleaned_count, Ordering::Relaxed);
+
         Ok(())
     }
-    
+
     /// Actually reclaim a buffer
     fn reclaim_buffer(&self, descriptor: &BlobDescriptor) -> Result<()> {
         let message_desc = crate::topic::MessageDescriptor::new(
@@ -357,15 +411,15 @@ impl EpochReclaimer {
             descriptor.buffer_handle,
             descriptor.total_size as u32,
         );
-        
+
         self.pool_manager.return_buffer(&message_desc)
     }
-    
+
     /// Get reclamation statistics
     pub fn get_statistics(&self) -> ReclamationStats {
         self.stats.clone()
     }
-    
+
     /// Perform maintenance (advance epoch, reclaim eligible, cleanup)
     pub fn maintenance(&self) -> Result<MaintenanceResult> {
         let epoch_advanced = self.try_advance_epoch()?;
@@ -375,7 +429,7 @@ impl EpochReclaimer {
         } else {
             0
         };
-        
+
         Ok(MaintenanceResult {
             epoch_advanced,
             items_reclaimed: reclaimed,

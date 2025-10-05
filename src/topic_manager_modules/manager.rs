@@ -1,21 +1,24 @@
 //! Core topic management system for ROS2-style messaging
 
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
-    sync::{Arc, RwLock, atomic::{AtomicU32, Ordering}},
+    collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use crate::{
     error::{RenoirError, Result},
-    memory::{SharedMemoryManager, RegionConfig, BackingType},
-    topic::{TopicConfig, TopicStats},
+    memory::{BackingType, RegionConfig, SharedMemoryManager},
     shared_pools::BufferPoolRegistry,
+    topic::{TopicConfig, TopicStats},
 };
 
 use super::{
-    instance::TopicInstance,
     handles::{Publisher, Subscriber},
+    instance::TopicInstance,
     stats::TopicManagerStats,
 };
 
@@ -44,7 +47,7 @@ impl TopicManager {
     /// Create a new topic manager
     pub fn new() -> Result<Self> {
         let memory_manager = Arc::new(SharedMemoryManager::new());
-        
+
         // Create default shared memory region for buffer pools
         let default_config = RegionConfig {
             name: "renoir_topic_pools".to_string(),
@@ -54,10 +57,10 @@ impl TopicManager {
             create: true,
             permissions: 0o600,
         };
-        
+
         let default_region = memory_manager.create_region(default_config)?;
         let buffer_registry = Arc::new(BufferPoolRegistry::new(default_region));
-        
+
         Ok(Self {
             topics: RwLock::new(HashMap::new()),
             topic_ids: RwLock::new(HashMap::new()),
@@ -71,7 +74,7 @@ impl TopicManager {
     /// Create or get an existing topic
     pub fn create_topic(&self, config: TopicConfig) -> Result<TopicId> {
         let topic_id = self.calculate_topic_id(&config.name);
-        
+
         {
             let topics = self.topics.read().unwrap();
             if topics.contains_key(&config.name) {
@@ -83,61 +86,63 @@ impl TopicManager {
         let region_config = RegionConfig {
             name: format!("topic_{}_{}", config.name, topic_id),
             size: self.calculate_topic_memory_size(&config),
-            backing_type: if config.enable_notifications { 
-                BackingType::MemFd 
-            } else { 
-                BackingType::FileBacked 
+            backing_type: if config.enable_notifications {
+                BackingType::MemFd
+            } else {
+                BackingType::FileBacked
             },
             file_path: None,
             create: true,
             permissions: 0o600,
         };
-        
+
         let region_name = region_config.name.clone();
         let memory_region = self.memory_manager.create_region(region_config)?;
         let topic_instance = Arc::new(TopicInstance::new(
-            topic_id, 
-            config, 
-            memory_region, 
-            region_name, 
-            self.buffer_registry.clone()
+            topic_id,
+            config,
+            memory_region,
+            region_name,
+            self.buffer_registry.clone(),
         )?);
-        
+
         // Store topic
         {
             let mut topics = self.topics.write().unwrap();
             let mut topic_ids = self.topic_ids.write().unwrap();
-            
+
             topics.insert(topic_instance.config.name.clone(), topic_instance.clone());
             topic_ids.insert(topic_id, topic_instance.config.name.clone());
         }
-        
+
         self.stats.topics_created.fetch_add(1, Ordering::Relaxed);
-        
+
         Ok(topic_id)
     }
 
     /// Create a publisher for a topic
     pub fn create_publisher(&self, topic_name: &str) -> Result<Publisher> {
         let topics = self.topics.read().unwrap();
-        let topic = topics.get(topic_name)
+        let topic = topics
+            .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?
             .clone();
-            
+
         let handle = topic.add_publisher()?;
-        
+
         Ok(Publisher::new(handle, topic.topic_id, topic))
     }
 
     /// Create a subscriber for a topic
     pub fn create_subscriber(&self, topic_name: &str) -> Result<Subscriber> {
         let topics = self.topics.read().unwrap();
-        let topic = topics.get(topic_name)
+        let topic = topics
+            .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?
             .clone();
-            
+
         let handle = topic.add_subscriber()?;
-        
+
         Ok(Subscriber::new(handle, topic.topic_id, topic))
     }
 
@@ -149,26 +154,30 @@ impl TopicManager {
         };
 
         if let Some(topic) = topic {
-            if topic.stats.active_publishers.load(Ordering::Relaxed) > 0 ||
-               topic.stats.active_subscribers.load(Ordering::Relaxed) > 0 {
+            if topic.stats.active_publishers.load(Ordering::Relaxed) > 0
+                || topic.stats.active_subscribers.load(Ordering::Relaxed) > 0
+            {
                 return Err(RenoirError::invalid_parameter(
-                    "topic_name", 
-                    "Cannot remove topic with active publishers/subscribers"
+                    "topic_name",
+                    "Cannot remove topic with active publishers/subscribers",
                 ));
             }
 
             let mut topics = self.topics.write().unwrap();
             let mut topic_ids = self.topic_ids.write().unwrap();
-            
+
             topics.remove(topic_name);
             topic_ids.remove(&topic.topic_id);
-            
+
             // Clean up the memory region
             if let Err(e) = self.memory_manager.remove_region(&topic.region_name) {
                 // Log error but don't fail the removal
-                eprintln!("Warning: Failed to remove memory region {}: {:?}", topic.region_name, e);
+                eprintln!(
+                    "Warning: Failed to remove memory region {}: {:?}",
+                    topic.region_name, e
+                );
             }
-            
+
             self.stats.topics_removed.fetch_add(1, Ordering::Relaxed);
         }
 
@@ -178,7 +187,8 @@ impl TopicManager {
     /// List all topics
     pub fn list_topics(&self) -> Vec<(String, TopicId, TopicConfig)> {
         let topics = self.topics.read().unwrap();
-        topics.iter()
+        topics
+            .iter()
             .map(|(name, topic)| (name.clone(), topic.topic_id, topic.config.clone()))
             .collect()
     }
@@ -186,9 +196,10 @@ impl TopicManager {
     /// Get topic statistics
     pub fn topic_stats(&self, topic_name: &str) -> Result<Arc<TopicStats>> {
         let topics = self.topics.read().unwrap();
-        let topic = topics.get(topic_name)
+        let topic = topics
+            .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?;
-            
+
         Ok(topic.stats.clone())
     }
 
@@ -243,14 +254,14 @@ impl TopicManager {
     fn calculate_topic_memory_size(&self, config: &TopicConfig) -> usize {
         // Ring buffer size + overhead
         let ring_size = config.ring_capacity * (config.max_payload_size + 128); // Header overhead
-        
+
         // Add buffer pool space if using shared pools
         let pool_size = if config.use_shared_pool {
             config.max_payload_size * 64 // Space for 64 large messages
         } else {
             0
         };
-        
+
         (ring_size + pool_size).max(1024 * 1024) // At least 1MB
     }
 }

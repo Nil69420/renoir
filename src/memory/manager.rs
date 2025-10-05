@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     config::RegionConfig,
-    regions::{SharedMemoryRegion, RegionMemoryStats},
+    regions::{RegionMemoryStats, SharedMemoryRegion},
 };
 
 /// Manager for multiple shared memory regions
@@ -36,7 +36,7 @@ impl SharedMemoryManager {
     /// Create a new shared memory manager with a control region
     pub fn with_control_region(control_config: RegionConfig) -> Result<Self> {
         let control_region = ControlRegion::new(control_config)?;
-        
+
         Ok(Self {
             regions: RwLock::new(HashMap::new()),
             control_region: Some(Arc::new(control_region)),
@@ -46,7 +46,7 @@ impl SharedMemoryManager {
     /// Create or open a shared memory region
     pub fn create_region(&self, config: RegionConfig) -> Result<Arc<SharedMemoryRegion>> {
         let region_name = config.name.clone();
-        
+
         {
             let regions = self.regions.read().unwrap();
             if regions.contains_key(&region_name) {
@@ -72,7 +72,8 @@ impl SharedMemoryManager {
     /// Get an existing shared memory region
     pub fn get_region(&self, name: &str) -> Result<Arc<SharedMemoryRegion>> {
         let regions = self.regions.read().unwrap();
-        regions.get(name)
+        regions
+            .get(name)
             .cloned()
             .ok_or_else(|| RenoirError::region_not_found(name))
     }
@@ -81,7 +82,8 @@ impl SharedMemoryManager {
     pub fn remove_region(&self, name: &str) -> Result<()> {
         {
             let mut regions = self.regions.write().unwrap();
-            regions.remove(name)
+            regions
+                .remove(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
         }
 
@@ -113,7 +115,8 @@ impl SharedMemoryManager {
     /// Get memory statistics for all regions
     pub fn memory_stats(&self) -> Vec<RegionMemoryStats> {
         let regions = self.regions.read().unwrap();
-        regions.values()
+        regions
+            .values()
             .map(|region| region.memory_stats())
             .collect()
     }
@@ -121,9 +124,7 @@ impl SharedMemoryManager {
     /// Get total memory usage across all regions
     pub fn total_memory_usage(&self) -> usize {
         let regions = self.regions.read().unwrap();
-        regions.values()
-            .map(|region| region.size())
-            .sum()
+        regions.values().map(|region| region.size()).sum()
     }
 
     /// Check if a region exists
@@ -155,18 +156,22 @@ impl SharedMemoryManager {
     /// Flush all regions to persistent storage
     pub fn flush_all(&self) -> Result<()> {
         let regions = self.regions.read().unwrap();
-        
+
         for region in regions.values() {
             region.flush()?;
         }
-        
+
         Ok(())
     }
 
     /// Get regions filtered by backing type
-    pub fn regions_by_backing_type(&self, backing_type: super::config::BackingType) -> Vec<Arc<SharedMemoryRegion>> {
+    pub fn regions_by_backing_type(
+        &self,
+        backing_type: super::config::BackingType,
+    ) -> Vec<Arc<SharedMemoryRegion>> {
         let regions = self.regions.read().unwrap();
-        regions.values()
+        regions
+            .values()
             .filter(|region| region.metadata().backing_type == backing_type)
             .cloned()
             .collect()

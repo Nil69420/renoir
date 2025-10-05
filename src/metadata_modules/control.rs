@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicU64, RwLock, Arc},
+    sync::{atomic::AtomicU64, Arc, RwLock},
     time::SystemTime,
 };
 
@@ -11,7 +11,7 @@ use crate::{
     memory::{RegionConfig, SharedMemoryRegion},
 };
 
-use super::types::{RegionMetadata, RegionRegistryEntry, ControlStats};
+use super::types::{ControlStats, RegionMetadata, RegionRegistryEntry};
 
 /// Header for the control region containing global metadata
 #[repr(C)]
@@ -58,30 +58,36 @@ impl Default for ControlHeader {
 impl ControlHeader {
     /// Magic number constant
     pub const MAGIC: u64 = 0x52454E4F49520001;
-    
+
     /// Current version constant
     pub const VERSION: u64 = 1;
-    
+
     /// Validate the header
     pub fn validate(&self) -> Result<()> {
         if self.magic != Self::MAGIC {
-            return Err(RenoirError::invalid_parameter("magic_number", "Invalid control header magic number"));
+            return Err(RenoirError::invalid_parameter(
+                "magic_number",
+                "Invalid control header magic number",
+            ));
         }
-        
+
         if self.version != Self::VERSION {
-            return Err(RenoirError::invalid_parameter("version", &format!(
-                "Unsupported control header version: {}",
-                self.version
-            )));
+            return Err(RenoirError::invalid_parameter(
+                "version",
+                &format!("Unsupported control header version: {}", self.version),
+            ));
         }
-        
+
         if self.total_size < std::mem::size_of::<ControlHeader>() as u64 {
-            return Err(RenoirError::invalid_parameter("total_size", "Control header size too small"));
+            return Err(RenoirError::invalid_parameter(
+                "total_size",
+                "Control header size too small",
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Initialize header with size
     pub fn initialize(&mut self, total_size: usize) {
         *self = Self::default();
@@ -112,10 +118,10 @@ impl ControlRegion {
         }
 
         let region = Arc::new(SharedMemoryRegion::new(config)?);
-        
+
         // Get pointer to header
         let header = region.as_ptr::<ControlHeader>() as *mut ControlHeader;
-        
+
         // Initialize or validate header
         let is_new = unsafe {
             let current_magic = (*header).magic;
@@ -145,27 +151,32 @@ impl ControlRegion {
     }
 
     /// Load registry from shared memory
-    fn load_registry_from_memory(region: &SharedMemoryRegion) -> Result<HashMap<String, RegionRegistryEntry>> {
+    fn load_registry_from_memory(
+        region: &SharedMemoryRegion,
+    ) -> Result<HashMap<String, RegionRegistryEntry>> {
         let header = unsafe { &*(region.as_ptr::<ControlHeader>()) };
-        
+
         if header.registry_size == 0 || header.region_count == 0 {
             return Ok(HashMap::new());
         }
 
         let registry_start = header.registry_offset as usize;
         let registry_end = registry_start + header.registry_size as usize;
-        
+
         if registry_end > region.size() {
-            return Err(RenoirError::invalid_parameter("registry_bounds", "Registry extends beyond region bounds"));
+            return Err(RenoirError::invalid_parameter(
+                "registry_bounds",
+                "Registry extends beyond region bounds",
+            ));
         }
-        
+
         let registry_slice = &region.as_slice()[registry_start..registry_end];
-        
+
         // Find the actual used portion (bincode might not use the full space)
         if registry_slice.is_empty() || registry_slice[0] == 0 {
             return Ok(HashMap::new());
         }
-        
+
         // Deserialize registry
         bincode::deserialize(registry_slice)
             .map_err(|e| RenoirError::serialization(format!("Failed to load registry: {}", e)))
@@ -174,15 +185,19 @@ impl ControlRegion {
     /// Save registry to shared memory
     fn save_registry_to_memory(&self) -> Result<()> {
         let registry = self.registry.read().unwrap();
-        let serialized = bincode::serialize(&*registry)
-            .map_err(|e| RenoirError::serialization(format!("Failed to serialize registry: {}", e)))?;
+        let serialized = bincode::serialize(&*registry).map_err(|e| {
+            RenoirError::serialization(format!("Failed to serialize registry: {}", e))
+        })?;
 
         let header = unsafe { &mut *self.header };
         let registry_start = header.registry_offset as usize;
         let available_size = header.registry_size as usize;
 
         if serialized.len() > available_size {
-            return Err(RenoirError::insufficient_space(serialized.len(), available_size));
+            return Err(RenoirError::insufficient_space(
+                serialized.len(),
+                available_size,
+            ));
         }
 
         // Copy serialized data to shared memory
@@ -196,7 +211,7 @@ impl ControlRegion {
         // Clear the region first
         region_slice.fill(0);
         region_slice[..serialized.len()].copy_from_slice(&serialized);
-        
+
         // Update header
         header.region_count = registry.len() as u64;
         header.last_modified.store(
@@ -209,7 +224,7 @@ impl ControlRegion {
 
         // Flush changes
         self.region.flush()?;
-        
+
         Ok(())
     }
 
@@ -217,7 +232,7 @@ impl ControlRegion {
     pub fn register_region(&self, metadata: &RegionMetadata) -> Result<()> {
         // Validate metadata first
         metadata.validate()?;
-        
+
         {
             let mut registry = self.registry.write().unwrap();
             if registry.contains_key(&metadata.name) {
@@ -230,7 +245,7 @@ impl ControlRegion {
 
         self.save_registry_to_memory()?;
         self.increment_sequence();
-        
+
         Ok(())
     }
 
@@ -238,13 +253,14 @@ impl ControlRegion {
     pub fn unregister_region(&self, name: &str) -> Result<()> {
         {
             let mut registry = self.registry.write().unwrap();
-            registry.remove(name)
+            registry
+                .remove(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
         }
 
         self.save_registry_to_memory()?;
         self.increment_sequence();
-        
+
         Ok(())
     }
 
@@ -264,13 +280,14 @@ impl ControlRegion {
     pub fn add_region_ref(&self, name: &str) -> Result<()> {
         {
             let mut registry = self.registry.write().unwrap();
-            let entry = registry.get_mut(name)
+            let entry = registry
+                .get_mut(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
             entry.add_ref();
         }
 
         self.save_registry_to_memory()?;
-        
+
         Ok(())
     }
 
@@ -278,7 +295,8 @@ impl ControlRegion {
     pub fn remove_region_ref(&self, name: &str) -> Result<bool> {
         let should_remove = {
             let mut registry = self.registry.write().unwrap();
-            let entry = registry.get_mut(name)
+            let entry = registry
+                .get_mut(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
             entry.remove_ref()
         };
@@ -295,13 +313,18 @@ impl ControlRegion {
     /// Get current global sequence number
     pub fn get_sequence(&self) -> u64 {
         let header = unsafe { &*self.header };
-        header.global_sequence.load(std::sync::atomic::Ordering::SeqCst)
+        header
+            .global_sequence
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Increment global sequence number
     pub fn increment_sequence(&self) -> u64 {
         let header = unsafe { &*self.header };
-        header.global_sequence.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        header
+            .global_sequence
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
     /// Get control region statistics
@@ -314,9 +337,12 @@ impl ControlRegion {
             header.total_size,
             self.get_sequence(),
             SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(header.created_at),
-            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(
-                header.last_modified.load(std::sync::atomic::Ordering::SeqCst)
-            ),
+            SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(
+                    header
+                        .last_modified
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                ),
         )
     }
 
@@ -329,16 +355,15 @@ impl ControlRegion {
     pub fn cleanup_stale_entries(&self, max_age_seconds: u64) -> Result<usize> {
         let stale_names: Vec<String> = {
             let registry = self.registry.read().unwrap();
-            registry.iter()
-                .filter(|(_, entry)| {
-                    entry.is_stale(max_age_seconds) && !entry.creator_alive()
-                })
+            registry
+                .iter()
+                .filter(|(_, entry)| entry.is_stale(max_age_seconds) && !entry.creator_alive())
                 .map(|(name, _)| name.clone())
                 .collect()
         };
 
         let removed_count = stale_names.len();
-        
+
         for name in stale_names {
             let _ = self.unregister_region(&name); // Ignore errors for cleanup
         }

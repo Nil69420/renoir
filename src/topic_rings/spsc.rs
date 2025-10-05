@@ -1,17 +1,17 @@
 //! Single Producer Single Consumer ring buffer for topic messaging
 
 use std::{
+    os::fd::{AsRawFd, RawFd},
+    ptr::NonNull,
     sync::{
-        atomic::{AtomicUsize, AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
-    ptr::NonNull,
-    os::fd::{RawFd, AsRawFd},
 };
 
 use crate::{
     error::{RenoirError, Result},
-    topic::{Message, MessageHeader, TopicStats, MessageDescriptor},
+    topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
 };
 
 /// Single Producer Single Consumer ring buffer optimized for topic messaging
@@ -44,7 +44,7 @@ impl SPSCTopicRing {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -75,14 +75,14 @@ impl SPSCTopicRing {
 
     /// Create from existing shared memory
     pub unsafe fn from_memory(
-        memory: NonNull<u8>, 
+        memory: NonNull<u8>,
         capacity: usize,
-        stats: Arc<TopicStats>
+        stats: Arc<TopicStats>,
     ) -> Result<Self> {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -106,7 +106,7 @@ impl SPSCTopicRing {
     #[cfg(target_os = "linux")]
     fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
         use nix::sys::eventfd::{eventfd, EfdFlags};
-        
+
         let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
             .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
         Ok(Some(fd))
@@ -121,7 +121,7 @@ impl SPSCTopicRing {
     pub fn available_write_space(&self) -> usize {
         let write_pos = self.write_pos.load(Ordering::Relaxed);
         let cached_read = self.cached_read_pos.load(Ordering::Relaxed);
-        
+
         // If we don't have enough space, refresh the cached read position
         if write_pos.wrapping_sub(cached_read) >= self.capacity {
             let fresh_read = self.read_pos.load(Ordering::Acquire);
@@ -135,7 +135,7 @@ impl SPSCTopicRing {
     /// Try to publish a message (producer side)
     pub fn try_publish(&self, message: &Message) -> Result<()> {
         let message_size = message.total_size();
-        
+
         // Check if we have enough space
         if self.available_write_space() < message_size {
             self.stats.record_dropped();
@@ -145,7 +145,7 @@ impl SPSCTopicRing {
         // Serialize and write the message
         let write_pos = self.write_pos.load(Ordering::Relaxed);
         let buffer_pos = write_pos & (self.capacity - 1);
-        
+
         unsafe {
             let write_ptr = self.buffer.as_ptr().add(buffer_pos);
             self.serialize_message(message, write_ptr, message_size)?;
@@ -154,10 +154,10 @@ impl SPSCTopicRing {
         // Update write position
         let new_write_pos = write_pos.wrapping_add(message_size);
         self.write_pos.store(new_write_pos, Ordering::Release);
-        
+
         // Record statistics
         let _sequence = self.stats.record_published(message_size);
-        
+
         // Notify readers if enabled
         if self.notification_enabled.load(Ordering::Relaxed) {
             self.notify_readers()?;
@@ -170,13 +170,13 @@ impl SPSCTopicRing {
     pub fn try_consume(&self) -> Result<Option<Message>> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let cached_write = self.cached_write_pos.load(Ordering::Relaxed);
-        
+
         // Check if there's data available
         if read_pos == cached_write {
             // Refresh cached write position
             let fresh_write = self.write_pos.load(Ordering::Acquire);
             self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
-            
+
             if read_pos == fresh_write {
                 return Ok(None); // No data available
             }
@@ -190,9 +190,12 @@ impl SPSCTopicRing {
         };
 
         let message_size = MessageHeader::SIZE + header.payload_length as usize;
-        
+
         // Check if we have the complete message
-        let available = self.cached_write_pos.load(Ordering::Relaxed).wrapping_sub(read_pos);
+        let available = self
+            .cached_write_pos
+            .load(Ordering::Relaxed)
+            .wrapping_sub(read_pos);
         if available < message_size {
             return Ok(None); // Incomplete message
         }
@@ -204,8 +207,9 @@ impl SPSCTopicRing {
         };
 
         // Update read position
-        self.read_pos.store(read_pos.wrapping_add(message_size), Ordering::Release);
-        
+        self.read_pos
+            .store(read_pos.wrapping_add(message_size), Ordering::Release);
+
         // Record statistics
         self.stats.record_consumed();
 
@@ -234,12 +238,12 @@ impl SPSCTopicRing {
             poll::{poll, PollFd, PollFlags},
             unistd::read,
         };
-        
+
         use std::os::fd::BorrowedFd;
         let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
         let mut fds = [PollFd::new(&borrowed_fd, PollFlags::POLLIN)];
         let timeout = timeout_ms.map(|ms| ms as i32).unwrap_or(-1);
-        
+
         match poll(&mut fds, timeout) {
             Ok(n) if n > 0 => {
                 // Clear the eventfd
@@ -264,7 +268,12 @@ impl SPSCTopicRing {
         Ok(())
     }
 
-    unsafe fn serialize_message(&self, message: &Message, ptr: *mut u8, _size: usize) -> Result<()> {
+    unsafe fn serialize_message(
+        &self,
+        message: &Message,
+        ptr: *mut u8,
+        _size: usize,
+    ) -> Result<()> {
         // Write header
         std::ptr::copy_nonoverlapping(
             &message.header as *const MessageHeader as *const u8,
@@ -276,11 +285,7 @@ impl SPSCTopicRing {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
         match &message.payload {
             crate::topic::MessagePayload::Inline(data) => {
-                std::ptr::copy_nonoverlapping(
-                    data.as_ptr(),
-                    payload_ptr,
-                    data.len(),
-                );
+                std::ptr::copy_nonoverlapping(data.as_ptr(), payload_ptr, data.len());
             }
             crate::topic::MessagePayload::Descriptor(desc) => {
                 std::ptr::copy_nonoverlapping(
@@ -300,12 +305,17 @@ impl SPSCTopicRing {
         Ok(header)
     }
 
-    unsafe fn deserialize_message(&self, header: &MessageHeader, ptr: *const u8) -> Result<Message> {
+    unsafe fn deserialize_message(
+        &self,
+        header: &MessageHeader,
+        ptr: *const u8,
+    ) -> Result<Message> {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
-        
+
         let payload = if header.payload_length <= std::mem::size_of::<MessageDescriptor>() as u32 {
             // This might be a descriptor
-            let desc: MessageDescriptor = std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
+            let desc: MessageDescriptor =
+                std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
             crate::topic::MessagePayload::Descriptor(desc)
         } else {
             // Inline payload

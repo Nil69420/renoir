@@ -1,17 +1,20 @@
 //! Individual topic instance with appropriate ring buffer and configuration
 
 use std::{
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
-    time::{Duration, Instant},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     thread,
+    time::{Duration, Instant},
 };
 
 use crate::{
     error::{RenoirError, Result},
     memory::SharedMemoryRegion,
-    topic::{TopicConfig, TopicPattern, TopicStats, Message},
-    topic_rings::{SPSCTopicRing, MPMCTopicRing},
     shared_pools::BufferPoolRegistry,
+    topic::{Message, TopicConfig, TopicPattern, TopicStats},
+    topic_rings::{MPMCTopicRing, SPSCTopicRing},
 };
 
 use super::manager::TopicId;
@@ -55,21 +58,15 @@ impl TopicInstance {
         buffer_registry: Arc<BufferPoolRegistry>,
     ) -> Result<Self> {
         let stats = Arc::new(TopicStats::default());
-        
+
         // Create appropriate ring buffer based on pattern
         let ring = match config.pattern {
-            TopicPattern::SPSC | TopicPattern::SPMC => {
-                TopicRingType::SPSC(Arc::new(SPSCTopicRing::new(
-                    config.ring_capacity * 1024, 
-                    stats.clone()
-                )?))
-            }
-            TopicPattern::MPSC | TopicPattern::MPMC => {
-                TopicRingType::MPMC(Arc::new(MPMCTopicRing::new(
-                    config.ring_capacity * 1024, 
-                    stats.clone()
-                )?))
-            }
+            TopicPattern::SPSC | TopicPattern::SPMC => TopicRingType::SPSC(Arc::new(
+                SPSCTopicRing::new(config.ring_capacity * 1024, stats.clone())?,
+            )),
+            TopicPattern::MPSC | TopicPattern::MPMC => TopicRingType::MPMC(Arc::new(
+                MPMCTopicRing::new(config.ring_capacity * 1024, stats.clone())?,
+            )),
         };
 
         Ok(Self {
@@ -92,8 +89,8 @@ impl TopicInstance {
                 // Single producer patterns - only allow one publisher
                 if self.stats.active_publishers.load(Ordering::Relaxed) > 0 {
                     return Err(RenoirError::invalid_parameter(
-                        "pattern", 
-                        "Topic only allows single publisher"
+                        "pattern",
+                        "Topic only allows single publisher",
                     ));
                 }
             }
@@ -120,8 +117,8 @@ impl TopicInstance {
                 // Single consumer patterns - only allow one subscriber
                 if self.stats.active_subscribers.load(Ordering::Relaxed) > 0 {
                     return Err(RenoirError::invalid_parameter(
-                        "pattern", 
-                        "Topic only allows single subscriber"
+                        "pattern",
+                        "Topic only allows single subscriber",
                     ));
                 }
             }
@@ -144,26 +141,27 @@ impl TopicInstance {
     /// Publish a message to this topic
     pub fn publish(&self, payload: Vec<u8>) -> Result<()> {
         let sequence = self.stats.current_sequence.load(Ordering::SeqCst);
-        
-        let message = if payload.len() > self.config.shared_pool_threshold && self.config.use_shared_pool {
-            // Use shared buffer pool for large messages
-            let descriptor = self.buffer_registry.get_buffer_for_payload(payload.len())?;
-            let buffer_data = self.buffer_registry.get_buffer_data(&descriptor)?;
-            
-            // Copy payload to shared buffer
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    payload.as_ptr(),
-                    buffer_data.as_mut_ptr(),
-                    payload.len(),
-                );
-            }
-            
-            Message::new_descriptor(self.topic_id, sequence, descriptor)
-        } else {
-            // Store inline in ring buffer
-            Message::new_inline(self.topic_id, sequence, payload)
-        };
+
+        let message =
+            if payload.len() > self.config.shared_pool_threshold && self.config.use_shared_pool {
+                // Use shared buffer pool for large messages
+                let descriptor = self.buffer_registry.get_buffer_for_payload(payload.len())?;
+                let buffer_data = self.buffer_registry.get_buffer_data(&descriptor)?;
+
+                // Copy payload to shared buffer
+                unsafe {
+                    std::ptr::copy_nonoverlapping(
+                        payload.as_ptr(),
+                        buffer_data.as_mut_ptr(),
+                        payload.len(),
+                    );
+                }
+
+                Message::new_descriptor(self.topic_id, sequence, descriptor)
+            } else {
+                // Store inline in ring buffer
+                Message::new_inline(self.topic_id, sequence, payload)
+            };
 
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_publish(&message),
@@ -183,7 +181,7 @@ impl TopicInstance {
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
         let timeout_ms = timeout.map(|d| d.as_millis() as u64);
-        
+
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.wait_for_message(timeout_ms),
             TopicRingType::MPMC(_ring) => {
@@ -193,13 +191,13 @@ impl TopicInstance {
                     if let Some(message) = self.subscribe()? {
                         return Ok(Some(message));
                     }
-                    
+
                     if let Some(timeout) = timeout {
                         if start.elapsed() >= timeout {
                             break;
                         }
                     }
-                    
+
                     thread::sleep(Duration::from_micros(100));
                 }
                 Ok(None)
@@ -218,8 +216,8 @@ impl TopicInstance {
 
     /// Check if the topic is active (has publishers and subscribers)
     pub fn is_active(&self) -> bool {
-        self.stats.active_publishers.load(Ordering::Relaxed) > 0 &&
-        self.stats.active_subscribers.load(Ordering::Relaxed) > 0
+        self.stats.active_publishers.load(Ordering::Relaxed) > 0
+            && self.stats.active_subscribers.load(Ordering::Relaxed) > 0
     }
 
     /// Get the number of messages in the ring buffer

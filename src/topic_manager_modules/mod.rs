@@ -4,12 +4,12 @@
 //! selects appropriate ring buffer types and shared buffer pools based on
 //! topic configuration and usage patterns.
 
-pub mod manager;
-pub mod instance;
 pub mod handles;
+pub mod instance;
+pub mod manager;
 pub mod stats;
 
-pub use manager::{TopicManager, TopicId};
-pub use instance::{TopicInstance, TopicRingType, PublisherHandle, SubscriberHandle};
 pub use handles::{Publisher, Subscriber};
+pub use instance::{PublisherHandle, SubscriberHandle, TopicInstance, TopicRingType};
+pub use manager::{TopicId, TopicManager};
 pub use stats::TopicManagerStats;

@@ -1,6 +1,6 @@
 //! Topic configuration and QoS settings
 
-use crate::message_formats::{FormatType, registry::SchemaInfo};
+use crate::message_formats::{registry::SchemaInfo, FormatType};
 
 /// Topic communication pattern
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +33,7 @@ impl Default for TopicMessageFormat {
         Self {
             format_type: FormatType::FlatBuffers, // Default to zero-copy
             schema: None,
-            enforce_schema: false, // Lenient by default
+            enforce_schema: false,    // Lenient by default
             auto_detect_format: true, // Allow mixed formats
         }
     }
@@ -54,7 +54,7 @@ impl TopicMessageFormat {
             auto_detect_format: false,
         }
     }
-    
+
     /// Create format config for zero-copy FlatBuffers (with existing schema)
     pub fn flatbuffers_with_schema(schema: SchemaInfo) -> Self {
         Self {
@@ -64,7 +64,7 @@ impl TopicMessageFormat {
             auto_detect_format: false,
         }
     }
-    
+
     /// Create format config for Cap'n Proto
     pub fn capnproto(schema_name: &str, schema_version: u32) -> Self {
         Self {
@@ -79,7 +79,7 @@ impl TopicMessageFormat {
             auto_detect_format: false,
         }
     }
-    
+
     /// Create format config for custom zero-copy format
     pub fn custom(schema: SchemaInfo) -> Self {
         Self {
@@ -138,78 +138,81 @@ impl TopicConfig {
             ..Default::default()
         }
     }
-    
+
     /// Set message format for zero-copy FlatBuffers
     pub fn with_flatbuffers_format(mut self, schema_name: &str, schema_version: u32) -> Self {
         self.message_format = TopicMessageFormat::flatbuffers(schema_name, schema_version);
         self
     }
-    
+
     /// Set message format for zero-copy FlatBuffers with existing schema
     pub fn with_flatbuffers_schema(mut self, schema: SchemaInfo) -> Self {
         self.message_format = TopicMessageFormat::flatbuffers_with_schema(schema);
         self
     }
-    
+
     /// Set message format for Cap'n Proto
     pub fn with_capnproto_format(mut self, schema_name: &str, schema_version: u32) -> Self {
         self.message_format = TopicMessageFormat::capnproto(schema_name, schema_version);
         self
     }
-    
+
     /// Set message format for custom zero-copy format
     pub fn with_custom_format(mut self, schema: SchemaInfo) -> Self {
         self.message_format = TopicMessageFormat::custom(schema);
         self
     }
-    
+
     /// Set communication pattern
     pub fn with_pattern(mut self, pattern: TopicPattern) -> Self {
         self.pattern = pattern;
         self
     }
-    
+
     /// Set ring buffer capacity (will be rounded up to next power of 2)
     pub fn with_ring_capacity(mut self, capacity: usize) -> Self {
         self.ring_capacity = capacity.next_power_of_two();
         self
     }
-    
+
     /// Enable shared buffer pool for large messages
     pub fn with_shared_pool(mut self, threshold: usize) -> Self {
         self.use_shared_pool = true;
         self.shared_pool_threshold = threshold;
         self
     }
-    
+
     /// Set QoS settings
     pub fn with_qos(mut self, qos: TopicQoS) -> Self {
         self.qos = qos;
         self
     }
-    
+
     /// Check if configuration is valid
     pub fn validate(&self) -> Result<(), crate::error::RenoirError> {
         use crate::error::RenoirError;
-        
+
         if self.name.is_empty() {
-            return Err(RenoirError::invalid_parameter("name", "Topic name cannot be empty"));
-        }
-        
-        if !self.ring_capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
-                "ring_capacity", 
-                "Ring capacity must be power of 2"
+                "name",
+                "Topic name cannot be empty",
             ));
         }
-        
+
+        if !self.ring_capacity.is_power_of_two() {
+            return Err(RenoirError::invalid_parameter(
+                "ring_capacity",
+                "Ring capacity must be power of 2",
+            ));
+        }
+
         if self.max_payload_size == 0 {
             return Err(RenoirError::invalid_parameter(
                 "max_payload_size",
-                "Max payload size must be greater than 0"
+                "Max payload size must be greater than 0",
             ));
         }
-        
+
         Ok(())
     }
 }

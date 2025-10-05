@@ -1,21 +1,21 @@
 //! Buffer pool implementation for efficient memory management
 
 use std::{
-    sync::{Arc, Mutex, RwLock},
     collections::{HashMap, VecDeque},
-    time::{SystemTime, Duration},
+    sync::{Arc, Mutex, RwLock},
+    time::{Duration, SystemTime},
 };
 
 use crate::{
+    allocators::{Allocator, PoolAllocator},
     error::{RenoirError, Result},
     memory::SharedMemoryRegion,
-    allocators::{Allocator, PoolAllocator},
 };
 
 use super::{
     buffer::Buffer,
     config::BufferPoolConfig,
-    stats::{BufferPoolStats, next_buffer_sequence},
+    stats::{next_buffer_sequence, BufferPoolStats},
 };
 
 /// A pool of pre-allocated buffers for efficient memory management
@@ -42,7 +42,10 @@ impl BufferPool {
         // Create pool allocator for the memory region
         let total_size = config.total_memory_required();
         if total_size > memory_region.size() {
-            return Err(RenoirError::insufficient_space(total_size, memory_region.size()));
+            return Err(RenoirError::insufficient_space(
+                total_size,
+                memory_region.size(),
+            ));
         }
 
         let allocator = unsafe {
@@ -54,7 +57,7 @@ impl BufferPool {
         };
 
         let mut available = VecDeque::new();
-        
+
         // Pre-allocate buffers if requested
         if config.pre_allocate {
             for _ in 0..config.initial_count {
@@ -68,7 +71,11 @@ impl BufferPool {
         }
 
         let stats = BufferPoolStats {
-            total_allocated: if config.pre_allocate { config.initial_count } else { 0 },
+            total_allocated: if config.pre_allocate {
+                config.initial_count
+            } else {
+                0
+            },
             currently_in_use: 0,
             peak_usage: 0,
             total_allocations: 0,
@@ -88,17 +95,17 @@ impl BufferPool {
     /// Get a buffer from the pool
     pub fn get_buffer(&self) -> Result<Buffer> {
         let start_time = SystemTime::now();
-        
+
         loop {
             // Try to get from available buffers first
             {
                 let mut available = self.available.lock().unwrap();
                 if let Some(mut buffer) = available.pop_front() {
                     buffer.set_sequence(next_buffer_sequence());
-                    
+
                     self.track_allocation(&buffer);
                     self.update_allocation_stats();
-                    
+
                     return Ok(buffer);
                 }
             }
@@ -188,7 +195,7 @@ impl BufferPool {
     pub fn shrink(&self, target_available: usize) -> usize {
         let mut available = self.available.lock().unwrap();
         let current_count = available.len();
-        
+
         if current_count <= target_available {
             return 0;
         }

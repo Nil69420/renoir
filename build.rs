@@ -86,8 +86,7 @@ include = ["renoir"]
 "feature = memfd" = "RENOIR_MEMFD_SUPPORT"
 "#;
 
-    std::fs::write(&config_file, config_content)
-        .expect("Failed to write cbindgen configuration");
+    std::fs::write(&config_file, config_content).expect("Failed to write cbindgen configuration");
 
     // Generate C headers with enhanced configuration
     let builder = cbindgen::Builder::new()
@@ -109,7 +108,7 @@ include = ["renoir"]
             .generate()
             .expect("Unable to generate C bindings")
             .write_to_file(&header_file);
-        
+
         println!("cargo:rerun-if-changed=src/ffi/");
         println!("cargo:rerun-if-changed=src/large_payloads/");
         println!("Generated C headers: {}", header_file.display());
@@ -128,7 +127,7 @@ include = ["renoir"]
 fn generate_ros2_integration_headers(output_dir: &PathBuf) {
     let ros2_header = output_dir.join("renoir_ros2.h");
     let integration_example = output_dir.join("renoir_usage_example.c");
-    
+
     let ros2_content = r#"
 /**
  * @file renoir_ros2.h

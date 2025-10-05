@@ -5,16 +5,9 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::{
-    error::Result,
-    memory::SharedMemoryRegion,
-    buffers::Buffer,
-    topic::MessageDescriptor,
-};
+use crate::{buffers::Buffer, error::Result, memory::SharedMemoryRegion, topic::MessageDescriptor};
 
-use super::{
-    manager::{SharedBufferPoolManager, PoolId},
-};
+use super::manager::{PoolId, SharedBufferPoolManager};
 
 /// Buffer pool registry for topic system
 #[derive(Debug)]
@@ -41,7 +34,7 @@ impl BufferPoolRegistry {
     pub fn get_pool_for_size(&self, size: usize) -> Result<PoolId> {
         // Round up to next power of 2 for size class
         let size_class = size.next_power_of_two();
-        
+
         {
             let size_classes = self.size_classes.read().unwrap();
             if let Some(&pool_id) = size_classes.get(&size_class) {
@@ -92,15 +85,20 @@ impl BufferPoolRegistry {
     /// Get all registered size classes
     pub fn size_classes(&self) -> Vec<(usize, PoolId)> {
         let size_classes = self.size_classes.read().unwrap();
-        size_classes.iter().map(|(&size, &pool_id)| (size, pool_id)).collect()
+        size_classes
+            .iter()
+            .map(|(&size, &pool_id)| (size, pool_id))
+            .collect()
     }
 
     /// Get statistics for all pools
     pub fn all_pool_stats(&self) -> Vec<(PoolId, String, usize, usize, usize, usize)> {
         let pools = self.manager.list_pools();
-        pools.into_iter()
+        pools
+            .into_iter()
             .filter_map(|(pool_id, name)| {
-                self.manager.pool_stats(pool_id)
+                self.manager
+                    .pool_stats(pool_id)
                     .ok()
                     .map(|(allocated, returned, active, peak)| {
                         (pool_id, name, allocated, returned, active, peak)
@@ -120,7 +118,7 @@ impl BufferPoolRegistry {
                 if allocated > 0 && allocated == returned {
                     if self.manager.remove_pool(pool_id).is_ok() {
                         removed_count += 1;
-                        
+
                         // Remove from size class mapping
                         let mut size_classes = self.size_classes.write().unwrap();
                         size_classes.retain(|_size, &mut pid| pid != pool_id);

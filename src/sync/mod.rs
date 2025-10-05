@@ -10,31 +10,25 @@
 //! - eventfd-based notifications for efficient wakeups
 //! - No locks on hot path for maximum real-time performance
 
+pub mod epoch;
+pub mod mio_notify;
+pub mod notify;
 pub mod sequence;
 pub mod swmr;
-pub mod epoch;
-pub mod notify;
-pub mod mio_notify;
 
-pub use sequence::{AtomicSequence, SequenceNumber};
-pub use swmr::{SWMRRing, SWMRSlot, ReaderHandle, WriterHandle};
 pub use epoch::{EpochManager, EpochReclaim, ReaderTracker};
+pub use mio_notify::{MioConditionNotifier, MioEventNotification};
 pub use notify::{EventNotifier, NotificationGroup, NotifyCondition};
-pub use mio_notify::{MioEventNotification, MioConditionNotifier};
+pub use sequence::{AtomicSequence, SequenceNumber};
+pub use swmr::{ReaderHandle, SWMRRing, SWMRSlot, WriterHandle};
 
 /// Common synchronization error types
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyncError {
     /// Sequence number inconsistency detected
-    SequenceInconsistent {
-        expected: u64,
-        actual: u64,
-    },
+    SequenceInconsistent { expected: u64, actual: u64 },
     /// Reader fell too far behind
-    ReaderTooSlow {
-        reader_seq: u64,
-        writer_seq: u64,
-    },
+    ReaderTooSlow { reader_seq: u64, writer_seq: u64 },
     /// No slots available for writing
     NoSlotsAvailable,
     /// Buffer was corrupted or partially written
@@ -47,10 +41,21 @@ impl std::fmt::Display for SyncError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SyncError::SequenceInconsistent { expected, actual } => {
-                write!(f, "Sequence inconsistent: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Sequence inconsistent: expected {}, got {}",
+                    expected, actual
+                )
             }
-            SyncError::ReaderTooSlow { reader_seq, writer_seq } => {
-                write!(f, "Reader too slow: reader at {}, writer at {}", reader_seq, writer_seq)
+            SyncError::ReaderTooSlow {
+                reader_seq,
+                writer_seq,
+            } => {
+                write!(
+                    f,
+                    "Reader too slow: reader at {}, writer at {}",
+                    reader_seq, writer_seq
+                )
             }
             SyncError::NoSlotsAvailable => write!(f, "No slots available for writing"),
             SyncError::CorruptedBuffer => write!(f, "Buffer corrupted or partially written"),

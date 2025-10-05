@@ -1,5 +1,5 @@
 //! Structured memory layout implementation following recommended schema patterns
-//! 
+//!
 //! This module implements a hierarchical shared memory layout:
 //! 1. Global control header (magic, version, metadata)
 //! 2. Topic directory (name → offset mapping)
@@ -13,7 +13,7 @@ pub mod region;
 // Re-export main types
 pub use constants::*;
 pub use headers::{
-    GlobalControlHeader, TopicDirectoryEntry, TopicDirectory, 
-    TopicControlHeader, RingMetadata, MessageSlot, BufferPoolHeader
+    BufferPoolHeader, GlobalControlHeader, MessageSlot, RingMetadata, TopicControlHeader,
+    TopicDirectory, TopicDirectoryEntry,
 };
-pub use region::{StructuredMemoryRegion, GlobalStats};
+pub use region::{GlobalStats, StructuredMemoryRegion};

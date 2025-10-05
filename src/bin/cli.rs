@@ -1,17 +1,16 @@
 use clap::{App, Arg, SubCommand};
 use renoir::{
-    memory::{SharedMemoryManager, RegionConfig, BackingType},
+    allocator::{Allocator, BumpAllocator, PoolAllocator},
     buffer::{BufferPool, BufferPoolConfig},
-    allocator::{BumpAllocator, PoolAllocator, Allocator},
-    ringbuf::RingBuffer,
     large_payloads::{
-        BlobManager, BlobHeader, ChunkManager, ChunkingStrategy, 
-        EpochReclaimer, ReclamationPolicy, ROS2MessageManager, ROS2MessageType,
-        ImageHeader, PointCloudHeader, LaserScanHeader
+        BlobHeader, BlobManager, ChunkManager, ChunkingStrategy, EpochReclaimer, ImageHeader,
+        LaserScanHeader, PointCloudHeader, ROS2MessageManager, ROS2MessageType, ReclamationPolicy,
     },
+    memory::{BackingType, RegionConfig, SharedMemoryManager},
+    ringbuf::RingBuffer,
     Result,
 };
-use std::{path::PathBuf, time::Duration, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -57,10 +56,7 @@ fn main() -> Result<()> {
                                 .help("Use anonymous memory file descriptor (Linux only)"),
                         ),
                 )
-                .subcommand(
-                    SubCommand::with_name("list")
-                        .about("List existing regions"),
-                ),
+                .subcommand(SubCommand::with_name("list").about("List existing regions")),
         )
         .subcommand(
             SubCommand::with_name("buffer")
@@ -248,10 +244,7 @@ fn main() -> Result<()> {
                         ),
                 ),
         )
-        .subcommand(
-            SubCommand::with_name("info")
-                .about("Show version and build information"),
-        )
+        .subcommand(SubCommand::with_name("info").about("Show version and build information"))
         .get_matches();
 
     match matches.subcommand() {
@@ -276,7 +269,9 @@ fn handle_region_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("size", "Invalid size format"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("size", "Invalid size format")
+                })?;
 
             let backing_type = if create_matches.is_present("memfd") {
                 #[cfg(target_os = "linux")]
@@ -285,7 +280,9 @@ fn handle_region_commands(matches: &clap::ArgMatches) -> Result<()> {
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
-                    return Err(renoir::error::RenoirError::platform("memfd not supported on this platform"));
+                    return Err(renoir::error::RenoirError::platform(
+                        "memfd not supported on this platform",
+                    ));
                 }
             } else {
                 BackingType::FileBacked
@@ -307,7 +304,11 @@ fn handle_region_commands(matches: &clap::ArgMatches) -> Result<()> {
             };
 
             let region = manager.create_region(config)?;
-            println!("Created region '{}' with size {} bytes", region.name(), region.size());
+            println!(
+                "Created region '{}' with size {} bytes",
+                region.name(),
+                region.size()
+            );
         }
         ("list", Some(_)) => {
             let manager = SharedMemoryManager::new();
@@ -334,12 +335,16 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("buffer_size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("buffer_size", "Invalid size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("buffer_size", "Invalid size")
+                })?;
             let count: usize = test_matches
                 .value_of("count")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("count", "Invalid count"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("count", "Invalid count")
+                })?;
 
             println!("Testing buffer pool performance...");
             println!("Region: {}", region_name);
@@ -347,7 +352,7 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
             println!("Operations: {}", count);
 
             let manager = SharedMemoryManager::new();
-            
+
             // Create or get region
             let region_config = RegionConfig {
                 name: region_name.to_string(),
@@ -357,7 +362,7 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                 create: true,
                 permissions: 0o644,
             };
-            
+
             let region = manager.create_region(region_config)?;
 
             let pool_config = BufferPoolConfig {
@@ -371,12 +376,12 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
             };
 
             let buffer_pool = BufferPool::new(pool_config, region)?;
-            
+
             let start = std::time::Instant::now();
-            
+
             for i in 0..count {
                 let buffer = buffer_pool.get_buffer()?;
-                
+
                 // Write some test data
                 let test_data = format!("Test data {}", i);
                 let bytes = test_data.as_bytes();
@@ -390,7 +395,7 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                         );
                     }
                 }
-                
+
                 buffer_pool.return_buffer(buffer)?;
             }
 
@@ -400,7 +405,10 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
             println!("\nResults:");
             println!("  Total time: {:.2}ms", elapsed.as_millis());
             println!("  Operations/sec: {:.0}", ops_per_sec);
-            println!("  Average latency: {:.2}μs", elapsed.as_micros() as f64 / count as f64);
+            println!(
+                "  Average latency: {:.2}μs",
+                elapsed.as_micros() as f64 / count as f64
+            );
 
             let stats = buffer_pool.stats();
             println!("  Success rate: {:.2}%", stats.success_rate() * 100.0);
@@ -417,7 +425,9 @@ fn handle_allocator_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("size", "Invalid size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("size", "Invalid size")
+                })?;
 
             println!("Testing bump allocator with {} bytes", size);
 
@@ -448,22 +458,34 @@ fn handle_allocator_commands(matches: &clap::ArgMatches) -> Result<()> {
             println!("  Used size: {}", allocator.used_size());
             println!("  Available size: {}", allocator.available_size());
             println!("  Time taken: {:.2}μs", elapsed.as_micros());
-            println!("  Avg time per allocation: {:.2}μs", 
-                     elapsed.as_micros() as f64 / allocations.len() as f64);
+            println!(
+                "  Avg time per allocation: {:.2}μs",
+                elapsed.as_micros() as f64 / allocations.len() as f64
+            );
         }
         ("pool", Some(pool_matches)) => {
             let size: usize = pool_matches
                 .value_of("size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("size", "Invalid size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("size", "Invalid size")
+                })?;
             let block_size: usize = pool_matches
                 .value_of("block_size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("block_size", "Invalid block size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter(
+                        "block_size",
+                        "Invalid block size",
+                    )
+                })?;
 
-            println!("Testing pool allocator with {} bytes, block size {}", size, block_size);
+            println!(
+                "Testing pool allocator with {} bytes, block size {}",
+                size, block_size
+            );
 
             let mut memory = vec![0u8; size];
             let allocator = PoolAllocator::new(&mut memory, block_size)?;
@@ -507,26 +529,29 @@ fn handle_allocator_commands(matches: &clap::ArgMatches) -> Result<()> {
 }
 
 fn handle_ringbuf_commands(matches: &clap::ArgMatches) -> Result<()> {
-    let capacity: usize = matches
-        .value_of("capacity")
-        .unwrap()
-        .parse()
-        .map_err(|_| renoir::error::RenoirError::invalid_parameter("capacity", "Invalid capacity"))?;
-        
+    let capacity: usize = matches.value_of("capacity").unwrap().parse().map_err(|_| {
+        renoir::error::RenoirError::invalid_parameter("capacity", "Invalid capacity")
+    })?;
+
     let operations: usize = matches
         .value_of("operations")
         .unwrap()
         .parse()
-        .map_err(|_| renoir::error::RenoirError::invalid_parameter("operations", "Invalid operations count"))?;
+        .map_err(|_| {
+            renoir::error::RenoirError::invalid_parameter("operations", "Invalid operations count")
+        })?;
 
     if !capacity.is_power_of_two() {
         return Err(renoir::error::RenoirError::invalid_parameter(
-            "capacity", 
-            "Capacity must be a power of 2"
+            "capacity",
+            "Capacity must be a power of 2",
         ));
     }
 
-    println!("Testing ring buffer with capacity {} and {} operations", capacity, operations);
+    println!(
+        "Testing ring buffer with capacity {} and {} operations",
+        capacity, operations
+    );
 
     let buffer: RingBuffer<u64> = RingBuffer::new(capacity)?;
     let producer = buffer.producer();
@@ -540,7 +565,7 @@ fn handle_ringbuf_commands(matches: &clap::ArgMatches) -> Result<()> {
     // Test push performance
     let start = std::time::Instant::now();
     let mut pushed = 0;
-    
+
     for i in 0..operations {
         match producer.try_push(i as u64) {
             Ok(()) => pushed += 1,
@@ -560,7 +585,7 @@ fn handle_ringbuf_commands(matches: &clap::ArgMatches) -> Result<()> {
     // Consume remaining items
     let start = std::time::Instant::now();
     let mut consumed = 0;
-    
+
     while consumer.try_pop().is_ok() {
         consumed += 1;
     }
@@ -572,8 +597,14 @@ fn handle_ringbuf_commands(matches: &clap::ArgMatches) -> Result<()> {
     println!("  Items consumed: {}", consumed);
     println!("  Push time: {:.2}μs", push_time.as_micros());
     println!("  Pop time: {:.2}μs", pop_time.as_micros());
-    println!("  Push rate: {:.0} ops/sec", pushed as f64 / push_time.as_secs_f64());
-    println!("  Pop rate: {:.0} ops/sec", consumed as f64 / pop_time.as_secs_f64());
+    println!(
+        "  Push rate: {:.0} ops/sec",
+        pushed as f64 / push_time.as_secs_f64()
+    );
+    println!(
+        "  Pop rate: {:.0} ops/sec",
+        consumed as f64 / pop_time.as_secs_f64()
+    );
 
     Ok(())
 }
@@ -585,12 +616,16 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("size", "Invalid size format"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("size", "Invalid size format")
+                })?;
             let count: usize = blob_matches
                 .value_of("count")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("count", "Invalid count format"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("count", "Invalid count format")
+                })?;
 
             println!("Testing blob management...");
             println!("Blob size: {} bytes", size);
@@ -605,7 +640,7 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 create: true,
                 permissions: 0o644,
             };
-            
+
             let region = manager.create_region(region_config)?;
             let blob_manager = BlobManager::new();
 
@@ -615,11 +650,14 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
             // Create blob headers
             for i in 0..count {
                 let test_data = vec![i as u8; size];
-                let header = blob_manager.create_header(renoir::large_payloads::content_types::CONTENT_TYPE_RAW, &test_data);
+                let header = blob_manager.create_header(
+                    renoir::large_payloads::content_types::CONTENT_TYPE_RAW,
+                    &test_data,
+                );
                 // Create a simple descriptor for testing
                 let descriptor = renoir::large_payloads::BlobDescriptor::new(
-                    (i * size) as u64, // offset
-                    size,               // size
+                    (i * size) as u64,     // offset
+                    size,                  // size
                     format!("blob_{}", i), // tag
                 )?;
                 blob_handles.push(descriptor);
@@ -634,18 +672,24 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                     return Err(renoir::error::RenoirError::validation("Blob size mismatch"));
                 }
             }
-            
+
             let validation_time = start.elapsed();
 
             println!("\nResults:");
             println!("  Blob creation: {:.2}ms", creation_time.as_millis());
             println!("  Blob validation: {:.2}ms", validation_time.as_millis());
-            println!("  Creation rate: {:.0} blobs/sec", count as f64 / creation_time.as_secs_f64());
-            println!("  Total memory used: {:.2}MB", (size * count) as f64 / 1024.0 / 1024.0);
+            println!(
+                "  Creation rate: {:.0} blobs/sec",
+                count as f64 / creation_time.as_secs_f64()
+            );
+            println!(
+                "  Total memory used: {:.2}MB",
+                (size * count) as f64 / 1024.0 / 1024.0
+            );
         }
         ("ros2", Some(ros2_matches)) => {
             let msg_type = ros2_matches.value_of("type").unwrap();
-            
+
             println!("Testing ROS2 message type: {}", msg_type);
 
             let manager = SharedMemoryManager::new();
@@ -657,9 +701,9 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 create: true,
                 permissions: 0o644,
             };
-            
+
             let region = manager.create_region(region_config)?;
-            
+
             // Create buffer pool manager and chunking strategy
             use renoir::shared_pools::SharedBufferPoolManager;
             let pool_manager = Arc::new(SharedBufferPoolManager::new()?);
@@ -668,52 +712,85 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
 
             match msg_type {
                 "image" => {
-                    let width: u32 = ros2_matches.value_of("width").unwrap().parse()
-                        .map_err(|_| renoir::error::RenoirError::invalid_parameter("width", "Invalid width"))?;
-                    let height: u32 = ros2_matches.value_of("height").unwrap().parse()
-                        .map_err(|_| renoir::error::RenoirError::invalid_parameter("height", "Invalid height"))?;
-                    
+                    let width: u32 =
+                        ros2_matches
+                            .value_of("width")
+                            .unwrap()
+                            .parse()
+                            .map_err(|_| {
+                                renoir::error::RenoirError::invalid_parameter(
+                                    "width",
+                                    "Invalid width",
+                                )
+                            })?;
+                    let height: u32 =
+                        ros2_matches
+                            .value_of("height")
+                            .unwrap()
+                            .parse()
+                            .map_err(|_| {
+                                renoir::error::RenoirError::invalid_parameter(
+                                    "height",
+                                    "Invalid height",
+                                )
+                            })?;
+
                     let step = width * 3; // 3 bytes per pixel for RGB
                     let data_size = (width * height * 3) as usize;
                     let image_data = vec![128u8; data_size]; // Gray image
 
-                    println!("Creating {}x{} RGB image ({:.2}MB)", width, height, data_size as f64 / 1024.0 / 1024.0);
-                    
+                    println!(
+                        "Creating {}x{} RGB image ({:.2}MB)",
+                        width,
+                        height,
+                        data_size as f64 / 1024.0 / 1024.0
+                    );
+
                     let start = std::time::Instant::now();
-                    
+
                     // Create a test pool ID for demonstration
                     let pool_id = renoir::shared_pools::PoolId(1);
-                    
+
                     let msg = ros2_manager.create_image_message(
                         width,
                         height,
                         "rgb8",
                         &image_data,
-                        pool_id
+                        pool_id,
                     )?;
                     let creation_time = start.elapsed();
 
                     println!("  Message created in {:.2}ms", creation_time.as_millis());
-                    println!("  Image dimensions: {}x{}", msg.header.width, msg.header.height);
+                    println!(
+                        "  Image dimensions: {}x{}",
+                        msg.header.width, msg.header.height
+                    );
                 }
                 "pointcloud" => {
                     let num_points = 100000; // 100k points
                     let header = PointCloudHeader::new(
-                        num_points,     // point_count
-                        16,             // point_step (4 fields * 4 bytes each)
-                        num_points,     // width
-                        1,              // height
-                        true            // is_dense
+                        num_points, // point_count
+                        16,         // point_step (4 fields * 4 bytes each)
+                        num_points, // width
+                        1,          // height
+                        true,       // is_dense
                     );
 
                     let data_size = num_points * 16; // x,y,z,intensity (4 floats)
                     let cloud_data = vec![0u8; data_size];
 
-                    println!("Creating point cloud with {} points ({:.2}MB)", num_points, data_size as f64 / 1024.0 / 1024.0);
-                    
+                    println!(
+                        "Creating point cloud with {} points ({:.2}MB)",
+                        num_points,
+                        data_size as f64 / 1024.0 / 1024.0
+                    );
+
                     let start = std::time::Instant::now();
                     // For demo, just create and validate header
-                    println!("  Point cloud header created in {:.2}μs", start.elapsed().as_micros());
+                    println!(
+                        "  Point cloud header created in {:.2}μs",
+                        start.elapsed().as_micros()
+                    );
                     println!("  Point count: {}", header.point_count);
                     println!("  Point step: {} bytes", header.point_step);
                     println!("  Is organized: {}", header.is_organized());
@@ -727,23 +804,32 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                         0.1,                                            // range_min
                         10.0,                                           // range_max
                         num_ranges,                                     // range_count
-                        num_ranges                                      // intensity_count
+                        num_ranges,                                     // intensity_count
                     );
 
                     let ranges = vec![5.0f32; num_ranges]; // 5m range for all points
                     let intensities = vec![100.0f32; num_ranges];
 
                     println!("Creating laser scan with {} ranges", num_ranges);
-                    
+
                     let start = std::time::Instant::now();
                     // For demo, just create and validate header
-                    println!("  Laser scan header created in {:.2}μs", start.elapsed().as_micros());
+                    println!(
+                        "  Laser scan header created in {:.2}μs",
+                        start.elapsed().as_micros()
+                    );
                     println!("  Range count: {}", header.range_count);
                     println!("  Intensity count: {}", header.intensity_count);
-                    println!("  Angular resolution: {:.4}°", header.angle_increment.to_degrees());
+                    println!(
+                        "  Angular resolution: {:.4}°",
+                        header.angle_increment.to_degrees()
+                    );
                 }
                 _ => {
-                    return Err(renoir::error::RenoirError::invalid_parameter("type", "Unknown message type"));
+                    return Err(renoir::error::RenoirError::invalid_parameter(
+                        "type",
+                        "Unknown message type",
+                    ));
                 }
             }
         }
@@ -752,15 +838,22 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("payload_size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("payload_size", "Invalid size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("payload_size", "Invalid size")
+                })?;
             let chunk_size: usize = chunk_matches
                 .value_of("chunk_size")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("chunk_size", "Invalid size"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("chunk_size", "Invalid size")
+                })?;
 
             println!("Testing chunking system...");
-            println!("Payload size: {:.2}MB", payload_size as f64 / 1024.0 / 1024.0);
+            println!(
+                "Payload size: {:.2}MB",
+                payload_size as f64 / 1024.0 / 1024.0
+            );
             println!("Chunk size: {:.2}KB", chunk_size as f64 / 1024.0);
 
             let num_chunks = (payload_size + chunk_size - 1) / chunk_size;
@@ -775,14 +868,14 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 create: true,
                 permissions: 0o644,
             };
-            
+
             let region = manager.create_region(region_config)?;
             let strategy = ChunkingStrategy::new(chunk_size)?;
             let chunk_manager = ChunkManager::new(Arc::new(region), strategy)?;
 
             // Create test payload
             let test_payload: Vec<u8> = (0..payload_size).map(|i| (i % 256) as u8).collect();
-            
+
             let start = std::time::Instant::now();
             let chunks = chunk_manager.chunk_data(&test_payload)?;
             let chunking_time = start.elapsed();
@@ -790,7 +883,10 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
             println!("\nResults:");
             println!("  Actual chunks created: {}", chunks.len());
             println!("  Chunking time: {:.2}ms", chunking_time.as_millis());
-            println!("  Chunking rate: {:.2}MB/s", payload_size as f64 / 1024.0 / 1024.0 / chunking_time.as_secs_f64());
+            println!(
+                "  Chunking rate: {:.2}MB/s",
+                payload_size as f64 / 1024.0 / 1024.0 / chunking_time.as_secs_f64()
+            );
 
             // Verify chunk integrity
             let mut total_size = 0;
@@ -811,7 +907,9 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 .value_of("objects")
                 .unwrap()
                 .parse()
-                .map_err(|_| renoir::error::RenoirError::invalid_parameter("objects", "Invalid count"))?;
+                .map_err(|_| {
+                    renoir::error::RenoirError::invalid_parameter("objects", "Invalid count")
+                })?;
 
             println!("Testing epoch-based reclamation...");
             println!("Objects to create: {}", object_count);
@@ -820,24 +918,24 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
                 Duration::from_millis(100), // Check interval
                 Duration::from_secs(1),     // Max age
             )?;
-            
+
             // Create pool manager for reclaimer
             let pool_manager = Arc::new(SharedBufferPoolManager::new()?);
             let reclaimer = EpochReclaimer::new(pool_manager, policy);
 
             let start = std::time::Instant::now();
-            
+
             // Create dummy blob descriptors for testing
             use renoir::large_payloads::BlobDescriptor;
             for i in 0..object_count {
                 let descriptor = BlobDescriptor::new(
-                    i as u64,           // offset
-                    1024,               // size  
+                    i as u64,              // offset
+                    1024,                  // size
                     format!("test_{}", i), // tag
                 )?;
                 reclaimer.mark_for_reclamation(descriptor)?;
             }
-            
+
             let marking_time = start.elapsed();
 
             // Force reclamation
@@ -849,8 +947,18 @@ fn handle_large_payloads_commands(matches: &clap::ArgMatches) -> Result<()> {
             println!("  Marking time: {:.2}ms", marking_time.as_millis());
             println!("  Reclamation time: {:.2}μs", reclamation_time.as_micros());
             println!("  Objects marked: {}", object_count);
-            println!("  Items reclaimed: {}", stats.items_reclaimed.load(std::sync::atomic::Ordering::Relaxed));
-            println!("  Items force-reclaimed: {}", stats.items_force_reclaimed.load(std::sync::atomic::Ordering::Relaxed));
+            println!(
+                "  Items reclaimed: {}",
+                stats
+                    .items_reclaimed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+            println!(
+                "  Items force-reclaimed: {}",
+                stats
+                    .items_force_reclaimed
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
         }
         _ => println!("Use 'large-payloads --help' for usage information"),
     }
@@ -863,23 +971,23 @@ fn show_info() -> Result<()> {
     println!("Build time: {}", env!("VERGEN_BUILD_TIMESTAMP"));
     println!("Git commit: {}", env!("VERGEN_GIT_SHA"));
     println!("Rust version: {}", env!("VERGEN_RUSTC_SEMVER"));
-    
+
     println!("\nFeatures:");
     #[cfg(feature = "file-backed")]
     println!("  ✓ File-backed shared memory");
-    
+
     #[cfg(all(feature = "memfd", target_os = "linux"))]
     println!("  ✓ Anonymous memory file descriptors (memfd)");
-    
+
     #[cfg(feature = "c-api")]
     println!("  ✓ C API for foreign function interface");
-    
+
     println!("\nCapabilities:");
     println!("  - Named shared memory regions");
     println!("  - Buffer pools with multiple allocation strategies");
     println!("  - Lock-free ring buffers");
     println!("  - Sequence/version tracking");
     println!("  - Zero-copy data sharing");
-    
+
     Ok(())
 }

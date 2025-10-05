@@ -2,8 +2,8 @@
 
 use std::mem::size_of;
 
-use crate::error::{RenoirError, Result};
 use super::constants::*;
+use crate::error::{RenoirError, Result};
 
 /// Global control header at the start of each shared memory region
 #[repr(C)]
@@ -40,7 +40,8 @@ impl GlobalControlHeader {
             version: SCHEMA_VERSION,
             creation_time: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap().as_secs(),
+                .unwrap()
+                .as_secs(),
             owner_pid: std::process::id(),
             region_size,
             topic_directory_offset: size_of::<GlobalControlHeader>() as u32,
@@ -55,10 +56,16 @@ impl GlobalControlHeader {
     /// Validate the header magic and version
     pub fn validate(&self) -> Result<()> {
         if self.magic != RENOIR_MAGIC {
-            return Err(RenoirError::invalid_parameter("magic", "Invalid magic number"));
+            return Err(RenoirError::invalid_parameter(
+                "magic",
+                "Invalid magic number",
+            ));
         }
         if self.version != SCHEMA_VERSION {
-            return Err(RenoirError::invalid_parameter("version", "Unsupported schema version"));
+            return Err(RenoirError::invalid_parameter(
+                "version",
+                "Unsupported schema version",
+            ));
         }
         Ok(())
     }
@@ -106,7 +113,7 @@ impl TopicDirectory {
             valid: 0,
             _padding: [0; 3],
         };
-        
+
         Self {
             entry_count: 0,
             validity_bitmap: [0; (MAX_TOPICS + 63) / 64],
@@ -151,7 +158,7 @@ pub struct RingMetadata {
     pub capacity: u32,
     /// Head pointer (use atomics for access)
     pub head: u32,
-    /// Tail pointer (use atomics for access) 
+    /// Tail pointer (use atomics for access)
     pub tail: u32,
     /// Mask for power-of-2 modulo
     pub mask: u32,

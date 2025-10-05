@@ -8,8 +8,8 @@ pub mod config;
 pub mod pool;
 pub mod stats;
 
-// Re-export main types  
+// Re-export main types
 pub use buffer::Buffer;
 pub use config::{BufferPoolConfig, BufferPoolConfigBuilder};
 pub use pool::BufferPool;
-pub use stats::{BufferPoolStats, AtomicBufferPoolStats, next_buffer_sequence};
+pub use stats::{next_buffer_sequence, AtomicBufferPoolStats, BufferPoolStats};

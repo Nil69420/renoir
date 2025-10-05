@@ -4,7 +4,7 @@
 mod tests {
     use renoir::{
         topic::{Message, TopicStats},
-        topic_rings::{SPSCTopicRing, MPMCTopicRing},
+        topic_rings::{MPMCTopicRing, SPSCTopicRing},
     };
     use std::sync::Arc;
 
@@ -20,17 +20,17 @@ mod tests {
     fn test_spsc_publish_consume() {
         let stats = Arc::new(TopicStats::default());
         let ring = SPSCTopicRing::new(4096, stats).unwrap();
-        
+
         let message = Message::new_inline(1, 1, b"Hello, Topic!".to_vec());
-        
+
         // Publish message
         ring.try_publish(&message).unwrap();
         assert!(ring.utilization() > 0.0);
-        
+
         // Consume message
         let consumed = ring.try_consume().unwrap();
         assert!(consumed.is_some());
-        
+
         let consumed_msg = consumed.unwrap();
         let topic_id = consumed_msg.header.topic_id;
         let sequence = consumed_msg.header.sequence;
@@ -49,7 +49,7 @@ mod tests {
     fn test_mpmc_concurrent_access() {
         let stats = Arc::new(TopicStats::default());
         let ring = Arc::new(MPMCTopicRing::new(8192, stats).unwrap());
-        
+
         let ring_clone = ring.clone();
         let producer = std::thread::spawn(move || {
             for i in 0..10 {
@@ -57,7 +57,7 @@ mod tests {
                 ring_clone.try_publish(&message).unwrap();
             }
         });
-        
+
         let ring_clone = ring.clone();
         let consumer = std::thread::spawn(move || {
             let mut count = 0;
@@ -68,7 +68,7 @@ mod tests {
             }
             count
         });
-        
+
         producer.join().unwrap();
         let consumed_count = consumer.join().unwrap();
         assert_eq!(consumed_count, 10);

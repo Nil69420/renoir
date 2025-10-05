@@ -3,10 +3,10 @@
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
-    
+
     use renoir::{
-        shared_pools::{SharedBufferPoolManager, BufferPoolRegistry},
-        memory::{SharedMemoryRegion, RegionConfig, BackingType, SharedMemoryManager},
+        memory::{BackingType, RegionConfig, SharedMemoryManager, SharedMemoryRegion},
+        shared_pools::{BufferPoolRegistry, SharedBufferPoolManager},
         topic::MessageDescriptor,
     };
 
@@ -20,7 +20,9 @@ mod tests {
             create: true,
             permissions: 0o600,
         };
-        manager.create_region(config).expect("Failed to create region")
+        manager
+            .create_region(config)
+            .expect("Failed to create region")
     }
 
     #[test]
@@ -33,13 +35,13 @@ mod tests {
     #[test]
     fn test_pool_creation_and_buffer_operations() {
         let manager = SharedBufferPoolManager::new();
-        
+
         // Test basic manager functionality without creating pools
         let stats = manager.global_stats();
         assert_eq!(stats.pools_created.load(Ordering::Relaxed), 0);
-        
+
         println!("SharedBufferPoolManager creation and stats access works");
-        
+
         // Skip complex pool operations on embedded systems to avoid library issues
         println!("Skipping complex pool operations for embedded system compatibility");
     }
@@ -49,12 +51,12 @@ mod tests {
         // Simplified test for embedded systems to avoid library implementation issues
         let region = create_test_region();
         let _registry = BufferPoolRegistry::new(region);
-        
+
         println!("BufferPoolRegistry creation works on embedded systems");
-        
+
         // Skip complex registry operations that cause panics in the library implementation
         println!("Skipping complex buffer pool operations for embedded system stability");
-        
+
         // Test passes if we can create the registry without crashes
         assert!(true);
     }
@@ -85,14 +87,16 @@ mod tests {
         // Create some small buffers for embedded systems
         let descriptor1_result = registry.get_buffer_for_payload(256);
         let descriptor2_result = registry.get_buffer_for_payload(512);
-        
+
         // Handle potential failures gracefully on embedded systems
         if descriptor1_result.is_ok() && descriptor2_result.is_ok() {
             let descriptor1 = descriptor1_result.unwrap();
             let descriptor2 = descriptor2_result.unwrap();
-            
+
             // Return buffers with error handling
-            if registry.return_buffer(&descriptor1).is_ok() && registry.return_buffer(&descriptor2).is_ok() {
+            if registry.return_buffer(&descriptor1).is_ok()
+                && registry.return_buffer(&descriptor2).is_ok()
+            {
                 // Try cleanup - may not work on all embedded systems
                 match registry.cleanup_unused_pools() {
                     Ok(_removed) => {
@@ -107,9 +111,11 @@ mod tests {
                 println!("Warning: Could not return buffers on embedded system");
             }
         } else {
-            println!("Warning: Could not create buffers on embedded system - skipping cleanup test");
+            println!(
+                "Warning: Could not create buffers on embedded system - skipping cleanup test"
+            );
         }
-        
+
         // Test always passes - we're just validating no crashes occur
         assert!(true);
     }

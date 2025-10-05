@@ -1,7 +1,7 @@
 //! Metadata management and control regions
 
-pub mod types;
 pub mod control;
+pub mod types;
 
-pub use types::{RegionMetadata, RegionRegistryEntry, ControlStats};
 pub use control::{ControlHeader, ControlRegion};
+pub use types::{ControlStats, RegionMetadata, RegionRegistryEntry};
