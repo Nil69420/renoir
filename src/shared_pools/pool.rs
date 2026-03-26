@@ -2,13 +2,18 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock, Mutex, atomic::{AtomicU32, AtomicUsize, Ordering}},
+    sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
+use parking_lot::{Mutex, RwLock};
+
 use crate::{
+    buffers::{Buffer, BufferPool, BufferPoolConfig},
     error::{RenoirError, Result},
     memory::SharedMemoryRegion,
-    buffers::{Buffer, BufferPool, BufferPoolConfig},
     topic::MessageDescriptor,
 };
 
@@ -45,7 +50,7 @@ impl SharedBufferPool {
         memory_region: Arc<SharedMemoryRegion>,
     ) -> Result<Self> {
         let buffer_pool = Arc::new(BufferPool::new(config.clone(), memory_region)?);
-        
+
         Ok(Self {
             pool_id,
             name: config.name,
@@ -61,18 +66,18 @@ impl SharedBufferPool {
     pub fn get_buffer(&self) -> Result<MessageDescriptor> {
         let buffer = self.buffer_pool.get_buffer()?;
         let handle = self.next_handle.fetch_add(1, Ordering::SeqCst);
-        
+
         // Store buffer reference
         {
-            let mut buffers = self.buffers.write().unwrap();
+            let mut buffers = self.buffers.write();
             buffers.insert(handle, Arc::new(buffer));
         }
-        
+
         self.active_count.fetch_add(1, Ordering::Relaxed);
-        
+
         // Update statistics
         {
-            let stats = self.stats.lock().unwrap();
+            let stats = self.stats.lock();
             stats.buffers_allocated.fetch_add(1, Ordering::Relaxed);
             stats.current_active.fetch_add(1, Ordering::Relaxed);
         }
@@ -90,8 +95,8 @@ impl SharedBufferPool {
     pub fn return_buffer(&self, descriptor: &MessageDescriptor) -> Result<()> {
         if descriptor.pool_id != self.pool_id {
             return Err(RenoirError::invalid_parameter(
-                "pool_id", 
-                "Buffer does not belong to this pool"
+                "pool_id",
+                "Buffer does not belong to this pool",
             ));
         }
 
@@ -101,22 +106,21 @@ impl SharedBufferPool {
         }
 
         let buffer = {
-            let mut buffers = self.buffers.write().unwrap();
-            buffers.remove(&descriptor.buffer_handle)
-                .ok_or_else(|| RenoirError::invalid_parameter(
-                    "buffer_handle", 
-                    "Buffer handle not found"
-                ))?
+            let mut buffers = self.buffers.write();
+            buffers.remove(&descriptor.buffer_handle).ok_or_else(|| {
+                RenoirError::invalid_parameter("buffer_handle", "Buffer handle not found")
+            })?
         };
 
         // Return to underlying pool
-        self.buffer_pool.return_buffer(Arc::try_unwrap(buffer).unwrap())?;
-        
+        self.buffer_pool
+            .return_buffer(Arc::try_unwrap(buffer).unwrap())?;
+
         self.active_count.fetch_sub(1, Ordering::Relaxed);
 
         // Update statistics
         {
-            let stats = self.stats.lock().unwrap();
+            let stats = self.stats.lock();
             stats.buffers_returned.fetch_add(1, Ordering::Relaxed);
             stats.current_active.fetch_sub(1, Ordering::Relaxed);
         }
@@ -126,13 +130,10 @@ impl SharedBufferPool {
 
     /// Get buffer data for reading/writing
     pub fn get_buffer_data(&self, handle: BufferHandle) -> Result<Arc<Buffer>> {
-        let buffers = self.buffers.read().unwrap();
-        buffers.get(&handle)
-            .cloned()
-            .ok_or_else(|| RenoirError::invalid_parameter(
-                "buffer_handle", 
-                "Buffer handle not found"
-            ))
+        let buffers = self.buffers.read();
+        buffers.get(&handle).cloned().ok_or_else(|| {
+            RenoirError::invalid_parameter("buffer_handle", "Buffer handle not found")
+        })
     }
 
     /// Get the number of active buffers
@@ -147,7 +148,7 @@ impl SharedBufferPool {
 
     /// Get pool statistics (returns atomic values)
     pub fn stats(&self) -> (usize, usize, usize, usize) {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock();
         (
             stats.buffers_allocated.load(Ordering::Relaxed),
             stats.buffers_returned.load(Ordering::Relaxed),

@@ -109,7 +109,7 @@ impl AtomicBufferPoolStats {
     pub fn record_allocation(&self) {
         self.total_allocations.fetch_add(1, Ordering::Relaxed);
         let new_in_use = self.currently_in_use.fetch_add(1, Ordering::Relaxed) + 1;
-        
+
         // Update peak usage
         let current_peak = self.peak_usage.load(Ordering::Relaxed);
         if new_in_use > current_peak {
@@ -136,7 +136,8 @@ impl AtomicBufferPoolStats {
 
     /// Record buffer pool expansion
     pub fn record_expansion(&self, new_buffers: usize) {
-        self.total_allocated.fetch_add(new_buffers, Ordering::Relaxed);
+        self.total_allocated
+            .fetch_add(new_buffers, Ordering::Relaxed);
     }
 
     /// Get current statistics snapshot
@@ -170,7 +171,6 @@ impl Default for AtomicBufferPoolStats {
 
 /// Helper for generating buffer sequence numbers
 pub fn next_buffer_sequence() -> u64 {
-    static SEQUENCE_COUNTER: std::sync::atomic::AtomicU64 = 
-        std::sync::atomic::AtomicU64::new(1);
+    static SEQUENCE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     SEQUENCE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
 }

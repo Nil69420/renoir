@@ -66,6 +66,12 @@ run_test "Buffer Pool Example" "buffer_example" "false"
 run_test "Ring Buffer Example" "ring_buffer_example" "false"
 run_test "Control Region Example" "control_region_example" "true"
 
+# Topic examples
+run_test "Topic Basic Example" "topic_basic_example" "true"
+run_test "Topic Async Example" "topic_async_example" "true"
+run_test "Topic Comprehensive Example" "topic_comprehensive_example" "true"
+run_test "Topic Peek Example" "topic_peek_example" "true"
+
 # Print summary
 echo ""
 echo "================================"

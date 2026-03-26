@@ -3,10 +3,13 @@
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
-    
+
     use renoir::{
+        topic::{
+            MessageHeader, Reliability, TopicConfig, TopicPattern, TopicQoS, TopicStats,
+            MESSAGE_MAGIC, MESSAGE_VERSION,
+        },
         topic_manager_modules::{TopicManager, TopicManagerStats},
-        topic::{TopicConfig, TopicPattern, TopicQoS, Reliability},
     };
 
     #[test]
@@ -17,10 +20,10 @@ mod tests {
         assert_eq!(manager.topic_count(), 0);
     }
 
-    #[test]  
+    #[test]
     fn test_topic_creation_and_messaging() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "test_topic".to_string(),
             pattern: TopicPattern::SPSC,
@@ -63,7 +66,7 @@ mod tests {
         let message = received.unwrap();
         let header_topic_id = message.header.topic_id;
         assert_eq!(header_topic_id, topic_id);
-        
+
         match message.payload {
             renoir::topic::MessagePayload::Inline(data) => {
                 assert_eq!(data, payload);
@@ -80,7 +83,7 @@ mod tests {
     #[test]
     fn test_spsc_pattern_enforcement() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "spsc_topic".to_string(),
             pattern: TopicPattern::SPSC,
@@ -91,14 +94,14 @@ mod tests {
 
         // First publisher should succeed
         let _pub1 = manager.create_publisher("spsc_topic").unwrap();
-        
+
         // Second publisher should fail
         let pub2_result = manager.create_publisher("spsc_topic");
         assert!(pub2_result.is_err());
 
         // First subscriber should succeed
         let _sub1 = manager.create_subscriber("spsc_topic").unwrap();
-        
+
         // Second subscriber should fail
         let sub2_result = manager.create_subscriber("spsc_topic");
         assert!(sub2_result.is_err());
@@ -107,7 +110,7 @@ mod tests {
     #[test]
     fn test_mpmc_pattern_multiple_handles() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "mpmc_topic".to_string(),
             pattern: TopicPattern::MPMC,
@@ -119,7 +122,7 @@ mod tests {
         // Multiple publishers should succeed
         let _pub1 = manager.create_publisher("mpmc_topic").unwrap();
         let _pub2 = manager.create_publisher("mpmc_topic").unwrap();
-        
+
         // Multiple subscribers should succeed
         let _sub1 = manager.create_subscriber("mpmc_topic").unwrap();
         let _sub2 = manager.create_subscriber("mpmc_topic").unwrap();
@@ -128,7 +131,7 @@ mod tests {
     #[test]
     fn test_large_message_with_shared_pools() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "large_msg_topic".to_string(),
             pattern: TopicPattern::SPSC,
@@ -168,11 +171,12 @@ mod tests {
 
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let topic_name = format!("removable_topic_{}_{}", 
+        let topic_name = format!(
+            "removable_topic_{}_{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::SeqCst)
         );
-        
+
         let config = TopicConfig {
             name: topic_name.clone(),
             ..Default::default()
@@ -193,7 +197,7 @@ mod tests {
         };
         manager.create_topic(config).unwrap();
         let _publisher = manager.create_publisher(&topic_name).unwrap();
-        
+
         // Should not be able to remove topic with active publisher
         let result = manager.remove_topic(&topic_name);
         assert!(result.is_err());
@@ -202,7 +206,7 @@ mod tests {
     #[test]
     fn test_publisher_subscriber_features() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "feature_test_topic".to_string(),
             pattern: TopicPattern::SPSC,
@@ -231,40 +235,43 @@ mod tests {
         // Test basic publish/subscribe functionality (embedded system compatible)
         let publish_result1 = publisher.publish(b"test1".to_vec());
         let publish_result2 = publisher.publish(b"test2".to_vec());
-        
+
         // Verify publishing worked
         assert!(publish_result1.is_ok(), "First publish should succeed");
         assert!(publish_result2.is_ok(), "Second publish should succeed");
 
         // Test message consumption - be flexible about implementation details
         let mut total_consumed = 0;
-        
+
         // Try to get messages via subscription
-        for _ in 0..5 { // Try a few times for embedded systems
+        for _ in 0..5 {
+            // Try a few times for embedded systems
             if let Ok(Some(_msg)) = subscriber.subscribe() {
                 total_consumed += 1;
             }
         }
-        
+
         // If direct subscription didn't work, try drain_messages
         if total_consumed == 0 {
             if let Ok(drained_messages) = subscriber.drain_messages() {
                 total_consumed += drained_messages.len();
             }
         }
-        
+
         // Basic functionality test - should be able to publish and potentially consume
-        println!("Publisher-Subscriber test: published 2, consumed {}", total_consumed);
-        
+        println!(
+            "Publisher-Subscriber test: published 2, consumed {}",
+            total_consumed
+        );
+
         // Test passes if basic functionality works (publishing succeeded)
         // Consumption behavior may vary between embedded systems
-        assert!(true, "Basic publisher-subscriber functionality test completed");
     }
 
     #[test]
     fn test_payload_size_validation() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "size_test_topic".to_string(),
             max_payload_size: 100,
@@ -286,7 +293,7 @@ mod tests {
     #[test]
     fn test_try_publish() {
         let manager = TopicManager::new().unwrap();
-        
+
         let config = TopicConfig {
             name: "try_publish_topic".to_string(),
             ring_capacity: 4, // Small capacity, power of 2
@@ -310,7 +317,7 @@ mod tests {
                 break; // Ring is full
             }
         }
-        
+
         // Verify that we can detect when publishing fails due to full buffer
         if publisher.is_full() {
             let msg = b"overflow_msg".to_vec();
@@ -318,15 +325,18 @@ mod tests {
             // Should either return Ok(false) or handle gracefully on embedded systems
             assert!(publish_result.is_ok());
         }
-        
+
         // Test completed successfully
-        assert!(messages_published >= 2, "Should publish at least 2 messages");
+        assert!(
+            messages_published >= 2,
+            "Should publish at least 2 messages"
+        );
     }
 
     #[test]
     fn test_topic_manager_stats() {
         let stats = TopicManagerStats::new();
-        
+
         assert_eq!(stats.active_topics(), 0);
         assert_eq!(stats.total_published(), 0);
         assert_eq!(stats.total_consumed(), 0);
@@ -364,7 +374,7 @@ mod tests {
     #[test]
     fn test_topic_list() {
         let manager = TopicManager::new().unwrap();
-        
+
         let topics = manager.list_topics();
         assert!(topics.is_empty());
 
@@ -390,9 +400,65 @@ mod tests {
         assert_eq!(topic1_entry.1, id1);
         assert_eq!(topic1_entry.2.pattern, TopicPattern::SPSC);
 
-        // Find topic2 in the list  
+        // Find topic2 in the list
         let topic2_entry = topics.iter().find(|(name, _, _)| name == "topic2").unwrap();
         assert_eq!(topic2_entry.1, id2);
         assert_eq!(topic2_entry.2.pattern, TopicPattern::MPMC);
+    }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_message_header_creation() {
+        let header = MessageHeader::new(42, 1337, 1024);
+
+        let magic = header.magic;
+        let version = header.version;
+        let topic_id = header.topic_id;
+        let sequence = header.sequence;
+        let payload_length = header.payload_length;
+        let timestamp = header.timestamp;
+
+        assert_eq!(magic, MESSAGE_MAGIC);
+        assert_eq!(version, MESSAGE_VERSION);
+        assert_eq!(topic_id, 42);
+        assert_eq!(sequence, 1337);
+        assert_eq!(payload_length, 1024);
+        assert!(timestamp > 0);
+    }
+
+    #[test]
+    fn test_message_header_validation() {
+        let mut header = MessageHeader::new(1, 1, 100);
+        assert!(header.validate().is_ok());
+
+        header.magic = 0xDEADBEEF;
+        assert!(header.validate().is_err());
+    }
+
+    #[test]
+    fn test_message_checksum() {
+        let payload = b"Hello, Renoir!";
+        let mut header = MessageHeader::new(1, 1, payload.len() as u32);
+
+        header.set_checksum(payload);
+        assert!(header.verify_checksum(payload));
+        assert!(!header.verify_checksum(b"Different data"));
+    }
+
+    #[test]
+    fn test_topic_stats_recording() {
+        let stats = TopicStats::default();
+
+        let seq1 = stats.record_published(1024);
+        let seq2 = stats.record_published(2048);
+
+        assert_eq!(seq1, 1);
+        assert_eq!(seq2, 2);
+        assert_eq!(stats.messages_published.load(Ordering::Relaxed), 2);
+        assert_eq!(stats.avg_message_size.load(Ordering::Relaxed), 1536);
+
+        stats.record_consumed();
+        assert_eq!(stats.messages_consumed.load(Ordering::Relaxed), 1);
     }
 }

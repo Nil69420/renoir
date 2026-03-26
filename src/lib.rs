@@ -36,10 +36,10 @@
 // All code should be actively used in production
 
 // Core modules
-pub mod error;
-pub mod memory;
 pub mod allocators;
 pub mod buffers;
+pub mod error;
+pub mod memory;
 pub mod metadata_modules;
 pub mod ringbuf;
 pub mod shared_pools;
@@ -61,25 +61,34 @@ pub mod sync;
 pub mod ffi;
 
 // Main API re-exports
-pub use memory::SharedMemoryManager;
-pub use topic_manager_modules::{TopicManager, Publisher, Subscriber, TopicId, TopicManagerStats};
-pub use topic::{TopicConfig, TopicPattern, Message};
-pub use error::{RenoirError, Result};
 pub use allocators::{Allocator, AllocatorExt, BumpAllocator, PoolAllocator};
-pub use buffers::{Buffer, BufferPool, BufferPoolConfig, BufferPoolConfigBuilder, BufferPoolStats, AtomicBufferPoolStats};
-pub use shared_pools::{SharedBufferPoolManager, SharedBufferPool, BufferPoolRegistry, PoolId, BufferHandle};
-pub use memory::{BackingType, RegionConfig, SharedMemoryRegion, RegionMemoryStats};
-pub use metadata_modules::{RegionMetadata, RegionRegistryEntry, ControlStats, ControlHeader, ControlRegion};
-pub use structured_layout::{StructuredMemoryRegion, GlobalStats, GlobalControlHeader, TopicDirectory};
-pub use topic_rings::{SPSCTopicRing, MPMCTopicRing};
-pub use ringbuf::{RingBuffer, Producer, Consumer, SequencedRingBuffer, ClaimGuard};
-pub use sync::{
-    sequence::{AtomicSequence, SequenceChecker, GlobalSequenceGenerator, SequenceNumber},
-    swmr::{SWMRRing, SharedSWMRRing, WriterHandle, ReaderHandle},
-    epoch::{EpochManager, SharedEpochManager, EpochReclaim, ReaderTracker},
-    notify::{EventNotifier, NotificationGroup, BatchNotifier, NotifyCondition},
-    SyncError, SyncResult
+pub use buffers::{
+    AtomicBufferPoolStats, Buffer, BufferPool, BufferPoolConfig, BufferPoolConfigBuilder,
+    BufferPoolStats,
 };
+pub use error::{RenoirError, Result};
+pub use memory::SharedMemoryManager;
+pub use memory::{BackingType, RegionConfig, RegionMemoryStats, SharedMemoryRegion};
+pub use metadata_modules::{
+    ControlHeader, ControlRegion, ControlStats, RegionMetadata, RegionRegistryEntry,
+};
+pub use ringbuf::{ClaimGuard, Consumer, Producer, RingBuffer, SequencedRingBuffer};
+pub use shared_pools::{
+    BufferHandle, BufferPoolRegistry, PoolId, SharedBufferPool, SharedBufferPoolManager,
+};
+pub use structured_layout::{
+    GlobalControlHeader, GlobalStats, StructuredMemoryRegion, TopicDirectory,
+};
+pub use sync::{
+    epoch::{EpochManager, EpochReclaim, ReaderTracker, SharedEpochManager},
+    notify::{BatchNotifier, EventNotifier, NotificationGroup, NotifyCondition},
+    sequence::{AtomicSequence, GlobalSequenceGenerator, SequenceChecker, SequenceNumber},
+    swmr::{ReaderHandle, SWMRRing, SharedSWMRRing, WriterHandle},
+    SyncError, SyncResult,
+};
+pub use topic::{Message, TopicConfig, TopicPattern};
+pub use topic_manager_modules::{Publisher, Subscriber, TopicId, TopicManager, TopicManagerStats};
+pub use topic_rings::{MPMCTopicRing, SPSCTopicRing};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -91,13 +100,13 @@ pub const VERSION_PATCH: u32 = 0;
 pub mod config {
     /// Default size for control/metadata region (64KB)
     pub const DEFAULT_CONTROL_SIZE: usize = 64 * 1024;
-    
+
     /// Default alignment for memory allocations
     pub const DEFAULT_ALIGNMENT: usize = 64;
-    
+
     /// Maximum number of named regions supported
     pub const MAX_REGIONS: usize = 1024;
-    
+
     /// Default ring buffer capacity
     pub const DEFAULT_RING_CAPACITY: usize = 4096;
 }

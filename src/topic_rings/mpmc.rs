@@ -1,17 +1,18 @@
 //! Multi Producer Multi Consumer ring buffer for topic messaging
 
 use std::{
+    os::fd::RawFd,
+    ptr::NonNull,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    ptr::NonNull,
-    os::fd::RawFd,
 };
 
 use crate::{
     error::{RenoirError, Result},
-    topic::{Message, MessageHeader, TopicStats, MessageDescriptor},
+    sync::MioEventNotification,
+    topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
 };
 
 /// Multi-Producer Multi-Consumer ring buffer for topics with multiple writers/readers
@@ -23,13 +24,12 @@ pub struct MPMCTopicRing {
     capacity: usize,
     /// Write position (atomic for multiple producers)
     write_pos: AtomicUsize,
-    /// Read position (atomic for multiple consumers) 
+    /// Read position (atomic for multiple consumers)
     read_pos: AtomicUsize,
     /// Topic statistics
     stats: Arc<TopicStats>,
-    /// Notification file descriptor (Linux only)
-    #[cfg(target_os = "linux")]
-    notify_fd: Option<std::os::fd::OwnedFd>,
+    /// Mio-based event notification system
+    notifier: Arc<MioEventNotification>,
 }
 
 impl MPMCTopicRing {
@@ -38,7 +38,7 @@ impl MPMCTopicRing {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
                 "capacity",
-                "Capacity must be a power of 2 and greater than 0"
+                "Capacity must be a power of 2 and greater than 0",
             ));
         }
 
@@ -50,8 +50,8 @@ impl MPMCTopicRing {
             NonNull::new(ptr).ok_or_else(|| RenoirError::memory("Failed to allocate MPMC ring"))?
         };
 
-        #[cfg(target_os = "linux")]
-        let notify_fd = Self::create_eventfd()?;
+        let notifier = MioEventNotification::new()
+            .map_err(|_| RenoirError::memory("Failed to create event notifier"))?;
 
         Ok(Self {
             buffer,
@@ -59,18 +59,8 @@ impl MPMCTopicRing {
             write_pos: AtomicUsize::new(0),
             read_pos: AtomicUsize::new(0),
             stats,
-            #[cfg(target_os = "linux")]
-            notify_fd,
+            notifier,
         })
-    }
-
-    #[cfg(target_os = "linux")]
-    fn create_eventfd() -> Result<Option<std::os::fd::OwnedFd>> {
-        use nix::sys::eventfd::{eventfd, EfdFlags};
-        
-        let fd = eventfd(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
-            .map_err(|_| RenoirError::memory("Failed to create eventfd"))?;
-        Ok(Some(fd))
     }
 
     /// Get the buffer capacity
@@ -81,18 +71,18 @@ impl MPMCTopicRing {
     /// Try to publish a message (thread-safe for multiple producers)
     pub fn try_publish(&self, message: &Message) -> Result<()> {
         let message_size = message.total_size();
-        
+
         // Atomic allocation of write space
         let write_start = loop {
             let current_write = self.write_pos.load(Ordering::Relaxed);
             let current_read = self.read_pos.load(Ordering::Acquire);
-            
+
             // Check if we have enough space
             if current_write.wrapping_sub(current_read) + message_size > self.capacity {
                 self.stats.record_dropped();
                 return Err(RenoirError::buffer_full("MPMC ring is full"));
             }
-            
+
             // Try to atomically reserve space
             match self.write_pos.compare_exchange_weak(
                 current_write,
@@ -115,8 +105,10 @@ impl MPMCTopicRing {
         // Record statistics
         let _sequence = self.stats.record_published(message_size);
 
-        // Notify readers
-        self.notify_readers()?;
+        // Notify readers if enabled
+        if self.notifier.is_enabled() {
+            let _ = self.notifier.notify(); // Ignore notification errors
+        }
 
         Ok(())
     }
@@ -126,7 +118,7 @@ impl MPMCTopicRing {
         loop {
             let current_read = self.read_pos.load(Ordering::Relaxed);
             let current_write = self.write_pos.load(Ordering::Acquire);
-            
+
             if current_read == current_write {
                 return Ok(None); // No data available
             }
@@ -142,7 +134,7 @@ impl MPMCTopicRing {
             };
 
             let message_size = MessageHeader::SIZE + header.payload_length as usize;
-            
+
             // Try to atomically reserve the message
             match self.read_pos.compare_exchange_weak(
                 current_read,
@@ -156,7 +148,7 @@ impl MPMCTopicRing {
                         let read_ptr = self.buffer.as_ptr().add(buffer_pos);
                         self.deserialize_message(&header, read_ptr)?
                     };
-                    
+
                     self.stats.record_consumed();
                     return Ok(Some(message));
                 }
@@ -165,20 +157,65 @@ impl MPMCTopicRing {
         }
     }
 
-    fn notify_readers(&self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        if let Some(ref owned_fd) = self.notify_fd {
-            use nix::unistd::write;
-            use std::os::fd::AsRawFd;
-            let fd = owned_fd.as_raw_fd();
-            let value: u64 = 1;
-            let buf = value.to_ne_bytes();
-            let _ = write(fd, &buf); // Ignore write errors for notifications
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message at the head of the queue without advancing the read position
+    /// Note: In MPMC mode, the message may be consumed by another thread between peek and consume
+    ///
+    /// # Safety note
+    /// Messages are assumed not to wrap around the ring buffer boundary.
+    /// `try_publish` enforces that each message fits contiguously from its write
+    /// position (modulo capacity), so this is safe as long as messages are
+    /// smaller than capacity.
+    pub fn try_peek(&self) -> Result<Option<Message>> {
+        let current_read = self.read_pos.load(Ordering::Acquire);
+        let current_write = self.write_pos.load(Ordering::Acquire);
+
+        if current_read == current_write {
+            return Ok(None); // No data available
         }
-        Ok(())
+
+        // Read message header
+        let buffer_pos = current_read & (self.capacity - 1);
+
+        // Guard against wrap-around: if the message would span past the buffer
+        // end, the data is not contiguous and we cannot safely deserialize.
+        let header = unsafe {
+            if buffer_pos + MessageHeader::SIZE > self.capacity {
+                return Ok(None); // Header wraps — skip
+            }
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_header(read_ptr)?
+        };
+
+        let message_size = MessageHeader::SIZE + header.payload_length as usize;
+
+        // Check if we have enough data for the complete message
+        if current_write.wrapping_sub(current_read) < message_size {
+            return Ok(None); // Incomplete message
+        }
+
+        // Ensure the message doesn't wrap around the buffer boundary
+        if buffer_pos + message_size > self.capacity {
+            return Ok(None); // Message wraps — cannot safely read contiguously
+        }
+
+        // Read the complete message (but don't advance read position)
+        let message = unsafe {
+            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
+            self.deserialize_message(&header, read_ptr)?
+        };
+
+        // Note: read_pos is NOT updated - this is the key difference from try_consume
+        // In MPMC, another consumer may consume this message before the caller can act on it
+        Ok(Some(message))
     }
 
-    unsafe fn serialize_message(&self, message: &Message, ptr: *mut u8, _size: usize) -> Result<()> {
+    unsafe fn serialize_message(
+        &self,
+        message: &Message,
+        ptr: *mut u8,
+        _size: usize,
+    ) -> Result<()> {
         // Write header
         std::ptr::copy_nonoverlapping(
             &message.header as *const MessageHeader as *const u8,
@@ -190,11 +227,7 @@ impl MPMCTopicRing {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
         match &message.payload {
             crate::topic::MessagePayload::Inline(data) => {
-                std::ptr::copy_nonoverlapping(
-                    data.as_ptr(),
-                    payload_ptr,
-                    data.len(),
-                );
+                std::ptr::copy_nonoverlapping(data.as_ptr(), payload_ptr, data.len());
             }
             crate::topic::MessagePayload::Descriptor(desc) => {
                 std::ptr::copy_nonoverlapping(
@@ -214,11 +247,16 @@ impl MPMCTopicRing {
         Ok(header)
     }
 
-    unsafe fn deserialize_message(&self, header: &MessageHeader, ptr: *const u8) -> Result<Message> {
+    unsafe fn deserialize_message(
+        &self,
+        header: &MessageHeader,
+        ptr: *const u8,
+    ) -> Result<Message> {
         let payload_ptr = ptr.add(MessageHeader::SIZE);
-        
+
         let payload = if header.payload_length <= std::mem::size_of::<MessageDescriptor>() as u32 {
-            let desc: MessageDescriptor = std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
+            let desc: MessageDescriptor =
+                std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
             crate::topic::MessagePayload::Descriptor(desc)
         } else {
             let mut data = vec![0u8; header.payload_length as usize];
@@ -236,16 +274,21 @@ impl MPMCTopicRing {
         })
     }
 
+    /// Get the eventfd for external polling
     #[cfg(target_os = "linux")]
     pub fn notification_fd(&self) -> Option<RawFd> {
-        use std::os::fd::AsRawFd;
-        self.notify_fd.as_ref().map(|fd| fd.as_raw_fd())
+        self.notifier.event_fd()
+    }
+
+    /// Enable or disable notifications
+    pub fn set_notifications(&self, enabled: bool) {
+        self.notifier.set_enabled(enabled);
     }
 }
 
 impl Drop for MPMCTopicRing {
     fn drop(&mut self) {
-        // OwnedFd will automatically close on drop, no manual close needed
+        // MioEventNotification will automatically clean up eventfd on drop
 
         let layout = std::alloc::Layout::array::<u8>(self.capacity).unwrap();
         unsafe {

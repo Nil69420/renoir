@@ -1,8 +1,8 @@
 //! Message types and payload handling
 
-use std::sync::atomic::{AtomicU32, Ordering};
-use crate::error::{RenoirError, Result};
 use super::header::MessageHeader;
+use crate::error::{RenoirError, Result};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Large message descriptor for shared buffer pool
 #[derive(Debug)]
@@ -28,12 +28,12 @@ impl MessageDescriptor {
             ref_count: AtomicU32::new(1),
         }
     }
-    
+
     /// Increment reference count
     pub fn add_ref(&self) -> u32 {
         self.ref_count.fetch_add(1, Ordering::SeqCst)
     }
-    
+
     /// Decrement reference count, returns true if should be freed
     pub fn release(&self) -> bool {
         self.ref_count.fetch_sub(1, Ordering::SeqCst) == 1
@@ -63,43 +63,48 @@ impl Message {
     pub fn new_inline(topic_id: u32, sequence: u64, payload: Vec<u8>) -> Self {
         let mut header = MessageHeader::new(topic_id, sequence, payload.len() as u32);
         header.set_checksum(&payload);
-        
+
         Self {
             header,
             payload: MessagePayload::Inline(payload),
         }
     }
-    
+
     /// Create a new descriptor-based message
     pub fn new_descriptor(topic_id: u32, sequence: u64, descriptor: MessageDescriptor) -> Self {
         // For descriptor messages, the payload_length is the size of the descriptor itself,
         // not the size of the data it references
-        let header = MessageHeader::new(topic_id, sequence, std::mem::size_of::<MessageDescriptor>() as u32);
-        
+        let header = MessageHeader::new(
+            topic_id,
+            sequence,
+            std::mem::size_of::<MessageDescriptor>() as u32,
+        );
+
         Self {
             header,
             payload: MessagePayload::Descriptor(descriptor),
         }
     }
-    
+
     /// Get the total message size (header + payload)
     pub fn total_size(&self) -> usize {
-        MessageHeader::SIZE + match &self.payload {
-            MessagePayload::Inline(data) => data.len(),
-            MessagePayload::Descriptor(_) => std::mem::size_of::<MessageDescriptor>(),
-        }
+        MessageHeader::SIZE
+            + match &self.payload {
+                MessagePayload::Inline(data) => data.len(),
+                MessagePayload::Descriptor(_) => std::mem::size_of::<MessageDescriptor>(),
+            }
     }
-    
+
     /// Validate the message integrity
     pub fn validate(&self) -> Result<()> {
         self.header.validate()?;
-        
+
         match &self.payload {
             MessagePayload::Inline(data) => {
                 if !self.header.verify_checksum(data) {
                     return Err(RenoirError::invalid_parameter(
                         "checksum",
-                        "Message checksum validation failed"
+                        "Message checksum validation failed",
                     ));
                 }
             }
@@ -107,7 +112,7 @@ impl Message {
                 // Descriptor validation would require access to buffer pool
             }
         }
-        
+
         Ok(())
     }
 }

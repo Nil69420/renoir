@@ -1,7 +1,7 @@
 //! FFI type definitions and handle types
 
-use std::ffi::{c_char, c_void};
 use crate::error::RenoirError;
+use std::ffi::{c_char, c_void};
 
 /// Opaque handle types for C API
 pub type RenoirManagerHandle = *mut c_void;
@@ -160,7 +160,7 @@ pub type RenoirReceivedMessageHandle = *mut c_void;
 /// Topic options for registration
 #[repr(C)]
 pub struct RenoirTopicOptions {
-    pub pattern: u32,           // 0 = SPSC, 1 = SPMC, 2 = MPSC, 3 = MPMC
+    pub pattern: u32, // 0 = SPSC, 1 = SPMC, 2 = MPSC, 3 = MPMC
     pub ring_capacity: usize,
     pub max_payload_size: usize,
     pub use_shared_pool: bool,
@@ -172,17 +172,17 @@ pub struct RenoirTopicOptions {
 #[repr(C)]
 pub struct RenoirPublisherOptions {
     pub batch_size: usize,
-    pub timeout_ms: u64,        // 0 = no timeout
-    pub priority: u32,          // 0 = normal, 1 = high
+    pub timeout_ms: u64, // 0 = no timeout
+    pub priority: u32,   // 0 = normal, 1 = high
     pub enable_batching: bool,
 }
 
 /// Subscriber options and modes
 #[repr(C)]
 pub struct RenoirSubscriberOptions {
-    pub mode: u32,              // 0 = blocking, 1 = non-blocking, 2 = polling
+    pub mode: u32, // 0 = blocking, 1 = non-blocking, 2 = polling
     pub batch_size: usize,
-    pub timeout_ms: u64,        // 0 = no timeout
+    pub timeout_ms: u64, // 0 = no timeout
     pub queue_depth: usize,
     pub enable_filtering: bool,
 }

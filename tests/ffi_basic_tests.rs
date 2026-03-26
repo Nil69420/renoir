@@ -1,16 +1,18 @@
 //! FFI (C API) Integration Tests
-//! 
+//!
 //! Tests for the C foreign function interface to validate
 //! C/C++ integration capabilities
 
 #[cfg(feature = "c-api")]
 use renoir::ffi::{
-    renoir_version_major, renoir_version_minor, renoir_version_patch, 
-    renoir_version_string, renoir_free_string,
-    renoir_manager_create, renoir_manager_destroy,
-    RenoirErrorCode,
+    renoir_free_string, renoir_manager_create, renoir_manager_destroy, renoir_topic_manager_create,
+    renoir_topic_manager_destroy, renoir_topic_register, renoir_version_major,
+    renoir_version_minor, renoir_version_patch, renoir_version_string, RenoirErrorCode,
+    RenoirTopicId, RenoirTopicOptions,
 };
 use std::ffi::CStr;
+#[cfg(feature = "c-api")]
+use std::ffi::CString;
 use std::ptr;
 
 #[cfg(test)]
@@ -24,20 +26,20 @@ mod ffi_tests {
             let major = renoir_version_major();
             let minor = renoir_version_minor();
             let patch = renoir_version_patch();
-            
+
             // Version should be reasonable
             assert!(major < 100);
             assert!(minor < 100);
             assert!(patch < 1000);
-            
+
             // Test version string
             let version_ptr = renoir_version_string();
             assert!(!version_ptr.is_null());
-            
+
             let version_str = CStr::from_ptr(version_ptr).to_string_lossy();
             assert!(!version_str.is_empty());
             assert!(version_str.contains(&major.to_string()));
-            
+
             // Clean up string
             renoir_free_string(version_ptr);
         }
@@ -48,7 +50,7 @@ mod ffi_tests {
         // Create manager
         let manager = renoir_manager_create();
         assert!(!manager.is_null());
-        
+
         // Destroy manager
         renoir_manager_destroy(manager);
     }
@@ -56,10 +58,10 @@ mod ffi_tests {
     #[test]
     fn test_null_pointer_safety() {
         // Test that passing null pointers doesn't crash
-        
+
         // Null manager operations
         renoir_manager_destroy(ptr::null_mut()); // Should not crash
-        
+
         // Null string operations
         renoir_free_string(ptr::null_mut()); // Should not crash
     }
@@ -68,13 +70,13 @@ mod ffi_tests {
     fn test_string_handling() {
         unsafe {
             let version_ptr = renoir_version_string();
-            
+
             if !version_ptr.is_null() {
                 // Verify string is valid UTF-8
                 let version_cstr = CStr::from_ptr(version_ptr);
                 let version_str = version_cstr.to_str();
                 assert!(version_str.is_ok());
-                
+
                 // Clean up
                 renoir_free_string(version_ptr);
             }
@@ -86,11 +88,11 @@ mod ffi_tests {
         // This is a basic test - real concurrent testing would need multiple threads
         let manager1 = renoir_manager_create();
         let manager2 = renoir_manager_create();
-        
+
         // Both should be valid (or both null if creation fails)
         if !manager1.is_null() {
             assert!(!manager2.is_null());
-            
+
             renoir_manager_destroy(manager1);
             renoir_manager_destroy(manager2);
         }
@@ -113,9 +115,12 @@ mod ffi_tests {
         assert_eq!(RenoirErrorCode::Success as i32, 0);
         assert_ne!(RenoirErrorCode::InvalidParameter as i32, 0);
         assert_ne!(RenoirErrorCode::OutOfMemory as i32, 0);
-        
+
         // Ensure different error codes have different values
-        assert_ne!(RenoirErrorCode::InvalidParameter, RenoirErrorCode::OutOfMemory);
+        assert_ne!(
+            RenoirErrorCode::InvalidParameter,
+            RenoirErrorCode::OutOfMemory
+        );
     }
 
     #[test]
@@ -124,14 +129,46 @@ mod ffi_tests {
         let major1 = renoir_version_major();
         let major2 = renoir_version_major();
         assert_eq!(major1, major2);
-        
+
         let minor1 = renoir_version_minor();
         let minor2 = renoir_version_minor();
         assert_eq!(minor1, minor2);
-        
+
         let patch1 = renoir_version_patch();
         let patch2 = renoir_version_patch();
         assert_eq!(patch1, patch2);
+    }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_topic_manager_create_and_register() {
+        let manager = renoir_topic_manager_create();
+        assert!(!manager.is_null());
+
+        let topic_name = CString::new("/test/topic").unwrap();
+        let options = RenoirTopicOptions {
+            pattern: 0,
+            ring_capacity: 16,
+            max_payload_size: 1024,
+            use_shared_pool: false,
+            shared_pool_threshold: 0,
+            enable_notifications: true,
+        };
+
+        let mut topic_id: RenoirTopicId = 0;
+        let result = renoir_topic_register(
+            manager,
+            topic_name.as_ptr(),
+            &options as *const _,
+            &mut topic_id as *mut _,
+        );
+
+        assert_eq!(result, RenoirErrorCode::Success);
+        assert_ne!(topic_id, 0);
+
+        let destroy_result = renoir_topic_manager_destroy(manager);
+        assert_eq!(destroy_result, RenoirErrorCode::Success);
     }
 }
 

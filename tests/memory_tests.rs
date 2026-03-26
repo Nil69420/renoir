@@ -1,9 +1,7 @@
 //! Integration tests for memory management components
 
+use renoir::memory::{BackingType, RegionConfig, SharedMemoryManager, SharedMemoryRegion};
 use tempfile::TempDir;
-use renoir::{
-    memory::{BackingType, RegionConfig, SharedMemoryRegion, SharedMemoryManager},
-};
 
 #[cfg(test)]
 mod tests {
@@ -23,7 +21,7 @@ mod tests {
             .with_backing_type(BackingType::FileBacked)
             .with_create(true)
             .with_permissions(0o600);
-        
+
         assert_eq!(config.name, "test");
         assert_eq!(config.size, 4096);
         assert_eq!(config.backing_type, BackingType::FileBacked);
@@ -34,14 +32,14 @@ mod tests {
     #[test]
     fn test_region_config_validation() {
         let mut config = RegionConfig::default();
-        
+
         // Empty name should fail
         assert!(config.validate().is_err());
-        
+
         config.name = "test".to_string();
         // Zero size should fail
         assert!(config.validate().is_err());
-        
+
         config.size = 4096;
         // Valid config should pass
         assert!(config.validate().is_ok());
@@ -96,17 +94,17 @@ mod tests {
         };
 
         let mut region = SharedMemoryRegion::new(config).unwrap();
-        
+
         // Test mutable access
         let slice = region.as_mut_slice();
         slice[0] = 42;
         slice[1] = 24;
-        
+
         // Test read-only access
         let read_slice = region.as_slice();
         assert_eq!(read_slice[0], 42);
         assert_eq!(read_slice[1], 24);
-        
+
         // Test pointer access
         let ptr = region.as_ptr::<u8>();
         unsafe {
@@ -134,7 +132,7 @@ mod tests {
         let _region = manager.create_region(config).unwrap();
         assert_eq!(manager.region_count(), 1);
         assert!(manager.has_region("test_region"));
-        
+
         // Get region
         let retrieved = manager.get_region("test_region").unwrap();
         assert_eq!(retrieved.name(), "test_region");
@@ -153,7 +151,7 @@ mod tests {
     #[test]
     fn test_manager_memory_stats() {
         let manager = SharedMemoryManager::new();
-        
+
         let temp_dir = TempDir::new().unwrap();
         let config1 = RegionConfig {
             name: "region1".to_string(),
@@ -178,13 +176,13 @@ mod tests {
 
         // Test memory statistics
         assert_eq!(manager.total_memory_usage(), 4096 + 8192);
-        
+
         let stats = manager.memory_stats();
         assert_eq!(stats.len(), 2);
-        
+
         let region1_stats = stats.iter().find(|s| s.name == "region1").unwrap();
         assert_eq!(region1_stats.size, 4096);
-        
+
         let region2_stats = stats.iter().find(|s| s.name == "region2").unwrap();
         assert_eq!(region2_stats.size, 8192);
     }
@@ -192,7 +190,7 @@ mod tests {
     #[test]
     fn test_manager_clear() {
         let manager = SharedMemoryManager::new();
-        
+
         let temp_dir = TempDir::new().unwrap();
         for i in 0..3 {
             let config = RegionConfig {
@@ -207,7 +205,7 @@ mod tests {
         }
 
         assert_eq!(manager.region_count(), 3);
-        
+
         manager.clear().unwrap();
         assert_eq!(manager.region_count(), 0);
     }

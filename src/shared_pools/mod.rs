@@ -5,10 +5,10 @@
 
 pub mod manager;
 pub mod pool;
-pub mod stats;
 pub mod registry;
+pub mod stats;
 
-pub use manager::{SharedBufferPoolManager, PoolId};
-pub use pool::{SharedBufferPool, BufferHandle};
-pub use stats::{SharedPoolStats, SharedPoolBufferStats};
+pub use manager::{PoolId, SharedBufferPoolManager};
+pub use pool::{BufferHandle, SharedBufferPool};
 pub use registry::BufferPoolRegistry;
+pub use stats::{SharedPoolBufferStats, SharedPoolStats};

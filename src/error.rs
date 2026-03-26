@@ -1,7 +1,5 @@
 //! Error types and handling for Renoir
 
-
-
 /// Result type alias for Renoir operations
 pub type Result<T> = std::result::Result<T, RenoirError>;
 
@@ -10,7 +8,7 @@ pub type Result<T> = std::result::Result<T, RenoirError>;
 pub enum RenoirError {
     /// I/O related errors (file operations, mmap, etc.)
     #[error("I/O error: {message}")]
-    Io { 
+    Io {
         message: String,
         #[source]
         source: Option<std::io::Error>,
@@ -91,16 +89,12 @@ impl RenoirError {
 
     /// Create a region not found error
     pub fn region_not_found(name: impl Into<String>) -> Self {
-        Self::RegionNotFound {
-            name: name.into(),
-        }
+        Self::RegionNotFound { name: name.into() }
     }
 
     /// Create a region exists error
     pub fn region_exists(name: impl Into<String>) -> Self {
-        Self::RegionExists {
-            name: name.into(),
-        }
+        Self::RegionExists { name: name.into() }
     }
 
     /// Create an insufficient space error
@@ -167,30 +161,5 @@ impl From<std::io::Error> for RenoirError {
 impl From<bincode::Error> for RenoirError {
     fn from(err: bincode::Error) -> Self {
         Self::serialization(format!("Bincode error: {}", err))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_error_creation() {
-        let err = RenoirError::memory("Out of memory");
-        assert!(matches!(err, RenoirError::Memory { .. }));
-
-        let err = RenoirError::region_not_found("test_region");
-        assert!(matches!(err, RenoirError::RegionNotFound { .. }));
-
-        let err = RenoirError::insufficient_space(1024, 512);
-        assert!(matches!(err, RenoirError::InsufficientSpace { .. }));
-    }
-
-    #[test]
-    fn test_error_display() {
-        let err = RenoirError::memory("Test message");
-        let display = format!("{}", err);
-        assert!(display.contains("Memory error"));
-        assert!(display.contains("Test message"));
     }
 }

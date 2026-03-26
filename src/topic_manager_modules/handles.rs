@@ -1,18 +1,21 @@
 //! Publisher and Subscriber handles for topic communication
 
 use std::{
-    sync::{Arc, atomic::{AtomicUsize, Ordering}},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use crate::{
     error::Result,
-    topic::{TopicConfig, TopicStats, Message},
+    topic::{Message, TopicConfig, TopicStats},
 };
 
 use super::{
+    instance::{PublisherHandle, SubscriberHandle, TopicInstance},
     manager::TopicId,
-    instance::{TopicInstance, PublisherHandle, SubscriberHandle},
 };
 
 /// Publisher handle for publishing messages to a topic
@@ -25,7 +28,11 @@ pub struct Publisher {
 
 impl Publisher {
     /// Create a new publisher (internal use)
-    pub(super) fn new(handle: PublisherHandle, topic_id: TopicId, topic: Arc<TopicInstance>) -> Self {
+    pub(super) fn new(
+        handle: PublisherHandle,
+        topic_id: TopicId,
+        topic: Arc<TopicInstance>,
+    ) -> Self {
         Self {
             handle,
             topic_id,
@@ -38,7 +45,7 @@ impl Publisher {
         if payload.len() > self.topic.config.max_payload_size {
             return Err(crate::error::RenoirError::invalid_parameter(
                 "payload",
-                &format!(
+                format!(
                     "Payload size {} exceeds maximum {}",
                     payload.len(),
                     self.topic.config.max_payload_size
@@ -107,13 +114,16 @@ pub struct Subscriber {
     pub handle: SubscriberHandle,
     pub topic_id: TopicId,
     topic: Arc<TopicInstance>,
-    #[allow(dead_code)]
     last_sequence: AtomicUsize,
 }
 
 impl Subscriber {
     /// Create a new subscriber (internal use)
-    pub(super) fn new(handle: SubscriberHandle, topic_id: TopicId, topic: Arc<TopicInstance>) -> Self {
+    pub(super) fn new(
+        handle: SubscriberHandle,
+        topic_id: TopicId,
+        topic: Arc<TopicInstance>,
+    ) -> Self {
         Self {
             handle,
             topic_id,
@@ -125,11 +135,12 @@ impl Subscriber {
     /// Subscribe to the next available message
     pub fn subscribe(&self) -> Result<Option<Message>> {
         let message = self.topic.subscribe()?;
-        
+
         if let Some(ref msg) = message {
-            self.last_sequence.store(msg.header.sequence as usize, Ordering::Relaxed);
+            self.last_sequence
+                .store(msg.header.sequence as usize, Ordering::Relaxed);
         }
-        
+
         Ok(message)
     }
 
@@ -138,15 +149,24 @@ impl Subscriber {
         self.subscribe()
     }
 
+    /// Peek at the next message without consuming it
+    /// Returns a copy of the message without removing it from the queue
+    /// Note: In MPMC mode, the message may be consumed by another subscriber
+    /// between peek and the next subscribe call
+    pub fn peek(&self) -> Result<Option<Message>> {
+        self.topic.peek()
+    }
+
     /// Wait for a message with optional timeout
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
         let message = self.topic.wait_for_message(timeout)?;
-        
+
         if let Some(ref msg) = message {
-            self.last_sequence.store(msg.header.sequence as usize, Ordering::Relaxed);
+            self.last_sequence
+                .store(msg.header.sequence as usize, Ordering::Relaxed);
         }
-        
+
         Ok(message)
     }
 
@@ -201,11 +221,11 @@ impl Subscriber {
     /// Drain all pending messages
     pub fn drain_messages(&self) -> Result<Vec<Message>> {
         let mut messages = Vec::new();
-        
+
         while let Some(message) = self.subscribe()? {
             messages.push(message);
         }
-        
+
         Ok(messages)
     }
 }
