@@ -30,20 +30,19 @@ use super::{
     utils::{c_str_to_string, string_to_c_str, HANDLE_REGISTRY},
 };
 
-/// If `ptr` points at a `BlobHeader`-prefixed payload, advance past the header
-/// and return `(payload_start, payload_len)`. Otherwise return `(ptr, len)` unchanged.
-///
-/// This is called on every received message so that callers see the original
-/// payload irrespective of whether the large_payloads path was used on publish.
 unsafe fn unwrap_blob_if_present(ptr: *const u8, len: usize) -> (*const u8, usize) {
-    use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC};
+    use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC, BLOB_VERSION};
     if len >= BlobHeader::SIZE {
         let magic = std::ptr::read_unaligned(ptr as *const u64);
         if magic == BLOB_MAGIC {
-            let header = &*(ptr as *const BlobHeader);
-            let payload_size = header.payload_size as usize;
-            if BlobHeader::SIZE + payload_size <= len {
-                return (ptr.add(BlobHeader::SIZE), payload_size);
+            let header = std::ptr::read_unaligned(ptr as *const BlobHeader);
+            if header.version == BLOB_VERSION {
+                let Ok(payload_size) = usize::try_from(header.payload_size) else {
+                    return (ptr, len);
+                };
+                if payload_size > 0 && BlobHeader::SIZE + payload_size <= len {
+                    return (ptr.add(BlobHeader::SIZE), payload_size);
+                }
             }
         }
     }
@@ -725,9 +724,6 @@ pub extern "C" fn renoir_subscribe_read_next(
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
-                // Fill in payload pointer and length based on message type.
-                // unwrap_blob_if_present strips the BlobHeader transparently when
-                // the publish_large path was used for oversized payloads.
                 match &msg.payload {
                     MessagePayload::Inline(data) => {
                         let (ptr, len) = unwrap_blob_if_present(data.as_ptr(), data.len());
@@ -735,17 +731,14 @@ pub extern "C" fn renoir_subscribe_read_next(
                         (*message).payload_len = len;
                     }
                     MessagePayload::Descriptor(desc) => {
-                        // Resolve descriptor to actual buffer data
                         if let Some(buf_registry) = buffer_registry {
                             match buf_registry.get_buffer_data(desc) {
                                 Ok(buffer) => {
-                                    // Store buffer to keep it alive
                                     let buf_id = registry.next_id;
                                     registry.next_id += 1;
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
 
-                                    // Strip BlobHeader if present, return actual payload
                                     let (ptr, len) = unwrap_blob_if_present(
                                         buffer.as_ptr(),
                                         desc.payload_size as usize,
@@ -754,31 +747,26 @@ pub extern "C" fn renoir_subscribe_read_next(
                                     (*message).payload_len = len;
                                 }
                                 Err(_) => {
-                                    // Failed to resolve descriptor
                                     (*message).payload_ptr = std::ptr::null();
                                     (*message).payload_len = 0;
                                 }
                             }
                         } else {
-                            // No buffer registry available
                             (*message).payload_ptr = std::ptr::null();
                             (*message).payload_len = 0;
                         }
                     }
                 }
 
-                // Fill metadata
                 (*message).metadata.timestamp_ns = msg.header.timestamp;
                 (*message).metadata.sequence_number = msg.header.sequence;
                 (*message).metadata.source_id = msg.header.topic_id;
                 (*message).metadata.message_type = 0;
-                (*message).metadata.flags = 0; // No flags field in MessageHeader
+                (*message).metadata.flags = 0;
             }
 
-            // Store message in registry and return handle
             let msg_id = registry.store_message(msg);
 
-            // Associate descriptor buffer with message for cleanup
             if let Some(buf_id) = descriptor_buffer_id {
                 registry.associate_descriptor_buffer(msg_id, buf_id);
             }
@@ -831,9 +819,6 @@ pub extern "C" fn renoir_subscribe_peek(
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
-                // Fill in payload pointer and length based on message type.
-                // unwrap_blob_if_present strips the BlobHeader transparently when
-                // the publish_large path was used for oversized payloads.
                 match &msg.payload {
                     MessagePayload::Inline(data) => {
                         let (ptr, len) = unwrap_blob_if_present(data.as_ptr(), data.len());
@@ -841,17 +826,14 @@ pub extern "C" fn renoir_subscribe_peek(
                         (*message).payload_len = len;
                     }
                     MessagePayload::Descriptor(desc) => {
-                        // Resolve descriptor to actual buffer data
                         if let Some(buf_registry) = buffer_registry {
                             match buf_registry.get_buffer_data(desc) {
                                 Ok(buffer) => {
-                                    // Store buffer to keep it alive
                                     let buf_id = registry.next_id;
                                     registry.next_id += 1;
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
 
-                                    // Strip BlobHeader if present, return actual payload
                                     let (ptr, len) = unwrap_blob_if_present(
                                         buffer.as_ptr(),
                                         desc.payload_size as usize,
@@ -860,20 +842,17 @@ pub extern "C" fn renoir_subscribe_peek(
                                     (*message).payload_len = len;
                                 }
                                 Err(_) => {
-                                    // Failed to resolve descriptor
                                     (*message).payload_ptr = std::ptr::null();
                                     (*message).payload_len = 0;
                                 }
                             }
                         } else {
-                            // No buffer registry available
                             (*message).payload_ptr = std::ptr::null();
                             (*message).payload_len = 0;
                         }
                     }
                 }
 
-                // Fill metadata
                 (*message).metadata.timestamp_ns = msg.header.timestamp;
                 (*message).metadata.sequence_number = msg.header.sequence;
                 (*message).metadata.source_id = msg.header.topic_id;
@@ -881,10 +860,8 @@ pub extern "C" fn renoir_subscribe_peek(
                 (*message).metadata.flags = 0;
             }
 
-            // Store message in registry and return handle
             let msg_id = registry.store_message(msg);
 
-            // Associate descriptor buffer with message for cleanup
             if let Some(buf_id) = descriptor_buffer_id {
                 registry.associate_descriptor_buffer(msg_id, buf_id);
             }
@@ -1303,4 +1280,51 @@ pub extern "C" fn renoir_subscriber_topic_name(
 
     let name = sub_handle.topic_name();
     string_to_c_str(name.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unwrap_blob_strips_header() {
+        use crate::large_payloads::blob::{content_types, BlobHeader, BlobManager};
+
+        let original = vec![42u8; 256];
+        let mgr = BlobManager::new();
+        let header = mgr.create_header(content_types::CUSTOM_BINARY, &original);
+
+        let mut blob = Vec::with_capacity(BlobHeader::SIZE + original.len());
+        let header_bytes = unsafe {
+            std::slice::from_raw_parts(&header as *const BlobHeader as *const u8, BlobHeader::SIZE)
+        };
+        blob.extend_from_slice(header_bytes);
+        blob.extend_from_slice(&original);
+
+        unsafe {
+            let (ptr, len) = unwrap_blob_if_present(blob.as_ptr(), blob.len());
+            let received = std::slice::from_raw_parts(ptr, len);
+            assert_eq!(received, &original[..]);
+        }
+    }
+
+    #[test]
+    fn test_unwrap_blob_passthrough_non_blob() {
+        let plain = [1u8; 100];
+        unsafe {
+            let (ptr, len) = unwrap_blob_if_present(plain.as_ptr(), plain.len());
+            assert_eq!(ptr, plain.as_ptr());
+            assert_eq!(len, plain.len());
+        }
+    }
+
+    #[test]
+    fn test_unwrap_blob_passthrough_small_buffer() {
+        let small = [0u8; 4];
+        unsafe {
+            let (ptr, len) = unwrap_blob_if_present(small.as_ptr(), small.len());
+            assert_eq!(ptr, small.as_ptr());
+            assert_eq!(len, small.len());
+        }
+    }
 }

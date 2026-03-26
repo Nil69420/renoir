@@ -191,7 +191,6 @@ impl TopicInstance {
         let blob_mgr = BlobManager::new();
         let header = blob_mgr.create_header(content_types::CUSTOM_BINARY, &payload);
 
-        // Serialize as [BlobHeader][payload]
         let mut blob_data = Vec::with_capacity(BlobHeader::SIZE + payload.len());
         // SAFETY: BlobHeader is #[repr(C, packed)]
         let header_bytes = unsafe {
@@ -202,8 +201,6 @@ impl TopicInstance {
 
         let sequence = self.stats.current_sequence.load(Ordering::SeqCst);
 
-        // Large payloads always go through the shared pool when available so that
-        // the ring buffer slot only holds a small descriptor, not the full blob.
         let message = if self.config.use_shared_pool {
             let descriptor = self
                 .buffer_registry
@@ -218,7 +215,6 @@ impl TopicInstance {
             }
             Message::new_descriptor(self.topic_id, sequence, descriptor)
         } else {
-            // No shared pool configured — store inline (ring buffer must accommodate)
             Message::new_inline(self.topic_id, sequence, blob_data)
         };
 

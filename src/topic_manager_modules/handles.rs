@@ -43,8 +43,6 @@ impl Publisher {
     /// Publish a message to the topic
     pub fn publish(&self, payload: Vec<u8>) -> Result<()> {
         if payload.len() > self.topic.config.max_payload_size {
-            // Automatically route through the large_payloads path: the payload
-            // is wrapped in a BlobHeader so the receiver can detect and strip it.
             return self.topic.publish_large(payload);
         }
 

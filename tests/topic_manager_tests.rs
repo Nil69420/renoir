@@ -276,7 +276,7 @@ mod tests {
             name: "size_test_topic".to_string(),
             max_payload_size: 100,
             use_shared_pool: true,
-            shared_pool_threshold: 0, // all large blobs go to pool
+            shared_pool_threshold: 0,
             ..Default::default()
         };
 
