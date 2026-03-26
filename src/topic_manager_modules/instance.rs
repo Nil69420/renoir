@@ -186,7 +186,7 @@ impl TopicInstance {
     /// Called automatically when `payload.len() > config.max_payload_size`.
     /// The BlobHeader is detected and stripped transparently on the receive side.
     pub fn publish_large(&self, payload: Vec<u8>) -> Result<()> {
-        use crate::large_payloads::blob::{BlobHeader, BlobManager, content_types};
+        use crate::large_payloads::blob::{content_types, BlobHeader, BlobManager};
 
         let blob_mgr = BlobManager::new();
         let header = blob_mgr.create_header(content_types::CUSTOM_BINARY, &payload);
@@ -195,10 +195,7 @@ impl TopicInstance {
         let mut blob_data = Vec::with_capacity(BlobHeader::SIZE + payload.len());
         // SAFETY: BlobHeader is #[repr(C, packed)]
         let header_bytes = unsafe {
-            std::slice::from_raw_parts(
-                &header as *const BlobHeader as *const u8,
-                BlobHeader::SIZE,
-            )
+            std::slice::from_raw_parts(&header as *const BlobHeader as *const u8, BlobHeader::SIZE)
         };
         blob_data.extend_from_slice(header_bytes);
         blob_data.extend_from_slice(&payload);
@@ -208,7 +205,9 @@ impl TopicInstance {
         // Large payloads always go through the shared pool when available so that
         // the ring buffer slot only holds a small descriptor, not the full blob.
         let message = if self.config.use_shared_pool {
-            let descriptor = self.buffer_registry.get_buffer_for_payload(blob_data.len())?;
+            let descriptor = self
+                .buffer_registry
+                .get_buffer_for_payload(blob_data.len())?;
             let buffer_data = self.buffer_registry.get_buffer_data(&descriptor)?;
             unsafe {
                 std::ptr::copy_nonoverlapping(
