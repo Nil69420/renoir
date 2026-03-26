@@ -847,7 +847,7 @@ mod sync_patterns_tests {
 
     #[test]
     fn test_mio_condition_notifier() {
-        let mut notifier = renoir::sync::mio_notify::MioConditionNotifier::new();
+        let mut notifier = renoir::sync::mio_notify::MioConditionNotifier::new().unwrap();
 
         let result = notifier.add_condition("test_condition".to_string(), NotifyCondition::Always);
         assert!(result.is_ok());

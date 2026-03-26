@@ -374,7 +374,7 @@ impl<T> SharedSWMRRing<T> {
     }
 }
 
-impl<T: Copy + Default> Clone for SharedSWMRRing<T> {
+impl<T> Clone for SharedSWMRRing<T> {
     fn clone(&self) -> Self {
         Self {
             ring: Arc::clone(&self.ring),

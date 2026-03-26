@@ -209,20 +209,14 @@ pub struct MioConditionNotifier {
     next_token: usize,
 }
 
-impl Default for MioConditionNotifier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl MioConditionNotifier {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> SyncResult<Self> {
+        Ok(Self {
             notifications: HashMap::new(),
             token_map: HashMap::new(),
-            poll: Poll::new().expect("failed to create mio Poll"),
+            poll: Poll::new().map_err(|_| SyncError::NotificationFailed)?,
             next_token: 1, // 0 is reserved for EVENTFD_TOKEN in MioEventNotification
-        }
+        })
     }
 
     pub fn add_condition(&mut self, name: String, _condition: NotifyCondition) -> SyncResult<()> {

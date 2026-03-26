@@ -268,8 +268,14 @@ impl SharedMemoryRegion {
     /// Remove stale file-backed shared memory files from `/tmp` that match the
     /// renoir naming convention (`/tmp/renoir_*`). Returns the list of removed
     /// file names.
+    ///
+    /// Safety measures:
+    /// - Uses `symlink_metadata` to avoid following symlinks (prevents symlink-based abuse)
+    /// - Only removes regular files owned by the current user
+    /// - Skips symlinks and directories
     pub fn cleanup_orphans() -> Result<Vec<String>> {
         let mut removed = Vec::new();
+        let current_uid = unsafe { libc::getuid() };
         let entries = std::fs::read_dir("/tmp")
             .map_err(|e| RenoirError::from_io(e, "Failed to read /tmp"))?;
 
@@ -277,10 +283,17 @@ impl SharedMemoryRegion {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             if name_str.starts_with("renoir_") {
-                if let Ok(metadata) = entry.metadata() {
+                // Use symlink_metadata to avoid following symlinks
+                if let Ok(metadata) = std::fs::symlink_metadata(entry.path()) {
                     // Only remove regular files (not directories or symlinks)
-                    if metadata.is_file() && std::fs::remove_file(entry.path()).is_ok() {
-                        removed.push(name_str.into_owned());
+                    // that are owned by the current user
+                    if metadata.is_file() {
+                        use std::os::unix::fs::MetadataExt;
+                        if metadata.uid() == current_uid
+                            && std::fs::remove_file(entry.path()).is_ok()
+                        {
+                            removed.push(name_str.into_owned());
+                        }
                     }
                 }
             }

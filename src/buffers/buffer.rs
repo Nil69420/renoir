@@ -151,7 +151,13 @@ impl Buffer {
         self.metadata.as_ref().and_then(|m| m.get(key))
     }
 
-    pub fn metadata(&self) -> Option<&HashMap<String, String>> {
+    pub fn metadata(&self) -> &HashMap<String, String> {
+        static EMPTY: std::sync::LazyLock<HashMap<String, String>> =
+            std::sync::LazyLock::new(HashMap::new);
+        self.metadata.as_deref().unwrap_or(&EMPTY)
+    }
+
+    pub fn metadata_opt(&self) -> Option<&HashMap<String, String>> {
         self.metadata.as_deref()
     }
 

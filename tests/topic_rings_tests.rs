@@ -143,4 +143,114 @@ mod tests {
 
         assert_eq!(buffer.try_read().unwrap(), 42);
     }
+
+    // === try_peek tests ===
+
+    #[test]
+    fn test_spsc_peek_returns_head_without_consuming() {
+        let stats = Arc::new(TopicStats::default());
+        let ring = SPSCTopicRing::new(4096, stats).unwrap();
+
+        let msg = Message::new_inline(1, 1, b"peek me".to_vec());
+        ring.try_publish(&msg).unwrap();
+
+        // First peek returns the head message
+        let peeked1 = ring.try_peek().unwrap();
+        assert!(peeked1.is_some());
+        let peeked1 = peeked1.unwrap();
+        let seq1 = peeked1.header.sequence;
+        assert_eq!(seq1, 1);
+
+        // Second peek returns the same message (not consumed)
+        let peeked2 = ring.try_peek().unwrap();
+        assert!(peeked2.is_some());
+        let peeked2 = peeked2.unwrap();
+        let seq2 = peeked2.header.sequence;
+        assert_eq!(seq2, seq1);
+    }
+
+    #[test]
+    fn test_spsc_peek_then_consume_advances() {
+        let stats = Arc::new(TopicStats::default());
+        let ring = SPSCTopicRing::new(4096, stats).unwrap();
+
+        let msg1 = Message::new_inline(1, 1, b"first".to_vec());
+        let msg2 = Message::new_inline(1, 2, b"second".to_vec());
+        ring.try_publish(&msg1).unwrap();
+        ring.try_publish(&msg2).unwrap();
+
+        // Peek sees first message
+        let peeked = ring.try_peek().unwrap().unwrap();
+        let peeked_seq = peeked.header.sequence;
+        assert_eq!(peeked_seq, 1);
+
+        // Consume removes the first message
+        let consumed = ring.try_consume().unwrap().unwrap();
+        let consumed_seq = consumed.header.sequence;
+        assert_eq!(consumed_seq, 1);
+
+        // Peek now sees the second message
+        let peeked_next = ring.try_peek().unwrap().unwrap();
+        let next_seq = peeked_next.header.sequence;
+        assert_eq!(next_seq, 2);
+    }
+
+    #[test]
+    fn test_mpmc_peek_returns_head_without_consuming() {
+        let stats = Arc::new(TopicStats::default());
+        let ring = MPMCTopicRing::new(4096, stats).unwrap();
+
+        let msg = Message::new_inline(1, 1, b"peek me mpmc".to_vec());
+        ring.try_publish(&msg).unwrap();
+
+        // First peek returns the head message
+        let peeked1 = ring.try_peek().unwrap();
+        assert!(peeked1.is_some());
+        let peeked1 = peeked1.unwrap();
+        let seq1 = peeked1.header.sequence;
+        assert_eq!(seq1, 1);
+
+        // Second peek returns the same message (not consumed)
+        let peeked2 = ring.try_peek().unwrap();
+        assert!(peeked2.is_some());
+        let peeked2 = peeked2.unwrap();
+        let seq2 = peeked2.header.sequence;
+        assert_eq!(seq2, seq1);
+    }
+
+    #[test]
+    fn test_mpmc_peek_then_consume_advances() {
+        let stats = Arc::new(TopicStats::default());
+        let ring = MPMCTopicRing::new(4096, stats).unwrap();
+
+        let msg1 = Message::new_inline(1, 1, b"first".to_vec());
+        let msg2 = Message::new_inline(1, 2, b"second".to_vec());
+        ring.try_publish(&msg1).unwrap();
+        ring.try_publish(&msg2).unwrap();
+
+        // Peek sees first message
+        let peeked = ring.try_peek().unwrap().unwrap();
+        let peeked_seq = peeked.header.sequence;
+        assert_eq!(peeked_seq, 1);
+
+        // Consume removes the first message
+        let consumed = ring.try_consume().unwrap().unwrap();
+        let consumed_seq = consumed.header.sequence;
+        assert_eq!(consumed_seq, 1);
+
+        // Peek now sees the second message
+        let peeked_next = ring.try_peek().unwrap().unwrap();
+        let next_seq = peeked_next.header.sequence;
+        assert_eq!(next_seq, 2);
+    }
+
+    #[test]
+    fn test_peek_empty_ring_returns_none() {
+        let stats = Arc::new(TopicStats::default());
+        let spsc_ring = SPSCTopicRing::new(4096, stats.clone()).unwrap();
+        let mpmc_ring = MPMCTopicRing::new(4096, stats).unwrap();
+
+        assert!(spsc_ring.try_peek().unwrap().is_none());
+        assert!(mpmc_ring.try_peek().unwrap().is_none());
+    }
 }

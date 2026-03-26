@@ -147,8 +147,19 @@ impl BufferPool {
                 }
             }
         } else {
-            self.record_allocation_failure();
-            Err(RenoirError::buffer_full("buffer_pool"))
+            // No timeout configured: block indefinitely until a buffer is returned.
+            let mut available = self.available.lock();
+            loop {
+                if let Some(mut buffer) = available.pop_front() {
+                    buffer.set_sequence(next_buffer_sequence());
+                    self.track_allocation(&buffer);
+                    self.update_allocation_stats();
+                    return Ok(buffer);
+                }
+
+                // Wait until a buffer is returned, then re-check the queue.
+                self.buffer_returned.wait(&mut available);
+            }
         }
     }
 
