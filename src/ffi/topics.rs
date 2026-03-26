@@ -40,8 +40,10 @@ unsafe fn unwrap_blob_if_present(ptr: *const u8, len: usize) -> (*const u8, usiz
                 let Ok(payload_size) = usize::try_from(header.payload_size) else {
                     return (ptr, len);
                 };
-                if payload_size > 0 && BlobHeader::SIZE + payload_size <= len {
-                    return (ptr.add(BlobHeader::SIZE), payload_size);
+                if let Some(total) = BlobHeader::SIZE.checked_add(payload_size) {
+                    if payload_size > 0 && total <= len {
+                        return (ptr.add(BlobHeader::SIZE), payload_size);
+                    }
                 }
             }
         }
@@ -1325,6 +1327,50 @@ mod tests {
             let (ptr, len) = unwrap_blob_if_present(small.as_ptr(), small.len());
             assert_eq!(ptr, small.as_ptr());
             assert_eq!(len, small.len());
+        }
+    }
+
+    #[test]
+    fn test_unwrap_blob_passthrough_wrong_version() {
+        use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC};
+
+        let mut header = unsafe { std::mem::zeroed::<BlobHeader>() };
+        header.magic = BLOB_MAGIC;
+        header.version = 0xFF;
+        header.payload_size = 10;
+
+        let mut buf = vec![0u8; BlobHeader::SIZE + 10];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &header as *const BlobHeader as *const u8,
+                buf.as_mut_ptr(),
+                BlobHeader::SIZE,
+            );
+            let (ptr, len) = unwrap_blob_if_present(buf.as_ptr(), buf.len());
+            assert_eq!(ptr, buf.as_ptr());
+            assert_eq!(len, buf.len());
+        }
+    }
+
+    #[test]
+    fn test_unwrap_blob_passthrough_zero_payload() {
+        use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC, BLOB_VERSION};
+
+        let mut header = unsafe { std::mem::zeroed::<BlobHeader>() };
+        header.magic = BLOB_MAGIC;
+        header.version = BLOB_VERSION;
+        header.payload_size = 0;
+
+        let mut buf = vec![0u8; BlobHeader::SIZE];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &header as *const BlobHeader as *const u8,
+                buf.as_mut_ptr(),
+                BlobHeader::SIZE,
+            );
+            let (ptr, len) = unwrap_blob_if_present(buf.as_ptr(), buf.len());
+            assert_eq!(ptr, buf.as_ptr());
+            assert_eq!(len, buf.len());
         }
     }
 }
