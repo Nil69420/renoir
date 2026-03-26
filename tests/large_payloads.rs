@@ -181,7 +181,15 @@ mod ros2_types_tests {
 
     #[test]
     fn test_laser_scan_header() {
-        let header = LaserScanHeader::new(-3.14, 3.14, 0.01, 0.1, 10.0, 628, 628);
+        let header = LaserScanHeader::new(
+            -std::f32::consts::PI,
+            std::f32::consts::PI,
+            0.01,
+            0.1,
+            10.0,
+            628,
+            628,
+        );
 
         // Use local variables to avoid packed field references
         let range_count = header.range_count;
@@ -211,11 +219,6 @@ mod ros2_types_tests {
 
     #[test]
     fn test_ros2_message_manager_basic() {
-        // Test basic manager creation without shared memory
-        // Actual message creation requires complex shared memory setup
         let _strategy = ChunkingStrategy::default();
-
-        // This tests the core types work without shared memory
-        assert!(true);
     }
 }

@@ -10,9 +10,6 @@ pub mod header;
 pub mod message;
 pub mod stats;
 
-#[cfg(test)]
-mod tests;
-
 // Re-export main types for convenience
 pub use config::{Reliability, TopicConfig, TopicPattern, TopicQoS};
 pub use header::{MessageHeader, MAX_TOPIC_NAME_LENGTH, MESSAGE_MAGIC, MESSAGE_VERSION};

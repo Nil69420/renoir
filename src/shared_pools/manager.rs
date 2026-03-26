@@ -4,9 +4,11 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc, RwLock,
+        Arc,
     },
 };
+
+use parking_lot::RwLock;
 
 use crate::{
     buffers::{Buffer, BufferPoolConfig},
@@ -64,7 +66,7 @@ impl SharedBufferPoolManager {
 
         let pool = SharedBufferPool::new(pool_id, config, memory_region)?;
 
-        let mut pools = self.pools.write().unwrap();
+        let mut pools = self.pools.write();
         pools.insert(pool_id, Arc::new(pool));
 
         self.stats.pools_created.fetch_add(1, Ordering::Relaxed);
@@ -74,7 +76,7 @@ impl SharedBufferPoolManager {
 
     /// Get a buffer from a specific pool
     pub fn get_buffer(&self, pool_id: PoolId) -> Result<MessageDescriptor> {
-        let pools = self.pools.read().unwrap();
+        let pools = self.pools.read();
         let pool = pools
             .get(&pool_id)
             .ok_or_else(|| RenoirError::invalid_parameter("pool_id", "Pool not found"))?;
@@ -84,7 +86,7 @@ impl SharedBufferPoolManager {
 
     /// Return a buffer to its pool
     pub fn return_buffer(&self, descriptor: &MessageDescriptor) -> Result<()> {
-        let pools = self.pools.read().unwrap();
+        let pools = self.pools.read();
         let pool = pools
             .get(&descriptor.pool_id)
             .ok_or_else(|| RenoirError::invalid_parameter("pool_id", "Pool not found"))?;
@@ -94,7 +96,7 @@ impl SharedBufferPoolManager {
 
     /// Get buffer data for reading/writing
     pub fn get_buffer_data(&self, descriptor: &MessageDescriptor) -> Result<Arc<Buffer>> {
-        let pools = self.pools.read().unwrap();
+        let pools = self.pools.read();
         let pool = pools
             .get(&descriptor.pool_id)
             .ok_or_else(|| RenoirError::invalid_parameter("pool_id", "Pool not found"))?;
@@ -104,7 +106,7 @@ impl SharedBufferPoolManager {
 
     /// Remove a buffer pool
     pub fn remove_pool(&self, pool_id: PoolId) -> Result<()> {
-        let mut pools = self.pools.write().unwrap();
+        let mut pools = self.pools.write();
 
         if let Some(pool) = pools.remove(&pool_id) {
             // Ensure no buffers are still in use
@@ -125,7 +127,7 @@ impl SharedBufferPoolManager {
 
     /// Get pool statistics
     pub fn pool_stats(&self, pool_id: PoolId) -> Result<(usize, usize, usize, usize)> {
-        let pools = self.pools.read().unwrap();
+        let pools = self.pools.read();
         let pool = pools
             .get(&pool_id)
             .ok_or_else(|| RenoirError::invalid_parameter("pool_id", "Pool not found"))?;
@@ -140,7 +142,7 @@ impl SharedBufferPoolManager {
 
     /// List all active pools
     pub fn list_pools(&self) -> Vec<(PoolId, String)> {
-        let pools = self.pools.read().unwrap();
+        let pools = self.pools.read();
         pools
             .iter()
             .map(|(id, pool)| (*id, pool.name().to_string()))

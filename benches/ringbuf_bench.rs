@@ -266,8 +266,8 @@ fn benchmark_memory_access_patterns(c: &mut Criterion) {
             while consumed < target {
                 // Produce in bursts
                 let produce_count = (produced + 50).min(target) - produced;
-                for i in produced..produced + produce_count {
-                    if producer.try_push(i as u64).is_err() {
+                for _ in 0..produce_count {
+                    if producer.try_push(produced as u64).is_err() {
                         break;
                     }
                     produced += 1;

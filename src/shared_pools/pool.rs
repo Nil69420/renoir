@@ -4,9 +4,11 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU32, AtomicUsize, Ordering},
-        Arc, Mutex, RwLock,
+        Arc,
     },
 };
+
+use parking_lot::{Mutex, RwLock};
 
 use crate::{
     buffers::{Buffer, BufferPool, BufferPoolConfig},
@@ -67,7 +69,7 @@ impl SharedBufferPool {
 
         // Store buffer reference
         {
-            let mut buffers = self.buffers.write().unwrap();
+            let mut buffers = self.buffers.write();
             buffers.insert(handle, Arc::new(buffer));
         }
 
@@ -75,7 +77,7 @@ impl SharedBufferPool {
 
         // Update statistics
         {
-            let stats = self.stats.lock().unwrap();
+            let stats = self.stats.lock();
             stats.buffers_allocated.fetch_add(1, Ordering::Relaxed);
             stats.current_active.fetch_add(1, Ordering::Relaxed);
         }
@@ -104,7 +106,7 @@ impl SharedBufferPool {
         }
 
         let buffer = {
-            let mut buffers = self.buffers.write().unwrap();
+            let mut buffers = self.buffers.write();
             buffers.remove(&descriptor.buffer_handle).ok_or_else(|| {
                 RenoirError::invalid_parameter("buffer_handle", "Buffer handle not found")
             })?
@@ -118,7 +120,7 @@ impl SharedBufferPool {
 
         // Update statistics
         {
-            let stats = self.stats.lock().unwrap();
+            let stats = self.stats.lock();
             stats.buffers_returned.fetch_add(1, Ordering::Relaxed);
             stats.current_active.fetch_sub(1, Ordering::Relaxed);
         }
@@ -128,7 +130,7 @@ impl SharedBufferPool {
 
     /// Get buffer data for reading/writing
     pub fn get_buffer_data(&self, handle: BufferHandle) -> Result<Arc<Buffer>> {
-        let buffers = self.buffers.read().unwrap();
+        let buffers = self.buffers.read();
         buffers.get(&handle).cloned().ok_or_else(|| {
             RenoirError::invalid_parameter("buffer_handle", "Buffer handle not found")
         })
@@ -146,7 +148,7 @@ impl SharedBufferPool {
 
     /// Get pool statistics (returns atomic values)
     pub fn stats(&self) -> (usize, usize, usize, usize) {
-        let stats = self.stats.lock().unwrap();
+        let stats = self.stats.lock();
         (
             stats.buffers_allocated.load(Ordering::Relaxed),
             stats.buffers_returned.load(Ordering::Relaxed),

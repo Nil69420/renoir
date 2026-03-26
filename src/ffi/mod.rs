@@ -3,6 +3,9 @@
 //! This module provides a complete C-compatible API for Renoir shared memory library,
 //! organized into logical submodules for better maintainability.
 
+// FFI functions intentionally take raw pointers — suppress Clippy warning
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+
 pub mod buffers;
 pub mod memory;
 pub mod topics;

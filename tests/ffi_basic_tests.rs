@@ -5,10 +5,14 @@
 
 #[cfg(feature = "c-api")]
 use renoir::ffi::{
-    renoir_free_string, renoir_manager_create, renoir_manager_destroy, renoir_version_major,
+    renoir_free_string, renoir_manager_create, renoir_manager_destroy, renoir_topic_manager_create,
+    renoir_topic_manager_destroy, renoir_topic_register, renoir_version_major,
     renoir_version_minor, renoir_version_patch, renoir_version_string, RenoirErrorCode,
+    RenoirTopicId, RenoirTopicOptions,
 };
 use std::ffi::CStr;
+#[cfg(feature = "c-api")]
+use std::ffi::CString;
 use std::ptr;
 
 #[cfg(test)]
@@ -133,6 +137,38 @@ mod ffi_tests {
         let patch1 = renoir_version_patch();
         let patch2 = renoir_version_patch();
         assert_eq!(patch1, patch2);
+    }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_topic_manager_create_and_register() {
+        let manager = renoir_topic_manager_create();
+        assert!(!manager.is_null());
+
+        let topic_name = CString::new("/test/topic").unwrap();
+        let options = RenoirTopicOptions {
+            pattern: 0,
+            ring_capacity: 16,
+            max_payload_size: 1024,
+            use_shared_pool: false,
+            shared_pool_threshold: 0,
+            enable_notifications: true,
+        };
+
+        let mut topic_id: RenoirTopicId = 0;
+        let result = renoir_topic_register(
+            manager,
+            topic_name.as_ptr(),
+            &options as *const _,
+            &mut topic_id as *mut _,
+        );
+
+        assert_eq!(result, RenoirErrorCode::Success);
+        assert_ne!(topic_id, 0);
+
+        let destroy_result = renoir_topic_manager_destroy(manager);
+        assert_eq!(destroy_result, RenoirErrorCode::Success);
     }
 }
 

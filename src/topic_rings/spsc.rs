@@ -70,6 +70,10 @@ impl SPSCTopicRing {
     }
 
     /// Create from existing shared memory
+    ///
+    /// # Safety
+    /// `memory` must point to a valid, aligned allocation large enough for
+    /// the ring buffer with the given `capacity`. The memory must outlive this struct.
     pub unsafe fn from_memory(
         memory: NonNull<u8>,
         capacity: usize,

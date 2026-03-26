@@ -63,7 +63,7 @@ mod cpu_performance_tests {
                         msg_count.fetch_add(1, Ordering::Relaxed);
                         sequence += 1;
                         // Very small delay to allow consumer to keep up
-                        if sequence % 10 == 0 {
+                        if sequence.is_multiple_of(10) {
                             thread::yield_now();
                         }
                     }
@@ -190,7 +190,6 @@ mod cpu_performance_tests {
         }
 
         // Just verify we got some reasonable throughput for each size
-        assert!(true, "Throughput scaling test completed");
 
         cleanup_test();
     }
@@ -400,9 +399,9 @@ mod cpu_performance_tests {
         let start_sequential = Instant::now();
         let mut checksum = 0u64;
 
-        for i in 0..buffer.len() {
-            buffer[i] = (i % 256) as u8;
-            checksum = checksum.wrapping_add(buffer[i] as u64);
+        for (i, byte) in buffer.iter_mut().enumerate() {
+            *byte = (i % 256) as u8;
+            checksum = checksum.wrapping_add(*byte as u64);
         }
 
         let sequential_time = start_sequential.elapsed();
@@ -480,9 +479,9 @@ mod cpu_performance_tests {
             let total_operations = Arc::new(AtomicUsize::new(0));
 
             let mut handles = Vec::new();
-            for thread_id in 0..thread_count {
+            for (_thread_id, region_name) in region_names.iter().enumerate().take(thread_count) {
                 let manager = manager.clone();
-                let region_name = region_names[thread_id].clone();
+                let region_name = region_name.clone();
                 let op_counter = total_operations.clone();
 
                 let handle = thread::spawn(move || {
@@ -508,8 +507,6 @@ mod cpu_performance_tests {
                 thread_count, ops_per_second, duration
             );
         }
-
-        assert!(true, "Scalability test completed");
 
         cleanup_test();
     }
@@ -583,8 +580,6 @@ mod cpu_performance_tests {
                 payload_size, throughput_msgs, throughput_mbps
             );
         }
-
-        assert!(true, "Payload size impact test completed");
 
         cleanup_test();
     }

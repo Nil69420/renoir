@@ -35,6 +35,11 @@ pub enum SyncError {
     CorruptedBuffer,
     /// Notification system failure
     NotificationFailed,
+    /// Operation called in invalid state
+    InvalidState {
+        expected: &'static str,
+        actual: &'static str,
+    },
 }
 
 impl std::fmt::Display for SyncError {
@@ -60,6 +65,9 @@ impl std::fmt::Display for SyncError {
             SyncError::NoSlotsAvailable => write!(f, "No slots available for writing"),
             SyncError::CorruptedBuffer => write!(f, "Buffer corrupted or partially written"),
             SyncError::NotificationFailed => write!(f, "Notification system failed"),
+            SyncError::InvalidState { expected, actual } => {
+                write!(f, "Invalid state: expected {}, got {}", expected, actual)
+            }
         }
     }
 }

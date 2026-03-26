@@ -322,6 +322,7 @@ impl ROS2MessageManager {
     }
 
     /// Create a point cloud message
+    #[allow(clippy::too_many_arguments)]
     pub fn create_point_cloud_message(
         &self,
         point_count: u32,
@@ -363,6 +364,7 @@ impl ROS2MessageManager {
     }
 
     /// Create a laser scan message
+    #[allow(clippy::too_many_arguments)]
     pub fn create_laser_scan_message(
         &self,
         angle_min: f32,

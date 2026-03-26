@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 //! FFI functions for buffer management
 
 use std::ffi::c_char;
@@ -58,7 +59,7 @@ pub extern "C" fn renoir_buffer_pool_create(
 
     // Get the manager and memory region - scope the lock to release it early
     let region = {
-        let registry = HANDLE_REGISTRY.lock().unwrap();
+        let registry = HANDLE_REGISTRY.lock();
         let manager = match registry.get_manager(manager_handle as usize) {
             Some(mgr) => mgr,
             None => return RenoirErrorCode::InvalidParameter,
@@ -72,7 +73,7 @@ pub extern "C" fn renoir_buffer_pool_create(
 
     match BufferPool::new(rust_config, region) {
         Ok(pool) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_buffer_pool(std::sync::Arc::new(pool));
             unsafe {
                 *pool_handle = id as RenoirBufferPoolHandle;
@@ -95,7 +96,7 @@ pub extern "C" fn renoir_buffer_get(
 
     let pool_id = pool as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -104,7 +105,7 @@ pub extern "C" fn renoir_buffer_get(
 
     match pool.get_buffer() {
         Ok(buffer) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.next_id;
             registry.next_id += 1;
             registry.buffers.insert(id, Box::new(buffer));
@@ -129,7 +130,7 @@ pub extern "C" fn renoir_buffer_info(
 
     let buffer_id = buffer as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -156,7 +157,7 @@ pub extern "C" fn renoir_buffer_sequence(
     }
 
     let buffer_id = buffer as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -180,7 +181,7 @@ pub extern "C" fn renoir_buffer_resize(
     }
 
     let buffer_id = buffer as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get_mut(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -200,7 +201,7 @@ pub extern "C" fn renoir_buffer_clear(buffer: RenoirBufferHandle) -> RenoirError
     }
 
     let buffer_id = buffer as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get_mut(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -222,7 +223,7 @@ pub extern "C" fn renoir_buffer_data(
     }
 
     let buffer_id = buffer as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -249,7 +250,7 @@ pub extern "C" fn renoir_buffer_data_mut(
     }
 
     let buffer_id = buffer as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.get_mut(&buffer_id) {
         Some(buf) => buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -277,14 +278,14 @@ pub extern "C" fn renoir_buffer_return(
     let pool_id = pool as usize;
     let buffer_id = buffer as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
     };
     drop(registry);
 
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let buffer = match registry.buffers.remove(&buffer_id) {
         Some(buf) => *buf,
         None => return RenoirErrorCode::InvalidParameter,
@@ -309,7 +310,7 @@ pub extern "C" fn renoir_buffer_pool_stats(
 
     let pool_id = pool as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -353,7 +354,7 @@ pub extern "C" fn renoir_buffer_pool_computed_stats(
 
     let pool_id = pool as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -382,7 +383,7 @@ pub extern "C" fn renoir_buffer_pool_available_count(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -406,7 +407,7 @@ pub extern "C" fn renoir_buffer_pool_allocated_count(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -430,7 +431,7 @@ pub extern "C" fn renoir_buffer_pool_can_expand(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -455,7 +456,7 @@ pub extern "C" fn renoir_buffer_pool_shrink(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -479,7 +480,7 @@ pub extern "C" fn renoir_buffer_pool_config(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let pool = match registry.get_buffer_pool(pool_id) {
         Some(p) => p,
         None => return RenoirErrorCode::InvalidParameter,
@@ -513,7 +514,7 @@ pub extern "C" fn renoir_buffer_pool_destroy(pool: RenoirBufferPoolHandle) -> Re
     }
 
     let pool_id = pool as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.buffer_pools.remove(&pool_id).is_some() {
         RenoirErrorCode::Success
@@ -538,7 +539,7 @@ pub extern "C" fn renoir_ring_buffer_create(
 
     match RingBuffer::<u8>::new(capacity) {
         Ok(ring_buffer) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let handle = registry.next_id;
             registry.next_id += 1;
             registry.ring_buffers.insert(handle, Box::new(ring_buffer));
@@ -560,7 +561,7 @@ pub extern "C" fn renoir_ring_buffer_stats(
     }
 
     let handle = ring_buffer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -589,7 +590,7 @@ pub extern "C" fn renoir_ring_buffer_is_empty(
     }
 
     let handle = ring_buffer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -612,7 +613,7 @@ pub extern "C" fn renoir_ring_buffer_is_full(
     }
 
     let handle = ring_buffer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -635,7 +636,7 @@ pub extern "C" fn renoir_ring_buffer_available_space(
     }
 
     let handle = ring_buffer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -657,7 +658,7 @@ pub extern "C" fn renoir_ring_buffer_reset(
     }
 
     let handle = ring_buffer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -712,7 +713,7 @@ pub extern "C" fn renoir_ring_producer_try_push(
     }
 
     let handle = producer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -740,7 +741,7 @@ pub extern "C" fn renoir_ring_producer_push(
     }
 
     let handle = producer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -768,7 +769,7 @@ pub extern "C" fn renoir_ring_consumer_try_pop(
     }
 
     let handle = consumer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -799,7 +800,7 @@ pub extern "C" fn renoir_ring_consumer_pop(
     }
 
     let handle = consumer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -830,7 +831,7 @@ pub extern "C" fn renoir_ring_consumer_peek(
     }
 
     let handle = consumer_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     if let Some(any_ring_buffer) = registry.ring_buffers.get(&handle) {
         if let Some(ring_buffer) = any_ring_buffer.downcast_ref::<RingBuffer<u8>>() {
@@ -860,7 +861,7 @@ pub extern "C" fn renoir_ring_buffer_destroy(
     }
 
     let handle = ring_buffer_handle as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.ring_buffers.remove(&handle).is_some() {
         RenoirErrorCode::Success
@@ -902,7 +903,7 @@ pub extern "C" fn renoir_control_region_create(
 
     match ControlRegion::new(region_config) {
         Ok(control_region) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let handle = registry.next_id;
             registry.next_id += 1;
             registry
@@ -928,7 +929,7 @@ pub extern "C" fn renoir_control_region_register_buffer_pool(
     let control_id = control_handle as usize;
     let pool_id = pool_handle as usize;
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let control_region = match registry.control_regions.get(&control_id) {
         Some(control) => control.clone(),
@@ -965,7 +966,7 @@ pub extern "C" fn renoir_control_region_stats(
     }
 
     let control_id = control_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let control_region = match registry.control_regions.get(&control_id) {
         Some(control) => control.clone(),
@@ -997,7 +998,7 @@ pub extern "C" fn renoir_control_region_list_regions(
     }
 
     let control_id = control_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let control_region = match registry.control_regions.get(&control_id) {
         Some(control) => control.clone(),
@@ -1100,7 +1101,7 @@ pub extern "C" fn renoir_control_region_cleanup_stale(
     }
 
     let control_id = control_handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let control_region = match registry.control_regions.get(&control_id) {
         Some(control) => control.clone(),
@@ -1127,7 +1128,7 @@ pub extern "C" fn renoir_control_region_destroy(
     }
 
     let control_id = control_handle as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.control_regions.remove(&control_id).is_some() {
         RenoirErrorCode::Success

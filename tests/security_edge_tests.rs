@@ -139,19 +139,8 @@ mod security_edge_tests {
         match empty_result {
             Ok(()) => {
                 // Empty message accepted - verify consumption
-                if let Ok(Some(consumed)) = ring.try_consume() {
-                    let payload_len = match &consumed.payload {
-                        renoir::topic::MessagePayload::Inline(data) => data.len(),
-                        renoir::topic::MessagePayload::Descriptor(_desc) => {
-                            // For descriptors, we just verify it was consumed successfully
-                            // The actual payload size might not be zero due to internal representation
-                            0 // Accept that descriptor-based messages handle empty differently
-                        }
-                    };
-                    assert!(
-                        payload_len == 0 || payload_len > 0,
-                        "Empty message consumed successfully"
-                    );
+                if let Ok(Some(_consumed)) = ring.try_consume() {
+                    // Empty message consumed successfully
                 }
             }
             Err(_) => {
@@ -272,7 +261,6 @@ mod security_edge_tests {
         println!("Adversarial concurrent access: basic functionality verified");
 
         // Just verify no crashes occurred
-        assert!(true, "Test completed without segfault");
     }
 
     /// Test: Resource exhaustion and recovery patterns
@@ -554,10 +542,10 @@ mod security_edge_tests {
         let stats = Arc::new(renoir::topic::TopicStats::default());
         let ring = Arc::new(SPSCTopicRing::new(512, stats).unwrap());
 
-        let invalid_payloads = vec![
-            vec![0u8; 0],                        // Empty
-            vec![0xFFu8; 64 * 1024],             // Large
-            (0..256).map(|i| i as u8).collect(), // Pattern data
+        let invalid_payloads: Vec<Vec<u8>> = vec![
+            vec![0u8; 0],            // Empty
+            vec![0xFFu8; 64 * 1024], // Large
+            (0u8..=255).collect(),   // Pattern data
         ];
 
         for (i, payload) in invalid_payloads.iter().enumerate() {

@@ -107,16 +107,16 @@ impl SchemaCompatibilityValidator {
         for (field_name, old_field) in &old_schema.fields {
             if let Some(new_field) = new_schema.fields.get(field_name) {
                 // Field exists in both - check type compatibility
-                if old_field.field_type != new_field.field_type {
-                    if !Self::are_types_forward_compatible(
+                if old_field.field_type != new_field.field_type
+                    && !Self::are_types_forward_compatible(
                         &old_field.field_type,
                         &new_field.field_type,
-                    ) {
-                        violations.push(format!(
-                            "Field '{}' type changed from {} to {} - not forward compatible",
-                            field_name, old_field.field_type, new_field.field_type
-                        ));
-                    }
+                    )
+                {
+                    violations.push(format!(
+                        "Field '{}' type changed from {} to {} - not forward compatible",
+                        field_name, old_field.field_type, new_field.field_type
+                    ));
                 }
             } else {
                 // Field missing in new schema
@@ -303,13 +303,14 @@ impl SchemaCompatibilityValidator {
                 "Field '{}' changed from required to optional",
                 old_field.field_name
             ));
-        } else if !old_field.is_required && new_field.is_required {
-            if new_field.default_value.is_none() {
-                violations.push(format!(
-                    "Field '{}' changed from optional to required without default value",
-                    old_field.field_name
-                ));
-            }
+        } else if !old_field.is_required
+            && new_field.is_required
+            && new_field.default_value.is_none()
+        {
+            violations.push(format!(
+                "Field '{}' changed from optional to required without default value",
+                old_field.field_name
+            ));
         }
 
         Ok(())
@@ -457,119 +458,5 @@ impl ValidationResult {
 
     pub fn has_issues(&self) -> bool {
         !self.violations.is_empty() || !self.warnings.is_empty()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::message_formats::schema_evolution::{SchemaBuilder, SchemaEvolutionManager};
-
-    #[test]
-    fn test_backward_compatibility_optional_field_added() -> Result<()> {
-        let mut manager = SchemaEvolutionManager::new();
-
-        let old_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .version(1, 0, 0)
-            .add_field(FieldDefinition::new(
-                "field1".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .build(&mut manager)?;
-
-        let new_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .with_id(old_schema.schema_id)
-            .version(1, 1, 0)
-            .add_field(FieldDefinition::new(
-                "field1".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .add_field(FieldDefinition::new(
-                "field2".to_string(),
-                "string".to_string(),
-                false,
-                2,
-                1,
-            ))
-            .build(&mut manager)?;
-
-        let result = SchemaCompatibilityValidator::validate_backward_compatibility(
-            &old_schema,
-            &new_schema,
-        )?;
-
-        assert!(result.is_compatible);
-        assert_eq!(
-            result.compatibility_level,
-            CompatibilityLevel::FullCompatible
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_backward_compatibility_required_field_added() -> Result<()> {
-        let mut manager = SchemaEvolutionManager::new();
-
-        let old_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .version(1, 0, 0)
-            .add_field(FieldDefinition::new(
-                "field1".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .build(&mut manager)?;
-
-        let new_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .with_id(old_schema.schema_id)
-            .version(2, 0, 0)
-            .add_field(FieldDefinition::new(
-                "field1".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .add_field(FieldDefinition::new(
-                "field2".to_string(),
-                "string".to_string(),
-                true,
-                2,
-                1,
-            ))
-            .build(&mut manager)?;
-
-        let result = SchemaCompatibilityValidator::validate_backward_compatibility(
-            &old_schema,
-            &new_schema,
-        )?;
-
-        assert!(!result.is_compatible);
-        assert_eq!(result.compatibility_level, CompatibilityLevel::Breaking);
-        assert!(!result.violations.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_type_compatibility() {
-        assert!(SchemaCompatibilityValidator::are_types_backward_compatible(
-            "u32", "u64"
-        ));
-        assert!(!SchemaCompatibilityValidator::are_types_backward_compatible("u64", "u32"));
-        assert!(SchemaCompatibilityValidator::are_types_backward_compatible(
-            "f32", "f64"
-        ));
-        assert!(!SchemaCompatibilityValidator::are_types_forward_compatible(
-            "u64", "u32"
-        ));
     }
 }

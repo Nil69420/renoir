@@ -4,19 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Types of shared memory backing
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum BackingType {
     /// File-backed shared memory
+    #[default]
     FileBacked,
     /// Anonymous memory file descriptor (Linux-specific)
     #[cfg(target_os = "linux")]
     MemFd,
-}
-
-impl Default for BackingType {
-    fn default() -> Self {
-        Self::FileBacked
-    }
 }
 
 impl BackingType {
@@ -126,7 +121,7 @@ impl RegionConfig {
         if !self.backing_type.is_supported() {
             return Err(RenoirError::invalid_parameter(
                 "backing_type",
-                &format!(
+                format!(
                     "Backing type {} is not supported on this platform",
                     self.backing_type.name()
                 ),

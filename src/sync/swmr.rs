@@ -83,6 +83,7 @@ impl<T> SWMRRing<T> {
         let layout = std::alloc::Layout::array::<SWMRSlot<T>>(capacity)
             .map_err(|_| SyncError::CorruptedBuffer)?;
 
+        // SAFETY: Layout is valid (non-zero, power-of-two capacity). Null check is performed before use.
         let slots = unsafe {
             let ptr = std::alloc::alloc(layout) as *mut SWMRSlot<T>;
             if ptr.is_null() {
@@ -128,6 +129,7 @@ impl<T> SWMRRing<T> {
 
     /// Get slot at given index
     fn slot(&self, index: usize) -> &SWMRSlot<T> {
+        // SAFETY: Index is masked to stay within allocated capacity.
         unsafe { &*self.slots.as_ptr().add(index & self.mask) }
     }
 
@@ -139,6 +141,8 @@ impl<T> SWMRRing<T> {
 
 impl<T> Drop for SWMRRing<T> {
     fn drop(&mut self) {
+        // SAFETY: Slots were allocated in `new`; only initialized (ready) slots are dropped.
+        // Dealloc uses the same layout as the original allocation.
         unsafe {
             // Drop all initialized slots
             for i in 0..self.capacity {
@@ -181,6 +185,7 @@ impl<'a, T> WriterHandle<'a, T> {
         }
 
         // Write data to slot (slot is now in WRITING state)
+        // SAFETY: Slot has been claimed for writing (WRITING state); exclusive access is guaranteed.
         unsafe {
             std::ptr::write(slot.data_ptr(), data);
         }
@@ -213,6 +218,7 @@ impl<'a, T> WriterHandle<'a, T> {
         slot.sequence().store_relaxed(special::WRITING);
 
         // Write data
+        // SAFETY: Slot is force-claimed (WRITING state); old data is dropped only if it was initialized.
         unsafe {
             // Drop existing data if it was ready
             if AtomicSequence::is_ready(current_seq) {
@@ -259,6 +265,7 @@ impl<'a, T: Clone> ReaderHandle<'a, T> {
         let checker = SequenceChecker::new(Arc::new(slot.sequence().clone()));
 
         // Use sequence checker to ensure consistent read
+        // SAFETY: Reads are guarded by SequenceChecker which retries on torn reads.
         match checker.consistent_read(|| unsafe { (*slot.data_ptr()).clone() }, 3) {
             Ok(data) => {
                 let sequence = slot.sequence().load_acquire();
@@ -286,6 +293,7 @@ impl<'a, T: Clone> ReaderHandle<'a, T> {
         let slot = self.ring.slot(slot_index);
         let checker = SequenceChecker::new(Arc::new(slot.sequence().clone()));
 
+        // SAFETY: Reads are guarded by SequenceChecker which retries on torn reads.
         match checker.consistent_read(|| unsafe { (*slot.data_ptr()).clone() }, 3) {
             Ok(data) => {
                 let sequence = slot.sequence().load_acquire();
@@ -364,134 +372,12 @@ impl<T> SharedSWMRRing<T> {
     pub fn reader(&self) -> ReaderHandle<'_, T> {
         self.ring.reader()
     }
+}
 
-    /// Clone for sharing across threads
-    pub fn clone(&self) -> Self {
+impl<T: Copy + Default> Clone for SharedSWMRRing<T> {
+    fn clone(&self) -> Self {
         Self {
             ring: Arc::clone(&self.ring),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn test_swmr_basic() {
-        let ring = SWMRRing::<i32>::new(4).unwrap();
-        let mut writer = ring.writer();
-        let mut reader = ring.reader();
-
-        // Write some data
-        let seq1 = writer.try_write(42).unwrap();
-        let seq2 = writer.try_write(84).unwrap();
-
-        // Read it back
-        let (data1, read_seq1) = reader.try_read().unwrap().unwrap();
-        assert_eq!(data1, 42);
-        assert_eq!(read_seq1, seq1);
-
-        let (data2, read_seq2) = reader.try_read().unwrap().unwrap();
-        assert_eq!(data2, 84);
-        assert_eq!(read_seq2, seq2);
-
-        // No more data
-        assert!(reader.try_read().unwrap().is_none());
-    }
-
-    #[test]
-    fn test_swmr_multiple_readers() {
-        let ring = Arc::new(SWMRRing::<u64>::new(8).unwrap());
-        let barrier = Arc::new(Barrier::new(3)); // 1 writer + 2 readers
-
-        let writer_ring = ring.clone();
-        let writer_barrier = barrier.clone();
-        let writer_handle = thread::spawn(move || {
-            let mut writer = writer_ring.writer();
-            writer_barrier.wait();
-
-            for i in 0..10 {
-                writer.try_write(i).unwrap();
-                thread::sleep(Duration::from_millis(1));
-            }
-        });
-
-        let reader_handles: Vec<_> = (0..2)
-            .map(|reader_id| {
-                let reader_ring = ring.clone();
-                let reader_barrier = barrier.clone();
-                thread::spawn(move || {
-                    let mut reader = reader_ring.reader();
-                    reader_barrier.wait();
-
-                    let mut read_data = Vec::new();
-                    for _ in 0..20 {
-                        // Try to read more than writer produces
-                        if let Some((data, _seq)) = reader.try_read().unwrap() {
-                            read_data.push(data);
-                        }
-                        thread::sleep(Duration::from_millis(2));
-                    }
-                    (reader_id, read_data)
-                })
-            })
-            .collect();
-
-        writer_handle.join().unwrap();
-
-        let results: Vec<_> = reader_handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .collect();
-
-        // Each reader should have read some data
-        for (reader_id, data) in results {
-            println!("Reader {} read {} items", reader_id, data.len());
-            assert!(!data.is_empty());
-        }
-    }
-
-    #[test]
-    fn test_swmr_slot_access() {
-        let ring = SWMRRing::<String>::new(4).unwrap();
-        let mut writer = ring.writer();
-        let reader = ring.reader();
-
-        writer.force_write("slot0".to_string(), 0).unwrap();
-        writer.force_write("slot2".to_string(), 2).unwrap();
-
-        let (data0, _) = reader.read_slot(0).unwrap().unwrap();
-        assert_eq!(data0, "slot0");
-
-        let (data2, _) = reader.read_slot(2).unwrap().unwrap();
-        assert_eq!(data2, "slot2");
-
-        // Slot 1 should be empty
-        assert!(reader.read_slot(1).unwrap().is_none());
-    }
-
-    #[test]
-    fn test_reader_lag_tracking() {
-        let ring = SWMRRing::<u32>::new(4).unwrap();
-        let mut writer = ring.writer();
-        let mut reader = ring.reader();
-
-        // Fill the ring
-        for i in 0..6 {
-            writer.try_write(i).unwrap();
-        }
-
-        // Reader should be behind
-        assert!(reader.lag() >= 4);
-        assert!(reader.is_too_slow());
-
-        // Skip to latest
-        reader.skip_to_latest().unwrap();
-        assert!(reader.lag() < 4);
-        assert!(!reader.is_too_slow());
     }
 }

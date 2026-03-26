@@ -109,13 +109,13 @@ impl SharedMemoryRegion {
             .map_err(|_| RenoirError::invalid_parameter("name", "Name contains null bytes"))?;
 
         let owned_fd = memfd_create(&name_cstr, MemFdCreateFlag::MFD_CLOEXEC)
-            .map_err(|e| RenoirError::platform(&format!("Failed to create memfd: {}", e)))?;
+            .map_err(|e| RenoirError::platform(format!("Failed to create memfd: {}", e)))?;
 
         let raw_fd = owned_fd.as_raw_fd();
 
         // Set size using ftruncate
         ftruncate(&owned_fd, config.size as i64)
-            .map_err(|e| RenoirError::platform(&format!("Failed to set memfd size: {}", e)))?;
+            .map_err(|e| RenoirError::platform(format!("Failed to set memfd size: {}", e)))?;
 
         Ok((None, Some(owned_fd), raw_fd))
     }
@@ -129,7 +129,7 @@ impl SharedMemoryRegion {
     ) -> Result<MmapMut> {
         match file {
             Some(f) => {
-                // For file-backed regions, use the File reference
+                // SAFETY: File is open and sized correctly; mapping is valid for the requested length.
                 unsafe {
                     MmapOptions::new()
                         .len(size)
@@ -140,6 +140,7 @@ impl SharedMemoryRegion {
             None => {
                 // For memfd regions, use the OwnedFd directly
                 if let Some(owned_fd) = owned_fd {
+                    // SAFETY: OwnedFd is valid and memfd has been sized via ftruncate.
                     unsafe {
                         MmapOptions::new()
                             .len(size)
@@ -147,9 +148,9 @@ impl SharedMemoryRegion {
                             .map_err(|e| RenoirError::from_io(e, "Failed to create memory mapping"))
                     }
                 } else {
-                    return Err(RenoirError::platform(
+                    Err(RenoirError::platform(
                         "No file or owned fd available for mapping",
-                    ));
+                    ))
                 }
             }
         }
@@ -228,6 +229,66 @@ impl SharedMemoryRegion {
         matches!(self.metadata.backing_type, BackingType::MemFd)
     }
 
+    /// Lock the region's pages into physical memory so they cannot be swapped
+    /// out. This is critical for real-time robotics workloads where page faults
+    /// would violate timing constraints.
+    ///
+    /// Requires `CAP_IPC_LOCK` or sufficient `RLIMIT_MEMLOCK`.
+    #[cfg(target_os = "linux")]
+    pub fn mlock(&self) -> Result<()> {
+        let ptr = self.mmap.as_ptr() as *const libc::c_void;
+        let len = self.mmap.len();
+        // SAFETY: ptr and len describe the mmap region which is valid for reads.
+        let ret = unsafe { libc::mlock(ptr, len) };
+        if ret != 0 {
+            return Err(RenoirError::platform(format!(
+                "mlock failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Unlock previously locked pages.
+    #[cfg(target_os = "linux")]
+    pub fn munlock(&self) -> Result<()> {
+        let ptr = self.mmap.as_ptr() as *const libc::c_void;
+        let len = self.mmap.len();
+        // SAFETY: ptr and len describe the mmap region which is valid for reads.
+        let ret = unsafe { libc::munlock(ptr, len) };
+        if ret != 0 {
+            return Err(RenoirError::platform(format!(
+                "munlock failed: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Remove stale file-backed shared memory files from `/tmp` that match the
+    /// renoir naming convention (`/tmp/renoir_*`). Returns the list of removed
+    /// file names.
+    pub fn cleanup_orphans() -> Result<Vec<String>> {
+        let mut removed = Vec::new();
+        let entries = std::fs::read_dir("/tmp")
+            .map_err(|e| RenoirError::from_io(e, "Failed to read /tmp"))?;
+
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with("renoir_") {
+                if let Ok(metadata) = entry.metadata() {
+                    // Only remove regular files (not directories or symlinks)
+                    if metadata.is_file() && std::fs::remove_file(entry.path()).is_ok() {
+                        removed.push(name_str.into_owned());
+                    }
+                }
+            }
+        }
+
+        Ok(removed)
+    }
+
     /// Get memory statistics for this region
     pub fn memory_stats(&self) -> RegionMemoryStats {
         RegionMemoryStats {
@@ -246,6 +307,7 @@ impl Drop for SharedMemoryRegion {
         // Only manually close if we have neither a File nor an OwnedFd (shouldn't happen in normal usage)
         if self._file.is_none() && self._owned_fd.is_none() && self.fd != -1 {
             #[cfg(target_os = "linux")]
+            // SAFETY: fd is valid and not owned by File or OwnedFd (checked above), so we must close it manually.
             unsafe {
                 libc::close(self.fd);
             }

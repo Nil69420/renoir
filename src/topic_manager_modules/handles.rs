@@ -45,7 +45,7 @@ impl Publisher {
         if payload.len() > self.topic.config.max_payload_size {
             return Err(crate::error::RenoirError::invalid_parameter(
                 "payload",
-                &format!(
+                format!(
                     "Payload size {} exceeds maximum {}",
                     payload.len(),
                     self.topic.config.max_payload_size
@@ -114,7 +114,6 @@ pub struct Subscriber {
     pub handle: SubscriberHandle,
     pub topic_id: TopicId,
     topic: Arc<TopicInstance>,
-    #[allow(dead_code)]
     last_sequence: AtomicUsize,
 }
 

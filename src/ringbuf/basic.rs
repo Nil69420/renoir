@@ -38,6 +38,7 @@ impl<T> RingBuffer<T> {
         let layout = std::alloc::Layout::array::<T>(capacity)
             .map_err(|_| RenoirError::memory("Failed to create layout for ring buffer"))?;
 
+        // SAFETY: Layout is valid (non-zero, power-of-two capacity). Null check follows.
         let buffer = unsafe {
             let ptr = std::alloc::alloc(layout) as *mut T;
             NonNull::new(ptr)
@@ -55,6 +56,10 @@ impl<T> RingBuffer<T> {
     }
 
     /// Create a ring buffer from existing memory
+    ///
+    /// # Safety
+    /// `memory` must point to a valid, aligned allocation of at least
+    /// `capacity * size_of::<T>()` bytes that outlives the returned buffer.
     pub unsafe fn from_memory(memory: NonNull<T>, capacity: usize) -> Result<Self> {
         if capacity == 0 || !capacity.is_power_of_two() {
             return Err(RenoirError::invalid_parameter(
@@ -139,6 +144,7 @@ impl<T> Drop for RingBuffer<T> {
             let read_pos = self.read_pos.load(Ordering::Acquire);
             let index = read_pos & self.mask;
 
+            // SAFETY: Index is within capacity and slot contains a valid initialized element.
             unsafe {
                 std::ptr::drop_in_place(self.buffer.as_ptr().add(index));
             }
@@ -149,6 +155,7 @@ impl<T> Drop for RingBuffer<T> {
 
         // Deallocate buffer
         let layout = std::alloc::Layout::array::<T>(self.capacity).unwrap();
+        // SAFETY: Buffer was allocated with the same layout in `new` and all elements have been dropped above.
         unsafe {
             std::alloc::dealloc(self.buffer.as_ptr() as *mut u8, layout);
         }
@@ -182,6 +189,7 @@ impl<'a, T: Clone> Producer<'a, T> {
 
         let index = write_pos & self.mask;
 
+        // SAFETY: Index is within capacity (masked) and the slot is empty (checked above: buffer not full).
         unsafe {
             // Write the item
             std::ptr::write(self.buffer.as_ptr().add(index), item);
@@ -194,19 +202,52 @@ impl<'a, T: Clone> Producer<'a, T> {
         Ok(())
     }
 
-    /// Push an item, blocking until space is available (spinning)
+    /// Push an item, blocking until space is available with exponential backoff.
     pub fn push(&self, item: T) -> Result<()> {
+        let mut backoff = 0u32;
         loop {
             match self.try_push(item.clone()) {
                 Ok(()) => return Ok(()),
                 Err(RenoirError::BufferFull { .. }) => {
-                    // Spin-wait for space
-                    std::hint::spin_loop();
+                    if backoff < 4 {
+                        for _ in 0..(1 << backoff) {
+                            std::hint::spin_loop();
+                        }
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    backoff = backoff.saturating_add(1).min(8);
                     continue;
                 }
                 Err(e) => return Err(e),
             }
         }
+    }
+
+    /// Push multiple items in a batch. Returns the number of items successfully pushed.
+    /// Items that don't fit are left unpushed (no partial writes per item).
+    pub fn try_push_batch(&self, items: &[T]) -> usize {
+        let mut pushed = 0;
+        let write_pos = self.write_pos.load(Ordering::Relaxed);
+        let read_pos = self.read_pos.load(Ordering::Acquire);
+        let available = self.capacity - write_pos.wrapping_sub(read_pos);
+
+        let count = items.len().min(available);
+
+        // SAFETY: Each index is within capacity (masked) and the slots are empty
+        // (we checked available space covers `count` items).
+        unsafe {
+            for (i, item) in items.iter().enumerate().take(count) {
+                let index = write_pos.wrapping_add(i) & self.mask;
+                std::ptr::write(self.buffer.as_ptr().add(index), item.clone());
+                pushed += 1;
+            }
+        }
+
+        self.write_pos
+            .store(write_pos.wrapping_add(pushed), Ordering::Release);
+
+        pushed
     }
 
     /// Get the current write position
@@ -245,6 +286,7 @@ impl<'a, T> Consumer<'a, T> {
 
         let index = read_pos & self.mask;
 
+        // SAFETY: Index is within capacity (masked) and the slot is initialized (checked above: buffer not empty).
         let item = unsafe {
             // Read the item
             std::ptr::read(self.buffer.as_ptr().add(index))
@@ -257,19 +299,50 @@ impl<'a, T> Consumer<'a, T> {
         Ok(item)
     }
 
-    /// Pop an item, blocking until one is available (spinning)
+    /// Pop an item, blocking until one is available with exponential backoff.
     pub fn pop(&self) -> Result<T> {
+        let mut backoff = 0u32;
         loop {
             match self.try_pop() {
                 Ok(item) => return Ok(item),
                 Err(RenoirError::BufferEmpty { .. }) => {
-                    // Spin-wait for data
-                    std::hint::spin_loop();
+                    if backoff < 4 {
+                        for _ in 0..(1 << backoff) {
+                            std::hint::spin_loop();
+                        }
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    backoff = backoff.saturating_add(1).min(8);
                     continue;
                 }
                 Err(e) => return Err(e),
             }
         }
+    }
+
+    /// Pop up to `max` items in a batch. Returns a Vec of popped items.
+    pub fn try_pop_batch(&self, max: usize) -> Vec<T> {
+        let read_pos = self.read_pos.load(Ordering::Relaxed);
+        let write_pos = self.write_pos.load(Ordering::Acquire);
+        let available = write_pos.wrapping_sub(read_pos);
+
+        let count = max.min(available);
+        let mut items = Vec::with_capacity(count);
+
+        // SAFETY: Each index is within capacity (masked) and the slots are initialized
+        // (we checked available items covers `count`).
+        unsafe {
+            for i in 0..count {
+                let index = read_pos.wrapping_add(i) & self.mask;
+                items.push(std::ptr::read(self.buffer.as_ptr().add(index)));
+            }
+        }
+
+        self.read_pos
+            .store(read_pos.wrapping_add(count), Ordering::Release);
+
+        items
     }
 
     /// Peek at the next item without consuming it
@@ -284,6 +357,7 @@ impl<'a, T> Consumer<'a, T> {
 
         let index = read_pos & self.mask;
 
+        // SAFETY: Index is within capacity (masked) and the slot is initialized (buffer not empty).
         Ok(unsafe { &*self.buffer.as_ptr().add(index) })
     }
 

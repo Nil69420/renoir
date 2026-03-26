@@ -171,10 +171,7 @@ impl SchemaEvolutionManager {
         self.validate_schema_evolution(&schema)?;
 
         // Store schema
-        self.schemas
-            .entry(schema_id)
-            .or_insert_with(Vec::new)
-            .push(schema);
+        self.schemas.entry(schema_id).or_default().push(schema);
 
         // Update name mapping
         self.name_to_id.insert(name, schema_id);
@@ -269,7 +266,7 @@ impl SchemaEvolutionManager {
             if !positions.insert(field.position) {
                 return Err(RenoirError::invalid_parameter(
                     "schema",
-                    &format!("Duplicate field position {} in schema", field.position),
+                    format!("Duplicate field position {} in schema", field.position),
                 ));
             }
         }
@@ -301,25 +298,43 @@ impl SchemaEvolutionManager {
                     if !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
                         return Err(RenoirError::invalid_parameter(
                             "rule",
-                            &format!("Required field '{}' added but not marked as breaking", field_name),
+                            format!(
+                                "Required field '{}' added but not marked as breaking",
+                                field_name
+                            ),
                         ));
                     }
                 }
-                FieldChange::FieldRemoved { field_name, was_required } => {
+                FieldChange::FieldRemoved {
+                    field_name,
+                    was_required,
+                } => {
                     // Breaking if required, potentially compatible if optional
-                    if *was_required && !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                    if *was_required && !matches!(rule.compatibility, CompatibilityLevel::Breaking)
+                    {
                         return Err(RenoirError::invalid_parameter(
                             "rule",
-                            &format!("Required field '{}' removed but not marked as breaking", field_name),
+                            format!(
+                                "Required field '{}' removed but not marked as breaking",
+                                field_name
+                            ),
                         ));
                     }
                 }
-                FieldChange::FieldTypeChanged { field_name, is_compatible, .. } => {
+                FieldChange::FieldTypeChanged {
+                    field_name,
+                    is_compatible,
+                    ..
+                } => {
                     // Breaking if incompatible type change
-                    if !is_compatible && !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
+                    if !is_compatible && !matches!(rule.compatibility, CompatibilityLevel::Breaking)
+                    {
                         return Err(RenoirError::invalid_parameter(
                             "rule",
-                            &format!("Incompatible type change for '{}' but not marked as breaking", field_name),
+                            format!(
+                                "Incompatible type change for '{}' but not marked as breaking",
+                                field_name
+                            ),
                         ));
                     }
                 }
@@ -328,13 +343,16 @@ impl SchemaEvolutionManager {
                     if !matches!(rule.compatibility, CompatibilityLevel::Breaking) {
                         return Err(RenoirError::invalid_parameter(
                             "rule",
-                            &format!("Field '{}' made required but not marked as breaking", field_name),
+                            format!(
+                                "Field '{}' made required but not marked as breaking",
+                                field_name
+                            ),
                         ));
                     }
                 }
-                FieldChange::FieldMadeOptional { .. } | 
-                FieldChange::FieldDeprecated { .. } | 
-                FieldChange::FieldReordered { .. } => {
+                FieldChange::FieldMadeOptional { .. }
+                | FieldChange::FieldDeprecated { .. }
+                | FieldChange::FieldReordered { .. } => {
                     // Generally compatible changes
                     continue;
                 }
@@ -342,7 +360,9 @@ impl SchemaEvolutionManager {
         }
 
         // If marked as breaking, ensure migration steps exist
-        if matches!(rule.compatibility, CompatibilityLevel::Breaking) && rule.migration_steps.is_empty() {
+        if matches!(rule.compatibility, CompatibilityLevel::Breaking)
+            && rule.migration_steps.is_empty()
+        {
             return Err(RenoirError::invalid_parameter(
                 "rule",
                 "Breaking change requires migration steps",
@@ -423,7 +443,7 @@ impl SchemaEvolutionManager {
                     } else {
                         return Err(RenoirError::invalid_parameter(
                             "schema",
-                            &format!("New required field '{}' needs a default value", field_name),
+                            format!("New required field '{}' needs a default value", field_name),
                         ));
                     }
                 }
@@ -575,109 +595,5 @@ impl SchemaBuilder {
             deprecated_fields: HashSet::new(),
             requires_migration_from: None,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_semantic_version_compatibility() {
-        let v1_0_0 = SemanticVersion::new(1, 0, 0);
-        let v1_1_0 = SemanticVersion::new(1, 1, 0);
-        let v1_0_1 = SemanticVersion::new(1, 0, 1);
-        let v2_0_0 = SemanticVersion::new(2, 0, 0);
-
-        assert_eq!(
-            v1_0_0.is_compatible_with(&v1_0_0),
-            CompatibilityLevel::FullCompatible
-        );
-        assert_eq!(
-            v1_0_0.is_compatible_with(&v1_1_0),
-            CompatibilityLevel::BackwardCompatible
-        );
-        assert_eq!(
-            v1_1_0.is_compatible_with(&v1_0_0),
-            CompatibilityLevel::ForwardCompatible
-        );
-        assert_eq!(
-            v1_0_0.is_compatible_with(&v2_0_0),
-            CompatibilityLevel::Breaking
-        );
-        assert_eq!(
-            v1_0_0.is_compatible_with(&v1_0_1),
-            CompatibilityLevel::FullCompatible
-        );
-    }
-
-    #[test]
-    fn test_schema_evolution_manager() -> Result<()> {
-        let mut manager = SchemaEvolutionManager::new();
-
-        let schema = SchemaBuilder::new("test_schema".to_string(), FormatType::FlatBuffers)
-            .version(1, 0, 0)
-            .add_field(FieldDefinition::new(
-                "field1".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .build(&mut manager)?;
-
-        manager.register_schema(schema)?;
-
-        let retrieved = manager.get_latest_schema("test_schema");
-        assert!(retrieved.is_some());
-        assert_eq!(
-            retrieved.unwrap().semantic_version,
-            SemanticVersion::new(1, 0, 0)
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_migration_plan_generation() -> Result<()> {
-        let mut manager = SchemaEvolutionManager::new();
-        let schema_id = manager.generate_schema_id();
-
-        let v1_schema = SchemaBuilder::new("migration_test".to_string(), FormatType::FlatBuffers)
-            .with_id(schema_id)
-            .version(1, 0, 0)
-            .add_field(FieldDefinition::new(
-                "old_field".to_string(),
-                "u32".to_string(),
-                true,
-                1,
-                0,
-            ))
-            .build(&mut manager)?;
-
-        let v2_schema = SchemaBuilder::new("migration_test".to_string(), FormatType::FlatBuffers)
-            .with_id(schema_id)
-            .version(2, 0, 0)
-            .add_field(FieldDefinition::new(
-                "old_field".to_string(),
-                "u64".to_string(), // Changed type - breaking
-                true,
-                1,
-                0,
-            ))
-            .add_field(
-                FieldDefinition::new("new_field".to_string(), "string".to_string(), true, 2, 1)
-                    .with_default("default_value".to_string()),
-            )
-            .build(&mut manager)?;
-
-        let migration_plan = manager.generate_migration_plan(&v1_schema, &v2_schema)?;
-
-        assert!(!migration_plan.is_empty());
-        assert!(migration_plan
-            .iter()
-            .any(|step| matches!(step, MigrationStep::VersionBump { is_major: true, .. })));
-
-        Ok(())
     }
 }

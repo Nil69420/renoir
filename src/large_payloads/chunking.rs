@@ -8,8 +8,10 @@ use crate::error::{RenoirError, Result};
 use crate::shared_pools::{PoolId, SharedBufferPoolManager};
 use crate::topic::MessageDescriptor;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+
+use parking_lot::Mutex;
 
 /// Maximum chunk size (configurable, typically 64KB-4MB)
 pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024; // 1MB
@@ -100,9 +102,6 @@ struct IncompleteMessage {
     chunks: HashMap<u32, (Vec<u8>, ChunkDescriptor)>,
     /// Creation timestamp for cleanup
     created_at: SystemTime,
-    /// Original blob header
-    #[allow(dead_code)]
-    blob_header: Option<BlobHeader>,
 }
 
 impl IncompleteMessage {
@@ -111,7 +110,6 @@ impl IncompleteMessage {
             total_chunks,
             chunks: HashMap::new(),
             created_at: SystemTime::now(),
-            blob_header: None,
         }
     }
 
@@ -228,7 +226,7 @@ impl ChunkManager {
             }
         };
 
-        let total_chunks = ((payload.len() + chunk_size - 1) / chunk_size) as u32;
+        let total_chunks = payload.len().div_ceil(chunk_size) as u32;
 
         if total_chunks > MAX_CHUNKS_PER_MESSAGE {
             return Err(RenoirError::invalid_parameter(
@@ -309,7 +307,7 @@ impl ChunkManager {
             ));
         }
 
-        let mut incomplete = self.incomplete_messages.lock().unwrap();
+        let mut incomplete = self.incomplete_messages.lock();
 
         // Get or create incomplete message
         let incomplete_msg = incomplete
@@ -334,7 +332,7 @@ impl ChunkManager {
 
     /// Clean up expired incomplete messages
     pub fn cleanup_expired(&self) -> usize {
-        let mut incomplete = self.incomplete_messages.lock().unwrap();
+        let mut incomplete = self.incomplete_messages.lock();
         let initial_count = incomplete.len();
 
         incomplete.retain(|_, msg| !msg.is_expired(self.reassembly_timeout));
@@ -344,7 +342,7 @@ impl ChunkManager {
 
     /// Get statistics about incomplete messages
     pub fn get_statistics(&self) -> ChunkManagerStats {
-        let incomplete = self.incomplete_messages.lock().unwrap();
+        let incomplete = self.incomplete_messages.lock();
 
         let incomplete_count = incomplete.len();
         let total_chunks_waiting: u32 =

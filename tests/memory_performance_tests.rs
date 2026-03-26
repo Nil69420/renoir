@@ -92,7 +92,7 @@ mod memory_performance_tests {
         let manager = SharedMemoryManager::new();
 
         // Create regions of varying sizes to simulate fragmentation (embedded-friendly sizes)
-        let region_sizes = vec![8 * 1024, 32 * 1024, 16 * 1024, 64 * 1024, 4 * 1024];
+        let region_sizes = [8 * 1024, 32 * 1024, 16 * 1024, 64 * 1024, 4 * 1024];
         let mut created_regions = Vec::new();
 
         let start_time = Instant::now();
@@ -475,11 +475,8 @@ mod memory_performance_tests {
         let mut buffers = Vec::new();
         let fill_start = Instant::now();
 
-        loop {
-            match pool.get_buffer() {
-                Ok(buffer) => buffers.push(buffer),
-                Err(_) => break, // Pool exhausted
-            }
+        while let Ok(buffer) = pool.get_buffer() {
+            buffers.push(buffer);
         }
 
         let fill_time = fill_start.elapsed();

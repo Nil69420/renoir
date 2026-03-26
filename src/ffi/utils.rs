@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 //! FFI utilities and handle management
 
 use std::{
@@ -16,8 +17,8 @@ use crate::{
 
 // Global handle management
 lazy_static::lazy_static! {
-    pub static ref HANDLE_REGISTRY: std::sync::Mutex<HandleRegistry> =
-        std::sync::Mutex::new(HandleRegistry::new());
+    pub static ref HANDLE_REGISTRY: parking_lot::Mutex<HandleRegistry> =
+        parking_lot::Mutex::new(HandleRegistry::new());
 }
 
 pub struct HandleRegistry {
@@ -25,23 +26,26 @@ pub struct HandleRegistry {
     pub regions: HashMap<usize, Arc<crate::memory::SharedMemoryRegion>>,
     pub buffer_pools: HashMap<usize, Arc<BufferPool>>,
     pub buffers: HashMap<usize, Box<Buffer>>,
-    #[allow(dead_code)]
     pub allocators: HashMap<usize, Arc<dyn Allocator>>,
-    #[allow(dead_code)]
     pub ring_buffers: HashMap<usize, Box<dyn std::any::Any + Send + Sync>>,
-    #[allow(dead_code)]
     pub control_regions: HashMap<usize, Arc<crate::metadata_modules::ControlRegion>>,
     pub topic_managers: HashMap<usize, Arc<TopicManager>>,
     pub buffer_registries: HashMap<usize, Arc<BufferPoolRegistry>>, // Maps topic_manager_id -> BufferPoolRegistry
     pub publishers: HashMap<usize, Arc<Publisher>>,
     pub subscribers: HashMap<usize, Arc<Subscriber>>,
     pub subscriber_to_manager: HashMap<usize, usize>, // Maps subscriber_id -> manager_id
-    pub publisher_to_manager: HashMap<usize, usize>, // Maps publisher_id -> manager_id
+    pub publisher_to_manager: HashMap<usize, usize>,  // Maps publisher_id -> manager_id
     pub reserved_buffers: HashMap<usize, Vec<u8>>,
     pub received_messages: HashMap<usize, crate::topic::Message>,
     pub descriptor_buffers: HashMap<usize, Arc<Buffer>>, // Keeps descriptor buffers alive
     pub message_to_descriptor_buffer: HashMap<usize, usize>, // Maps message_id -> descriptor_buffer_id
     pub next_id: usize,
+}
+
+impl Default for HandleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HandleRegistry {
@@ -106,7 +110,11 @@ impl HandleRegistry {
     }
 
     // Topic Manager methods
-    pub fn store_topic_manager(&mut self, manager: Arc<TopicManager>, registry: Arc<BufferPoolRegistry>) -> usize {
+    pub fn store_topic_manager(
+        &mut self,
+        manager: Arc<TopicManager>,
+        registry: Arc<BufferPoolRegistry>,
+    ) -> usize {
         let id = self.next_id;
         self.next_id += 1;
         self.topic_managers.insert(id, manager);
@@ -168,10 +176,10 @@ impl HandleRegistry {
     }
 
     // Message methods
-    pub fn store_message(&mut self, message: Box<crate::topic::Message>) -> usize {
+    pub fn store_message(&mut self, message: crate::topic::Message) -> usize {
         let id = self.next_id;
         self.next_id += 1;
-        self.received_messages.insert(id, *message);
+        self.received_messages.insert(id, message);
         id
     }
 
@@ -188,7 +196,8 @@ impl HandleRegistry {
     }
 
     pub fn associate_descriptor_buffer(&mut self, message_id: usize, buffer_id: usize) {
-        self.message_to_descriptor_buffer.insert(message_id, buffer_id);
+        self.message_to_descriptor_buffer
+            .insert(message_id, buffer_id);
     }
 }
 

@@ -3,11 +3,10 @@
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
     hash::{Hash, Hasher},
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc, RwLock,
-    },
+    sync::{atomic::Ordering, Arc},
 };
+
+use parking_lot::RwLock;
 
 use crate::{
     error::{RenoirError, Result},
@@ -36,9 +35,6 @@ pub struct TopicManager {
     memory_manager: Arc<SharedMemoryManager>,
     /// Buffer pool registry for large messages
     buffer_registry: Arc<BufferPoolRegistry>,
-    /// Next available topic ID
-    #[allow(dead_code)]
-    next_topic_id: AtomicU32,
     /// Global statistics
     stats: TopicManagerStats,
 }
@@ -66,7 +62,6 @@ impl TopicManager {
             topic_ids: RwLock::new(HashMap::new()),
             memory_manager,
             buffer_registry,
-            next_topic_id: AtomicU32::new(1),
             stats: TopicManagerStats::default(),
         })
     }
@@ -76,7 +71,7 @@ impl TopicManager {
         let topic_id = self.calculate_topic_id(&config.name);
 
         {
-            let topics = self.topics.read().unwrap();
+            let topics = self.topics.read();
             if topics.contains_key(&config.name) {
                 return Ok(topic_id);
             }
@@ -108,8 +103,8 @@ impl TopicManager {
 
         // Store topic
         {
-            let mut topics = self.topics.write().unwrap();
-            let mut topic_ids = self.topic_ids.write().unwrap();
+            let mut topics = self.topics.write();
+            let mut topic_ids = self.topic_ids.write();
 
             topics.insert(topic_instance.config.name.clone(), topic_instance.clone());
             topic_ids.insert(topic_id, topic_instance.config.name.clone());
@@ -122,7 +117,7 @@ impl TopicManager {
 
     /// Create a publisher for a topic
     pub fn create_publisher(&self, topic_name: &str) -> Result<Publisher> {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         let topic = topics
             .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?
@@ -135,7 +130,7 @@ impl TopicManager {
 
     /// Create a subscriber for a topic
     pub fn create_subscriber(&self, topic_name: &str) -> Result<Subscriber> {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         let topic = topics
             .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?
@@ -149,7 +144,7 @@ impl TopicManager {
     /// Remove a topic (only if no active publishers/subscribers)
     pub fn remove_topic(&self, topic_name: &str) -> Result<()> {
         let topic = {
-            let topics = self.topics.read().unwrap();
+            let topics = self.topics.read();
             topics.get(topic_name).cloned()
         };
 
@@ -163,8 +158,8 @@ impl TopicManager {
                 ));
             }
 
-            let mut topics = self.topics.write().unwrap();
-            let mut topic_ids = self.topic_ids.write().unwrap();
+            let mut topics = self.topics.write();
+            let mut topic_ids = self.topic_ids.write();
 
             topics.remove(topic_name);
             topic_ids.remove(&topic.topic_id);
@@ -172,9 +167,10 @@ impl TopicManager {
             // Clean up the memory region
             if let Err(e) = self.memory_manager.remove_region(&topic.region_name) {
                 // Log error but don't fail the removal
-                eprintln!(
-                    "Warning: Failed to remove memory region {}: {:?}",
-                    topic.region_name, e
+                log::warn!(
+                    "Failed to remove memory region {}: {:?}",
+                    topic.region_name,
+                    e
                 );
             }
 
@@ -186,7 +182,7 @@ impl TopicManager {
 
     /// List all topics
     pub fn list_topics(&self) -> Vec<(String, TopicId, TopicConfig)> {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         topics
             .iter()
             .map(|(name, topic)| (name.clone(), topic.topic_id, topic.config.clone()))
@@ -195,7 +191,7 @@ impl TopicManager {
 
     /// Get topic statistics
     pub fn topic_stats(&self, topic_name: &str) -> Result<Arc<TopicStats>> {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         let topic = topics
             .get(topic_name)
             .ok_or_else(|| RenoirError::invalid_parameter("topic_name", "Topic not found"))?;
@@ -208,41 +204,28 @@ impl TopicManager {
         &self.stats
     }
 
-    /// Get topic instance by name (internal use)
-    #[allow(dead_code)]
-    pub(super) fn get_topic_instance(&self, topic_name: &str) -> Option<Arc<TopicInstance>> {
-        let topics = self.topics.read().unwrap();
-        topics.get(topic_name).cloned()
-    }
-
     /// Check if a topic exists
     pub fn has_topic(&self, topic_name: &str) -> bool {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         topics.contains_key(topic_name)
     }
 
     /// Get topic name by ID
     pub fn get_topic_name(&self, topic_id: TopicId) -> Option<String> {
-        let topic_ids = self.topic_ids.read().unwrap();
+        let topic_ids = self.topic_ids.read();
         topic_ids.get(&topic_id).cloned()
     }
 
     /// Get topic ID by name
     pub fn get_topic_id(&self, topic_name: &str) -> Option<TopicId> {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         topics.get(topic_name).map(|topic| topic.topic_id)
     }
 
     /// Get topic count
     pub fn topic_count(&self) -> usize {
-        let topics = self.topics.read().unwrap();
+        let topics = self.topics.read();
         topics.len()
-    }
-
-    /// Get memory manager (internal use)
-    #[allow(dead_code)]
-    pub(super) fn memory_manager(&self) -> &Arc<SharedMemoryManager> {
-        &self.memory_manager
     }
 
     /// Get buffer registry (internal use)  
@@ -268,11 +251,5 @@ impl TopicManager {
         };
 
         (ring_size + pool_size).max(1024 * 1024) // At least 1MB
-    }
-}
-
-impl Default for TopicManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default TopicManager")
     }
 }

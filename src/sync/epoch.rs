@@ -8,11 +8,12 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
 };
+
+use parking_lot::Mutex;
 
 use super::sequence::SequenceNumber;
 
@@ -20,7 +21,7 @@ use super::sequence::SequenceNumber;
 pub type EpochNumber = u64;
 
 /// Special epoch values
-pub mod epoch {
+pub mod epoch_values {
     use super::EpochNumber;
 
     /// Initial epoch number
@@ -45,7 +46,7 @@ impl ReaderEntry {
     fn new() -> Self {
         Self {
             last_sequence: AtomicU64::new(0),
-            current_epoch: AtomicU64::new(epoch::INITIAL),
+            current_epoch: AtomicU64::new(epoch_values::INITIAL),
             active: AtomicU64::new(0),
         }
     }
@@ -59,7 +60,8 @@ impl ReaderEntry {
     /// Mark reader as inactive
     fn leave_epoch(&self) {
         self.active.store(0, Ordering::Release);
-        self.current_epoch.store(epoch::INACTIVE, Ordering::Relaxed);
+        self.current_epoch
+            .store(epoch_values::INACTIVE, Ordering::Relaxed);
     }
 
     /// Update the last sequence number seen
@@ -92,7 +94,7 @@ impl EpochManager {
     /// Create a new epoch manager
     pub fn new() -> Self {
         Self {
-            global_epoch: AtomicU64::new(epoch::INITIAL),
+            global_epoch: AtomicU64::new(epoch_values::INITIAL),
             readers: Mutex::new(HashMap::new()),
             next_reader_id: AtomicUsize::new(1),
             pending_reclaims: Mutex::new(HashMap::new()),
@@ -105,7 +107,7 @@ impl EpochManager {
         let entry = Arc::new(ReaderEntry::new());
 
         {
-            let mut readers = self.readers.lock().unwrap();
+            let mut readers = self.readers.lock();
             readers.insert(reader_id, entry.clone());
         }
 
@@ -118,7 +120,7 @@ impl EpochManager {
 
     /// Unregister a reader
     pub fn unregister_reader(&self, reader_id: usize) {
-        let mut readers = self.readers.lock().unwrap();
+        let mut readers = self.readers.lock();
         readers.remove(&reader_id);
     }
 
@@ -135,10 +137,10 @@ impl EpochManager {
     /// Schedule an object for reclamation in the next safe epoch
     pub fn defer_reclaim<T: EpochReclaim + 'static>(&self, object: T) {
         let current_epoch = self.current_epoch();
-        let mut pending = self.pending_reclaims.lock().unwrap();
+        let mut pending = self.pending_reclaims.lock();
         pending
             .entry(current_epoch)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(Box::new(object));
     }
 
@@ -152,7 +154,7 @@ impl EpochManager {
         // Compute safe epoch first, before locking pending_reclaims
         let safe_epoch = self.compute_safe_epoch(current_epoch);
 
-        let mut pending = self.pending_reclaims.lock().unwrap();
+        let mut pending = self.pending_reclaims.lock();
         let mut reclaimed_count = 0;
 
         // Collect epochs that are safe to reclaim
@@ -181,13 +183,13 @@ impl EpochManager {
     ///
     /// This is the minimum epoch among all active readers
     fn compute_safe_epoch(&self, current_epoch: EpochNumber) -> EpochNumber {
-        let readers = self.readers.lock().unwrap();
+        let readers = self.readers.lock();
 
         let mut min_epoch = None;
 
         for entry in readers.values() {
             let (active, reader_epoch, _sequence) = entry.status();
-            if active && reader_epoch != epoch::INACTIVE {
+            if active && reader_epoch != epoch_values::INACTIVE {
                 match min_epoch {
                     None => min_epoch = Some(reader_epoch),
                     Some(current_min) => min_epoch = Some(current_min.min(reader_epoch)),
@@ -209,14 +211,14 @@ impl EpochManager {
 
         // Get reader stats first
         let (active_readers, total_readers) = {
-            let readers = self.readers.lock().unwrap();
+            let readers = self.readers.lock();
             let active = readers.values().filter(|entry| entry.status().0).count();
             (active, readers.len())
         };
 
         // Get pending stats
         let pending_objects = {
-            let pending = self.pending_reclaims.lock().unwrap();
+            let pending = self.pending_reclaims.lock();
             pending.values().map(|v| v.len()).sum()
         };
 
@@ -233,8 +235,11 @@ impl EpochManager {
     }
 
     /// Force reclamation of all objects (unsafe, for shutdown)
+    ///
+    /// # Safety
+    /// Caller must ensure no readers hold references to objects pending reclamation.
     pub unsafe fn force_reclaim_all(&self) -> usize {
-        let mut pending = self.pending_reclaims.lock().unwrap();
+        let mut pending = self.pending_reclaims.lock();
         let total: usize = pending.values().map(|v| v.len()).sum();
         pending.clear();
         total
@@ -288,6 +293,10 @@ pub struct PtrGuard<T> {
 
 impl<T> PtrGuard<T> {
     /// Create a new pointer guard (takes ownership of the pointer)
+    ///
+    /// # Safety
+    /// `ptr` must point to a valid, heap-allocated `T`. The caller transfers
+    /// ownership; the guard will deallocate on drop.
     pub unsafe fn new(ptr: NonNull<T>) -> Self {
         Self {
             ptr,
@@ -426,9 +435,10 @@ impl SharedEpochManager {
     pub fn stats(&self) -> EpochStats {
         self.manager.stats()
     }
+}
 
-    /// Clone for sharing across threads
-    pub fn clone(&self) -> Self {
+impl Clone for SharedEpochManager {
+    fn clone(&self) -> Self {
         Self {
             manager: Arc::clone(&self.manager),
         }
@@ -438,182 +448,5 @@ impl SharedEpochManager {
 impl Default for SharedEpochManager {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-    use std::time::Duration;
-
-    // Test object for reclamation
-    struct TestObject {
-        #[allow(dead_code)]
-        data: Vec<u8>,
-        reclaimed: Arc<AtomicUsize>,
-    }
-
-    impl EpochReclaim for TestObject {
-        fn reclaim(&mut self) {
-            self.reclaimed.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    #[test]
-    fn test_epoch_basic() {
-        let manager = EpochManager::new();
-
-        assert_eq!(manager.current_epoch(), epoch::INITIAL);
-
-        let new_epoch = manager.advance_epoch();
-        assert_eq!(new_epoch, epoch::INITIAL);
-        assert_eq!(manager.current_epoch(), epoch::INITIAL + 1);
-    }
-
-    #[test]
-    fn test_reader_tracking() {
-        let manager = EpochManager::new();
-        let reader = manager.register_reader();
-
-        let epoch = reader.enter();
-        assert_eq!(epoch, epoch::INITIAL);
-
-        let status = reader.status();
-        assert!(status.active);
-        assert_eq!(status.current_epoch, epoch::INITIAL);
-
-        reader.leave();
-        let status = reader.status();
-        assert!(!status.active);
-    }
-
-    #[test]
-    fn test_reclamation_basic() {
-        let manager = EpochManager::new();
-        let reclaimed_count = Arc::new(AtomicUsize::new(0));
-
-        // Defer some objects for reclamation
-        for i in 0..5 {
-            let obj = TestObject {
-                data: vec![i; 100],
-                reclaimed: reclaimed_count.clone(),
-            };
-            manager.defer_reclaim(obj);
-        }
-
-        // Advance epoch and try to reclaim
-        manager.advance_epoch();
-        manager.advance_epoch(); // Need to advance past objects' epoch
-
-        let reclaimed = manager.try_reclaim();
-        assert_eq!(reclaimed, 5);
-        assert_eq!(reclaimed_count.load(Ordering::Relaxed), 5);
-    }
-
-    #[test]
-    fn test_reader_prevents_reclamation() {
-        let manager = EpochManager::new();
-        let reader = manager.register_reader();
-        let reclaimed_count = Arc::new(AtomicUsize::new(0));
-
-        // Reader enters current epoch
-        reader.enter();
-
-        // Defer object for reclamation
-        let obj = TestObject {
-            data: vec![42; 100],
-            reclaimed: reclaimed_count.clone(),
-        };
-        manager.defer_reclaim(obj);
-
-        // Advance epoch but reader is still in old epoch
-        manager.advance_epoch();
-
-        // Should not be able to reclaim yet
-        let reclaimed = manager.try_reclaim();
-        assert_eq!(reclaimed, 0);
-        assert_eq!(reclaimed_count.load(Ordering::Relaxed), 0);
-
-        // Reader leaves epoch
-        reader.leave();
-
-        // Now should be able to reclaim
-        let reclaimed = manager.try_reclaim();
-        assert_eq!(reclaimed, 1);
-        assert_eq!(reclaimed_count.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn test_multiple_readers() {
-        let manager = Arc::new(EpochManager::new());
-        let barrier = Arc::new(Barrier::new(3)); // 2 readers + main thread
-        let reclaimed_count = Arc::new(AtomicUsize::new(0));
-
-        // Start two readers
-        let handles: Vec<_> = (0..2)
-            .map(|_i| {
-                let manager = manager.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    let reader = manager.register_reader();
-                    reader.enter(); // Enter before sync
-                    barrier.wait(); // Sync start
-
-                    thread::sleep(Duration::from_millis(100)); // Hold epoch for longer
-                    reader.leave();
-                })
-            })
-            .collect();
-
-        barrier.wait(); // Wait for readers to start and enter
-
-        // Defer object while readers are active
-        let obj = TestObject {
-            data: vec![99; 100],
-            reclaimed: reclaimed_count.clone(),
-        };
-        manager.defer_reclaim(obj);
-
-        // Advance epoch
-        manager.advance_epoch();
-
-        // Should not reclaim while readers are active
-        // Give a small delay to ensure readers are still in their epochs
-        thread::sleep(Duration::from_millis(10));
-        assert_eq!(manager.try_reclaim(), 0);
-
-        // Wait for readers to finish
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        // Now should be able to reclaim
-        assert_eq!(manager.try_reclaim(), 1);
-        assert_eq!(reclaimed_count.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn test_epoch_statistics() {
-        let manager = EpochManager::new();
-        let _reader1 = manager.register_reader();
-        let reader2 = manager.register_reader();
-
-        reader2.enter();
-
-        // Defer some objects
-        for i in 0..3 {
-            let obj = TestObject {
-                data: vec![i; 10],
-                reclaimed: Arc::new(AtomicUsize::new(0)),
-            };
-            manager.defer_reclaim(obj);
-        }
-
-        let stats = manager.stats();
-        assert_eq!(stats.total_readers, 2);
-        assert_eq!(stats.active_readers, 1);
-        assert_eq!(stats.pending_reclamations, 3);
     }
 }

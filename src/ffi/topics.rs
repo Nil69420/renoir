@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 //! FFI functions for topic-based messaging system
 //!
 //! This module provides a complete C API for Renoir's topic-based pub/sub system,
@@ -17,7 +18,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::{
-    topic::{MessagePayload, TopicConfig, TopicPattern, TopicQoS, Reliability, config::TopicMessageFormat},
+    topic::{
+        config::TopicMessageFormat, MessagePayload, Reliability, TopicConfig, TopicPattern,
+        TopicQoS,
+    },
     topic_manager_modules::TopicManager,
 };
 
@@ -55,7 +59,7 @@ pub extern "C" fn renoir_topic_manager_create() -> RenoirTopicManagerHandle {
         Ok(manager) => {
             let buffer_registry = manager.buffer_registry().clone();
             let manager = Arc::new(manager);
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_topic_manager(manager, buffer_registry);
             id as RenoirTopicManagerHandle
         }
@@ -73,7 +77,7 @@ pub extern "C" fn renoir_topic_manager_destroy(
     }
 
     let manager_id = manager as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.remove_topic_manager(manager_id) {
         RenoirErrorCode::Success
@@ -99,7 +103,7 @@ pub extern "C" fn renoir_topic_register(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -147,7 +151,7 @@ pub extern "C" fn renoir_topic_register(
             RenoirErrorCode::Success
         }
         Err(e) => {
-            eprintln!("Failed to create topic '{}': {:?}", name, e);
+            log::warn!("Failed to create topic '{}': {:?}", name, e);
             e.into()
         }
     }
@@ -165,7 +169,7 @@ pub extern "C" fn renoir_topic_lookup(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -188,7 +192,7 @@ pub extern "C" fn renoir_topic_lookup(
             return RenoirErrorCode::Success;
         }
     }
-    
+
     RenoirErrorCode::RegionNotFound
 }
 
@@ -203,7 +207,7 @@ pub extern "C" fn renoir_topic_remove(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -231,7 +235,7 @@ pub extern "C" fn renoir_topic_count(manager: RenoirTopicManagerHandle) -> usize
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -253,7 +257,7 @@ pub extern "C" fn renoir_topic_list(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -284,7 +288,7 @@ pub extern "C" fn renoir_topic_list(
     for (i, (name, topic_id, config)) in topic_list.iter().enumerate() {
         let topic_info = unsafe { ptr.add(i) };
         let name_cstr = string_to_c_str(name.clone());
-        
+
         unsafe {
             (*topic_info).topic_id = *topic_id as RenoirTopicId;
             (*topic_info).name = name_cstr;
@@ -294,11 +298,17 @@ pub extern "C" fn renoir_topic_list(
                 crate::topic::TopicPattern::MPSC => 2,
                 crate::topic::TopicPattern::MPMC => 3,
             };
-            
+
             // Get stats to populate counts
             if let Ok(stats) = manager.topic_stats(name) {
-                (*topic_info).publisher_count = stats.active_publishers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-                (*topic_info).subscriber_count = stats.active_subscribers.load(std::sync::atomic::Ordering::Relaxed) as usize;
+                (*topic_info).publisher_count = stats
+                    .active_publishers
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as usize;
+                (*topic_info).subscriber_count = stats
+                    .active_subscribers
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as usize;
             } else {
                 (*topic_info).publisher_count = 0;
                 (*topic_info).subscriber_count = 0;
@@ -341,7 +351,7 @@ pub extern "C" fn renoir_publisher_create(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -357,7 +367,7 @@ pub extern "C" fn renoir_publisher_create(
 
     match manager.create_publisher(&name) {
         Ok(pub_handle) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_publisher(Arc::new(pub_handle), manager_id);
             unsafe {
                 *publisher = id as RenoirPublisherHandle;
@@ -376,7 +386,7 @@ pub extern "C" fn renoir_publisher_destroy(publisher: RenoirPublisherHandle) -> 
     }
 
     let pub_id = publisher as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.remove_publisher(pub_id) {
         RenoirErrorCode::Success
@@ -399,7 +409,7 @@ pub extern "C" fn renoir_publish(
     }
 
     let pub_id = publisher as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let pub_handle = match registry.get_publisher(pub_id) {
         Some(p) => p,
@@ -415,7 +425,10 @@ pub extern "C" fn renoir_publish(
         Ok(()) => {
             // Get sequence number from stats if requested
             if !sequence.is_null() {
-                let seq = pub_handle.stats().current_sequence.load(std::sync::atomic::Ordering::Relaxed);
+                let seq = pub_handle
+                    .stats()
+                    .current_sequence
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 unsafe {
                     *sequence = seq;
                 }
@@ -440,7 +453,7 @@ pub extern "C" fn renoir_publish_try(
     }
 
     let pub_id = publisher as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let pub_handle = match registry.get_publisher(pub_id) {
         Some(p) => p,
@@ -455,7 +468,10 @@ pub extern "C" fn renoir_publish_try(
         Ok(published) => {
             if published {
                 if !sequence.is_null() {
-                    let seq = pub_handle.stats().current_sequence.load(std::sync::atomic::Ordering::Relaxed);
+                    let seq = pub_handle
+                        .stats()
+                        .current_sequence
+                        .load(std::sync::atomic::Ordering::Relaxed);
                     unsafe {
                         *sequence = seq;
                     }
@@ -490,7 +506,7 @@ pub extern "C" fn renoir_publish_reserve(
     let buffer_ptr = buffer.as_mut_ptr();
 
     // Store the buffer in the registry
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let buffer_id = registry.next_id;
     registry.next_id += 1;
     registry.reserved_buffers.insert(buffer_id, buffer);
@@ -521,7 +537,7 @@ pub extern "C" fn renoir_publish_commit(
 
     // Get the reserved buffer
     let buffer = {
-        let mut registry = HANDLE_REGISTRY.lock().unwrap();
+        let mut registry = HANDLE_REGISTRY.lock();
         match registry.reserved_buffers.remove(&buffer_id) {
             Some(buf) => buf,
             None => return RenoirErrorCode::InvalidParameter,
@@ -538,7 +554,7 @@ pub extern "C" fn renoir_publish_commit(
 
     // Get the publisher handle
     let pub_handle = {
-        let registry = HANDLE_REGISTRY.lock().unwrap();
+        let registry = HANDLE_REGISTRY.lock();
         match registry.get_publisher(pub_id) {
             Some(p) => p,
             None => return RenoirErrorCode::InvalidParameter,
@@ -554,7 +570,9 @@ pub extern "C" fn renoir_publish_commit(
             if !sequence.is_null() {
                 let stats = pub_handle.stats();
                 unsafe {
-                    *sequence = stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
+                    *sequence = stats
+                        .messages_published
+                        .load(std::sync::atomic::Ordering::Relaxed);
                 }
             }
             RenoirErrorCode::Success
@@ -580,7 +598,7 @@ pub extern "C" fn renoir_subscriber_create(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -596,7 +614,7 @@ pub extern "C" fn renoir_subscriber_create(
 
     match manager.create_subscriber(&name) {
         Ok(sub_handle) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_subscriber(Arc::new(sub_handle), manager_id);
             unsafe {
                 *subscriber = id as RenoirSubscriberHandle;
@@ -609,15 +627,13 @@ pub extern "C" fn renoir_subscriber_create(
 
 /// Destroy a subscriber
 #[no_mangle]
-pub extern "C" fn renoir_subscriber_destroy(
-    subscriber: RenoirSubscriberHandle,
-) -> RenoirErrorCode {
+pub extern "C" fn renoir_subscriber_destroy(subscriber: RenoirSubscriberHandle) -> RenoirErrorCode {
     if subscriber.is_null() {
         return RenoirErrorCode::InvalidParameter;
     }
 
     let sub_id = subscriber as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.remove_subscriber(sub_id) {
         RenoirErrorCode::Success
@@ -638,7 +654,7 @@ pub extern "C" fn renoir_subscribe_read_next(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -682,10 +698,10 @@ pub extern "C" fn renoir_subscribe_read_next(
     match received_msg {
         Some(msg) => {
             // Get buffer registry for this subscriber
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let manager_id = registry.get_subscriber_manager_id(sub_id);
             let buffer_registry = manager_id.and_then(|id| registry.get_buffer_registry(id));
-            
+
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
@@ -705,7 +721,7 @@ pub extern "C" fn renoir_subscribe_read_next(
                                     registry.next_id += 1;
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
-                                    
+
                                     // Return pointer and size
                                     (*message).payload_ptr = buffer.as_ptr();
                                     (*message).payload_len = desc.payload_size as usize;
@@ -733,8 +749,8 @@ pub extern "C" fn renoir_subscribe_read_next(
             }
 
             // Store message in registry and return handle
-            let msg_id = registry.store_message(Box::new(msg));
-            
+            let msg_id = registry.store_message(msg);
+
             // Associate descriptor buffer with message for cleanup
             if let Some(buf_id) = descriptor_buffer_id {
                 registry.associate_descriptor_buffer(msg_id, buf_id);
@@ -763,7 +779,7 @@ pub extern "C" fn renoir_subscribe_peek(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -781,10 +797,10 @@ pub extern "C" fn renoir_subscribe_peek(
     match peeked_msg {
         Some(msg) => {
             // Get buffer registry for this subscriber
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let manager_id = registry.get_subscriber_manager_id(sub_id);
             let buffer_registry = manager_id.and_then(|id| registry.get_buffer_registry(id));
-            
+
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
@@ -804,7 +820,7 @@ pub extern "C" fn renoir_subscribe_peek(
                                     registry.next_id += 1;
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
-                                    
+
                                     // Return pointer and size
                                     (*message).payload_ptr = buffer.as_ptr();
                                     (*message).payload_len = desc.payload_size as usize;
@@ -832,8 +848,8 @@ pub extern "C" fn renoir_subscribe_peek(
             }
 
             // Store message in registry and return handle
-            let msg_id = registry.store_message(Box::new(msg));
-            
+            let msg_id = registry.store_message(msg);
+
             // Associate descriptor buffer with message for cleanup
             if let Some(buf_id) = descriptor_buffer_id {
                 registry.associate_descriptor_buffer(msg_id, buf_id);
@@ -853,13 +869,15 @@ pub extern "C" fn renoir_subscribe_peek(
 
 /// Release a received message
 #[no_mangle]
-pub extern "C" fn renoir_message_release(message_handle: RenoirReceivedMessageHandle) -> RenoirErrorCode {
+pub extern "C" fn renoir_message_release(
+    message_handle: RenoirReceivedMessageHandle,
+) -> RenoirErrorCode {
     if message_handle.is_null() {
         return RenoirErrorCode::InvalidParameter;
     }
 
     let msg_id = message_handle as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.remove_message(msg_id) {
         RenoirErrorCode::Success
@@ -879,7 +897,7 @@ pub extern "C" fn renoir_subscribe_drain(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -917,7 +935,7 @@ pub extern "C" fn renoir_subscriber_get_event_fd(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -975,7 +993,7 @@ pub extern "C" fn renoir_topic_stats(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let manager = match registry.get_topic_manager(manager_id) {
         Some(m) => m,
@@ -996,12 +1014,29 @@ pub extern "C" fn renoir_topic_stats(
         Ok(topic_stats) => {
             unsafe {
                 (*stats).topic_id = topic_id as RenoirTopicId;
-                (*stats).publisher_count = topic_stats.active_publishers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-                (*stats).subscriber_count = topic_stats.active_subscribers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-                (*stats).messages_published = topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_consumed = topic_stats.messages_consumed.load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_dropped = topic_stats.messages_dropped.load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).bytes_transferred = topic_stats.avg_message_size.load(std::sync::atomic::Ordering::Relaxed) * topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
+                (*stats).publisher_count = topic_stats
+                    .active_publishers
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as usize;
+                (*stats).subscriber_count = topic_stats
+                    .active_subscribers
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    as usize;
+                (*stats).messages_published = topic_stats
+                    .messages_published
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                (*stats).messages_consumed = topic_stats
+                    .messages_consumed
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                (*stats).messages_dropped = topic_stats
+                    .messages_dropped
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                (*stats).bytes_transferred = topic_stats
+                    .avg_message_size
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    * topic_stats
+                        .messages_published
+                        .load(std::sync::atomic::Ordering::Relaxed);
                 // Latency tracking would require timestamp collection - not implemented yet
                 (*stats).average_latency_ns = 0;
                 (*stats).peak_latency_ns = 0;
@@ -1024,7 +1059,7 @@ pub extern "C" fn renoir_publisher_stats(
     }
 
     let pub_id = publisher as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let pub_handle = match registry.get_publisher(pub_id) {
         Some(p) => p,
@@ -1035,12 +1070,28 @@ pub extern "C" fn renoir_publisher_stats(
 
     unsafe {
         (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats.active_publishers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats.active_subscribers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).messages_published = topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats.messages_consumed.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats.messages_dropped.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats.avg_message_size.load(std::sync::atomic::Ordering::Relaxed) * topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).publisher_count = topic_stats
+            .active_publishers
+            .load(std::sync::atomic::Ordering::Relaxed) as usize;
+        (*stats).subscriber_count = topic_stats
+            .active_subscribers
+            .load(std::sync::atomic::Ordering::Relaxed)
+            as usize;
+        (*stats).messages_published = topic_stats
+            .messages_published
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).messages_consumed = topic_stats
+            .messages_consumed
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).messages_dropped = topic_stats
+            .messages_dropped
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).bytes_transferred = topic_stats
+            .avg_message_size
+            .load(std::sync::atomic::Ordering::Relaxed)
+            * topic_stats
+                .messages_published
+                .load(std::sync::atomic::Ordering::Relaxed);
         (*stats).average_latency_ns = 0;
         (*stats).peak_latency_ns = 0;
         (*stats).throughput_mbps = 0.0;
@@ -1060,7 +1111,7 @@ pub extern "C" fn renoir_subscriber_stats(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -1071,12 +1122,28 @@ pub extern "C" fn renoir_subscriber_stats(
 
     unsafe {
         (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats.active_publishers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats.active_subscribers.load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).messages_published = topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats.messages_consumed.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats.messages_dropped.load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats.avg_message_size.load(std::sync::atomic::Ordering::Relaxed) * topic_stats.messages_published.load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).publisher_count = topic_stats
+            .active_publishers
+            .load(std::sync::atomic::Ordering::Relaxed) as usize;
+        (*stats).subscriber_count = topic_stats
+            .active_subscribers
+            .load(std::sync::atomic::Ordering::Relaxed)
+            as usize;
+        (*stats).messages_published = topic_stats
+            .messages_published
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).messages_consumed = topic_stats
+            .messages_consumed
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).messages_dropped = topic_stats
+            .messages_dropped
+            .load(std::sync::atomic::Ordering::Relaxed);
+        (*stats).bytes_transferred = topic_stats
+            .avg_message_size
+            .load(std::sync::atomic::Ordering::Relaxed)
+            * topic_stats
+                .messages_published
+                .load(std::sync::atomic::Ordering::Relaxed);
         (*stats).average_latency_ns = 0;
         (*stats).peak_latency_ns = 0;
         (*stats).throughput_mbps = 0.0;
@@ -1100,7 +1167,7 @@ pub extern "C" fn renoir_publisher_has_subscribers(
     }
 
     let pub_id = publisher as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let pub_handle = match registry.get_publisher(pub_id) {
         Some(p) => p,
@@ -1125,7 +1192,7 @@ pub extern "C" fn renoir_subscriber_has_messages(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -1150,7 +1217,7 @@ pub extern "C" fn renoir_subscriber_pending_count(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,
@@ -1166,15 +1233,13 @@ pub extern "C" fn renoir_subscriber_pending_count(
 
 /// Get topic name from publisher
 #[no_mangle]
-pub extern "C" fn renoir_publisher_topic_name(
-    publisher: RenoirPublisherHandle,
-) -> *const c_char {
+pub extern "C" fn renoir_publisher_topic_name(publisher: RenoirPublisherHandle) -> *const c_char {
     if publisher.is_null() {
         return std::ptr::null();
     }
 
     let pub_id = publisher as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let pub_handle = match registry.get_publisher(pub_id) {
         Some(p) => p,
@@ -1195,7 +1260,7 @@ pub extern "C" fn renoir_subscriber_topic_name(
     }
 
     let sub_id = subscriber as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let sub_handle = match registry.get_subscriber(sub_id) {
         Some(s) => s,

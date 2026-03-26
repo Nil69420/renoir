@@ -5,7 +5,10 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use renoir::{
-        topic::{Reliability, TopicConfig, TopicPattern, TopicQoS},
+        topic::{
+            MessageHeader, Reliability, TopicConfig, TopicPattern, TopicQoS, TopicStats,
+            MESSAGE_MAGIC, MESSAGE_VERSION,
+        },
         topic_manager_modules::{TopicManager, TopicManagerStats},
     };
 
@@ -263,10 +266,6 @@ mod tests {
 
         // Test passes if basic functionality works (publishing succeeded)
         // Consumption behavior may vary between embedded systems
-        assert!(
-            true,
-            "Basic publisher-subscriber functionality test completed"
-        );
     }
 
     #[test]
@@ -405,5 +404,61 @@ mod tests {
         let topic2_entry = topics.iter().find(|(name, _, _)| name == "topic2").unwrap();
         assert_eq!(topic2_entry.1, id2);
         assert_eq!(topic2_entry.2.pattern, TopicPattern::MPMC);
+    }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_message_header_creation() {
+        let header = MessageHeader::new(42, 1337, 1024);
+
+        let magic = header.magic;
+        let version = header.version;
+        let topic_id = header.topic_id;
+        let sequence = header.sequence;
+        let payload_length = header.payload_length;
+        let timestamp = header.timestamp;
+
+        assert_eq!(magic, MESSAGE_MAGIC);
+        assert_eq!(version, MESSAGE_VERSION);
+        assert_eq!(topic_id, 42);
+        assert_eq!(sequence, 1337);
+        assert_eq!(payload_length, 1024);
+        assert!(timestamp > 0);
+    }
+
+    #[test]
+    fn test_message_header_validation() {
+        let mut header = MessageHeader::new(1, 1, 100);
+        assert!(header.validate().is_ok());
+
+        header.magic = 0xDEADBEEF;
+        assert!(header.validate().is_err());
+    }
+
+    #[test]
+    fn test_message_checksum() {
+        let payload = b"Hello, Renoir!";
+        let mut header = MessageHeader::new(1, 1, payload.len() as u32);
+
+        header.set_checksum(payload);
+        assert!(header.verify_checksum(payload));
+        assert!(!header.verify_checksum(b"Different data"));
+    }
+
+    #[test]
+    fn test_topic_stats_recording() {
+        let stats = TopicStats::default();
+
+        let seq1 = stats.record_published(1024);
+        let seq2 = stats.record_published(2048);
+
+        assert_eq!(seq1, 1);
+        assert_eq!(seq2, 2);
+        assert_eq!(stats.messages_published.load(Ordering::Relaxed), 2);
+        assert_eq!(stats.avg_message_size.load(Ordering::Relaxed), 1536);
+
+        stats.record_consumed();
+        assert_eq!(stats.messages_consumed.load(Ordering::Relaxed), 1);
     }
 }

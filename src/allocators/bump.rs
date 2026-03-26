@@ -75,6 +75,27 @@ impl BumpAllocator {
         self.current_offset.load(Ordering::Acquire)
     }
 
+    /// Save the current position as a watermark for later reset.
+    /// Returns the current offset which can be passed to `reset_to_watermark`.
+    pub fn watermark(&self) -> usize {
+        self.current_offset.load(Ordering::Acquire)
+    }
+
+    /// Reset the allocator to a previously saved watermark, freeing
+    /// all allocations made after the watermark was taken.
+    ///
+    /// The caller must ensure no references to memory above `mark` are still live.
+    pub fn reset_to_watermark(&self, mark: usize) -> Result<()> {
+        if mark > self.total_size {
+            return Err(RenoirError::InvalidParameter {
+                parameter: "mark".to_string(),
+                message: "Watermark exceeds allocator size".to_string(),
+            });
+        }
+        self.current_offset.store(mark, Ordering::Release);
+        Ok(())
+    }
+
     /// Check if a specific size can be allocated
     pub fn can_allocate_size(&self, size: usize, align: usize) -> bool {
         let current = self.current_offset.load(Ordering::Acquire);
@@ -103,6 +124,8 @@ impl Allocator for BumpAllocator {
             });
         }
 
+        let mut backoff = 0u32;
+
         loop {
             let current = self.current_offset.load(Ordering::Acquire);
             let base_addr = self.base_ptr.as_ptr() as usize;
@@ -117,7 +140,6 @@ impl Allocator for BumpAllocator {
                 ));
             }
 
-            // Try to update the offset atomically
             match self.current_offset.compare_exchange_weak(
                 current,
                 new_offset,
@@ -133,8 +155,15 @@ impl Allocator for BumpAllocator {
                     return Ok(ptr);
                 }
                 Err(_) => {
-                    // Another thread updated the offset, retry
-                    std::hint::spin_loop();
+                    // Scaled backoff: spin → yield → yield
+                    if backoff < 4 {
+                        for _ in 0..(1 << backoff) {
+                            std::hint::spin_loop();
+                        }
+                    } else {
+                        std::thread::yield_now();
+                    }
+                    backoff = backoff.saturating_add(1).min(8);
                     continue;
                 }
             }

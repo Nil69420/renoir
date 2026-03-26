@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -124,7 +124,7 @@ include = ["renoir"]
 }
 
 /// Generate ROS2-specific integration headers and examples
-fn generate_ros2_integration_headers(output_dir: &PathBuf) {
+fn generate_ros2_integration_headers(output_dir: &Path) {
     let ros2_header = output_dir.join("renoir_ros2.h");
     let integration_example = output_dir.join("renoir_usage_example.c");
 

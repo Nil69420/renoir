@@ -173,7 +173,7 @@ mod reliability_tests {
         let region = manager.create_region(region_config).unwrap();
 
         let pool_config = BufferPoolConfig::new("error_pool")
-            .with_buffer_size(1 * 1024)
+            .with_buffer_size(1024)
             .with_initial_count(10)
             .with_max_count(100)
             .with_pre_allocate(false);
@@ -358,7 +358,7 @@ mod reliability_tests {
                 }
 
                 // Occasional yield to prevent CPU starvation
-                if sequence % 100 == 0 {
+                if sequence.is_multiple_of(100) {
                     thread::yield_now();
                 }
             }
@@ -465,7 +465,7 @@ mod reliability_tests {
 
             let region = manager.create_region(region_config).unwrap();
 
-            let pool_config = BufferPoolConfig::new(&format!("{}_pool", region_name))
+            let pool_config = BufferPoolConfig::new(format!("{}_pool", region_name))
                 .with_buffer_size(1024)
                 .with_initial_count(2)
                 .with_max_count(15) // Fits in 64KB region with overhead
@@ -658,7 +658,7 @@ mod reliability_tests {
                 ops_ref.fetch_add(1, Ordering::Relaxed);
 
                 // Small delay for embedded systems
-                if data_counter % 10 == 0 {
+                if data_counter.is_multiple_of(10) {
                     thread::sleep(Duration::from_millis(1));
                 }
             }

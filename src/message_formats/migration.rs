@@ -270,7 +270,7 @@ impl SchemaMigrationExecutor {
                 } else {
                     Err(RenoirError::invalid_parameter(
                         "function_name",
-                        &format!("Migration function '{}' not found", function_name),
+                        format!("Migration function '{}' not found", function_name),
                     ))
                 }
             }
@@ -366,7 +366,7 @@ impl SchemaMigrationExecutor {
         let function = self.migration_functions.get(function_name).ok_or_else(|| {
             RenoirError::invalid_parameter(
                 "function_name",
-                &format!("Migration function '{}' not found", function_name),
+                format!("Migration function '{}' not found", function_name),
             )
         })?;
 
@@ -433,7 +433,7 @@ impl SchemaMigrationExecutor {
                 if !to_schema.fields.contains_key(field_name) {
                     return Err(RenoirError::invalid_parameter(
                         "field_name",
-                        &format!("Field '{}' not found in target schema", field_name),
+                        format!("Field '{}' not found in target schema", field_name),
                     ));
                 }
             }
@@ -444,7 +444,7 @@ impl SchemaMigrationExecutor {
                 if !self.migration_functions.contains_key(function_name) {
                     return Err(RenoirError::invalid_parameter(
                         "function_name",
-                        &format!("Migration function '{}' not registered", function_name),
+                        format!("Migration function '{}' not registered", function_name),
                     ));
                 }
             }
@@ -721,50 +721,5 @@ impl Default for EvolutionAwareSchema {
             deprecated_fields: std::collections::HashSet::new(),
             requires_migration_from: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::message_formats::schema_evolution::{SchemaBuilder, SchemaEvolutionManager};
-
-    #[test]
-    fn test_migration_executor_creation() {
-        let executor = SchemaMigrationExecutor::new();
-        assert!(executor
-            .migration_functions
-            .contains_key("default_value_assigner"));
-        assert!(executor.migration_functions.contains_key("type_converter"));
-        assert!(executor.migration_functions.contains_key("field_reorderer"));
-    }
-
-    #[test]
-    fn test_migration_plan_execution() -> Result<()> {
-        let mut executor = SchemaMigrationExecutor::new();
-        let mut manager = SchemaEvolutionManager::new();
-
-        let from_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .version(1, 0, 0)
-            .build(&mut manager)?;
-
-        let to_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
-            .with_id(from_schema.schema_id)
-            .version(2, 0, 0)
-            .build(&mut manager)?;
-
-        let plan = vec![MigrationStep::VersionBump {
-            from_version: 1,
-            to_version: 2,
-            is_major: true,
-        }];
-
-        let test_data = b"test data";
-        let result = executor.execute_migration_plan(test_data, plan, &from_schema, &to_schema)?;
-
-        assert!(!result.migrated_data.is_empty());
-        assert_eq!(result.executed_steps.len(), 1);
-
-        Ok(())
     }
 }

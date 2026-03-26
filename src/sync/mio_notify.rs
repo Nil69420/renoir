@@ -122,7 +122,7 @@ impl MioEventNotification {
                     .lock()
                     .map_err(|_| SyncError::NotificationFailed)?;
                 let fd = owned_fd.as_raw_fd();
-                return self.wait_on_mio_poll(&mut *poll, fd, timeout_ms);
+                return self.wait_on_mio_poll(&mut poll, fd, timeout_ms);
             }
         }
 
@@ -160,7 +160,7 @@ impl MioEventNotification {
 
     /// Clear eventfd after notification received
     #[cfg(target_os = "linux")]
-    fn clear_eventfd(&self) -> SyncResult<()> {
+    pub(crate) fn clear_eventfd(&self) -> SyncResult<()> {
         if let Some(ref owned_fd) = self.event_fd {
             use nix::unistd::read;
             let fd = owned_fd.as_raw_fd();
@@ -195,65 +195,18 @@ impl MioEventNotification {
     }
 }
 
-/// Mio-based condition notification manager
+/// Mio-based condition notification manager.
+///
+/// Uses a single shared `mio::Poll` instance to wait on all registered
+/// eventfds simultaneously, rather than iterating them serially.
 pub struct MioConditionNotifier {
     notifications: HashMap<String, Arc<MioEventNotification>>,
-}
-
-impl MioConditionNotifier {
-    /// Create new condition notifier using mio
-    pub fn new() -> Self {
-        Self {
-            notifications: HashMap::new(),
-        }
-    }
-
-    /// Add a notification condition
-    pub fn add_condition(&mut self, name: String, _condition: NotifyCondition) -> SyncResult<()> {
-        let notification = MioEventNotification::new()?;
-        self.notifications.insert(name, notification);
-        Ok(())
-    }
-
-    /// Notify specific condition
-    pub fn notify_condition(&self, name: &str) -> SyncResult<()> {
-        if let Some(notification) = self.notifications.get(name) {
-            notification.notify()
-        } else {
-            Err(SyncError::NotificationFailed)
-        }
-    }
-
-    /// Wait for any condition with async polling
-    pub fn wait_any_async(&self, timeout_ms: Option<u64>) -> SyncResult<Vec<String>> {
-        let mut triggered = Vec::new();
-
-        // This is a simplified implementation - a full async version would use
-        // a single mio Poll instance to wait for multiple eventfds
-        for (name, notification) in &self.notifications {
-            match notification.wait_async(Some(1)) {
-                // Very short timeout for each
-                Ok(()) => {
-                    triggered.push(name.clone());
-                }
-                Err(_) => continue,
-            }
-        }
-
-        if triggered.is_empty() && timeout_ms.is_some() {
-            std::thread::sleep(Duration::from_millis(timeout_ms.unwrap_or(0).min(100)));
-        }
-
-        Ok(triggered)
-    }
-
-    /// Get statistics for all notifications
-    pub fn get_all_stats(&self) -> HashMap<String, (u64, u64)> {
-        self.notifications
-            .iter()
-            .map(|(name, notification)| (name.clone(), notification.get_stats()))
-            .collect()
-    }
+    /// Token → condition name mapping
+    token_map: HashMap<usize, String>,
+    /// Shared poll instance that monitors all registered eventfds
+    poll: Poll,
+    /// Next token value
+    next_token: usize,
 }
 
 impl Default for MioConditionNotifier {
@@ -262,44 +215,82 @@ impl Default for MioConditionNotifier {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mio_notification_creation() {
-        let notification = MioEventNotification::new();
-        assert!(notification.is_ok());
-
-        if let Ok(notif) = notification {
-            assert!(notif.is_enabled());
-            let (notify_count, wait_count) = notif.get_stats();
-            assert_eq!(notify_count, 0);
-            assert_eq!(wait_count, 0);
+impl MioConditionNotifier {
+    pub fn new() -> Self {
+        Self {
+            notifications: HashMap::new(),
+            token_map: HashMap::new(),
+            poll: Poll::new().expect("failed to create mio Poll"),
+            next_token: 1, // 0 is reserved for EVENTFD_TOKEN in MioEventNotification
         }
     }
 
-    #[test]
-    fn test_mio_condition_notifier() {
-        let mut notifier = MioConditionNotifier::new();
+    pub fn add_condition(&mut self, name: String, _condition: NotifyCondition) -> SyncResult<()> {
+        let notification = MioEventNotification::new()?;
 
-        let result = notifier.add_condition("test_condition".to_string(), NotifyCondition::Always);
-        assert!(result.is_ok());
+        // Register the notification's eventfd with the shared poll
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(raw_fd) = notification.event_fd() {
+                let token = Token(self.next_token);
+                let mut source = SourceFd(&raw_fd);
+                self.poll
+                    .registry()
+                    .register(&mut source, token, Interest::READABLE)
+                    .map_err(|_| SyncError::NotificationFailed)?;
+                self.token_map.insert(self.next_token, name.clone());
+                self.next_token += 1;
+            }
+        }
 
-        let notify_result = notifier.notify_condition("test_condition");
-        assert!(notify_result.is_ok());
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.token_map.insert(self.next_token, name.clone());
+            self.next_token += 1;
+        }
+
+        self.notifications.insert(name, notification);
+        Ok(())
     }
 
-    #[test]
-    fn test_mio_notification_enable_disable() {
-        let notification = MioEventNotification::new().unwrap();
+    pub fn notify_condition(&self, name: &str) -> SyncResult<()> {
+        if let Some(notification) = self.notifications.get(name) {
+            notification.notify()
+        } else {
+            Err(SyncError::NotificationFailed)
+        }
+    }
 
-        assert!(notification.is_enabled());
+    /// Wait for any registered condition to trigger using a single poll call.
+    pub fn wait_any_async(&mut self, timeout_ms: Option<u64>) -> SyncResult<Vec<String>> {
+        let mut events = Events::with_capacity(self.notifications.len().max(1));
+        let timeout = timeout_ms.map(Duration::from_millis);
 
-        notification.set_enabled(false);
-        assert!(!notification.is_enabled());
+        self.poll
+            .poll(&mut events, timeout)
+            .map_err(|_| SyncError::NotificationFailed)?;
 
-        notification.set_enabled(true);
-        assert!(notification.is_enabled());
+        let mut triggered = Vec::new();
+        for event in events.iter() {
+            if event.is_readable() {
+                if let Some(name) = self.token_map.get(&event.token().0) {
+                    // Clear the eventfd so it doesn't fire again immediately
+                    if let Some(notification) = self.notifications.get(name) {
+                        #[cfg(target_os = "linux")]
+                        notification.clear_eventfd()?;
+                    }
+                    triggered.push(name.clone());
+                }
+            }
+        }
+
+        Ok(triggered)
+    }
+
+    pub fn get_all_stats(&self) -> HashMap<String, (u64, u64)> {
+        self.notifications
+            .iter()
+            .map(|(name, notification)| (name.clone(), notification.get_stats()))
+            .collect()
     }
 }

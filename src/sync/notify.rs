@@ -6,11 +6,12 @@
 
 use std::collections::HashMap;
 use std::os::fd::{AsRawFd, RawFd};
-use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+
+use parking_lot::Mutex;
 
 use nix::{
     errno::Errno,
@@ -44,7 +45,7 @@ pub struct EventNotifier {
     event_fd: Option<std::os::fd::OwnedFd>,
     /// Fallback condition variable for non-Linux systems
     #[cfg(not(target_os = "linux"))]
-    condvar: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    condvar: Arc<(Mutex<bool>, parking_lot::Condvar)>,
     /// Whether notifications are enabled
     enabled: AtomicBool,
     /// Statistics
@@ -59,7 +60,7 @@ impl EventNotifier {
         let event_fd = Self::create_eventfd()?;
 
         #[cfg(not(target_os = "linux"))]
-        let condvar = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let condvar = Arc::new((Mutex::new(false), parking_lot::Condvar::new()));
 
         Ok(Self {
             #[cfg(target_os = "linux")]
@@ -104,7 +105,7 @@ impl EventNotifier {
         #[cfg(not(target_os = "linux"))]
         {
             let (mutex, condvar) = &*self.condvar;
-            let mut notified = mutex.lock().unwrap();
+            let mut notified = mutex.lock();
             *notified = true;
             condvar.notify_all();
         }
@@ -131,16 +132,14 @@ impl EventNotifier {
         #[cfg(not(target_os = "linux"))]
         {
             let (mutex, condvar) = &*self.condvar;
-            let mut notified = mutex.lock().unwrap();
+            let mut notified = mutex.lock();
 
             if let Some(timeout) = timeout_ms {
                 let timeout_duration = Duration::from_millis(timeout);
-                let (new_notified, _timeout_result) = condvar
-                    .wait_timeout_while(notified, timeout_duration, |&mut n| !n)
-                    .unwrap();
-                notified = new_notified;
+                let _timeout_result =
+                    condvar.wait_while_for(&mut notified, timeout_duration, |n| !*n);
             } else {
-                notified = condvar.wait_while(notified, |&mut n| !n).unwrap();
+                condvar.wait_while(&mut notified, |n| !*n);
             }
 
             if *notified {
@@ -240,14 +239,14 @@ impl NotificationGroup {
     /// Add a named notifier channel
     pub fn add_channel(&self, name: &str) -> SyncResult<Arc<EventNotifier>> {
         let notifier = Arc::new(EventNotifier::new()?);
-        let mut notifiers = self.notifiers.lock().unwrap();
+        let mut notifiers = self.notifiers.lock();
         notifiers.insert(name.to_string(), notifier.clone());
         Ok(notifier)
     }
 
     /// Get a notifier by channel name
     pub fn get_channel(&self, name: &str) -> Option<Arc<EventNotifier>> {
-        let notifiers = self.notifiers.lock().unwrap();
+        let notifiers = self.notifiers.lock();
         notifiers.get(name).cloned()
     }
 
@@ -262,7 +261,7 @@ impl NotificationGroup {
         self.default_notifier.notify()?;
 
         // Notify all named channels
-        let notifiers = self.notifiers.lock().unwrap();
+        let notifiers = self.notifiers.lock();
         for notifier in notifiers.values() {
             notifier.notify()?;
         }
@@ -272,7 +271,7 @@ impl NotificationGroup {
 
     /// Notify specific channels
     pub fn notify_channels(&self, channel_names: &[&str]) -> SyncResult<()> {
-        let notifiers = self.notifiers.lock().unwrap();
+        let notifiers = self.notifiers.lock();
         for name in channel_names {
             if let Some(notifier) = notifiers.get(*name) {
                 notifier.notify()?;
@@ -283,13 +282,13 @@ impl NotificationGroup {
 
     /// Remove a channel
     pub fn remove_channel(&self, name: &str) -> bool {
-        let mut notifiers = self.notifiers.lock().unwrap();
+        let mut notifiers = self.notifiers.lock();
         notifiers.remove(name).is_some()
     }
 
     /// Get list of all channel names
     pub fn channel_names(&self) -> Vec<String> {
-        let notifiers = self.notifiers.lock().unwrap();
+        let notifiers = self.notifiers.lock();
         notifiers.keys().cloned().collect()
     }
 
@@ -309,7 +308,7 @@ impl NotificationGroup {
         }
 
         // Add named channel stats
-        let notifiers = self.notifiers.lock().unwrap();
+        let notifiers = self.notifiers.lock();
         total_channels += notifiers.len();
 
         for notifier in notifiers.values() {
@@ -327,12 +326,6 @@ impl NotificationGroup {
             total_channels,
             enabled_channels,
         }
-    }
-}
-
-impl Default for NotificationGroup {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default notification group")
     }
 }
 
@@ -389,7 +382,7 @@ impl BatchNotifier {
 
         let should_notify = match self.condition {
             NotifyCondition::Always => true,
-            NotifyCondition::WriteCount(n) => write_count % n == 0,
+            NotifyCondition::WriteCount(n) => write_count.is_multiple_of(n),
             NotifyCondition::BufferLevel(threshold) => buffer_level
                 .map(|level| level >= threshold)
                 .unwrap_or(false),
@@ -464,143 +457,4 @@ pub struct BatchStats {
     pub total_writes: u64,
     /// Underlying notification stats
     pub notification_stats: NotificationStats,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Barrier};
-    use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn test_event_notifier_basic() {
-        let notifier = EventNotifier::new().unwrap();
-
-        // Should start enabled
-        assert!(notifier.is_enabled());
-
-        // Basic notify should not fail
-        notifier.notify().unwrap();
-
-        let stats = notifier.stats();
-        assert_eq!(stats.notify_count, 1);
-    }
-
-    #[test]
-    fn test_notifier_enable_disable() {
-        let notifier = EventNotifier::new().unwrap();
-
-        notifier.set_enabled(false);
-        assert!(!notifier.is_enabled());
-
-        // Notify should still succeed but do nothing
-        notifier.notify().unwrap();
-
-        notifier.set_enabled(true);
-        assert!(notifier.is_enabled());
-    }
-
-    #[test]
-    fn test_notification_group() {
-        let group = NotificationGroup::new().unwrap();
-
-        // Add some channels
-        let _channel1 = group.add_channel("sensor1").unwrap();
-        let _channel2 = group.add_channel("sensor2").unwrap();
-
-        let names = group.channel_names();
-        assert_eq!(names.len(), 2);
-        assert!(names.contains(&"sensor1".to_string()));
-        assert!(names.contains(&"sensor2".to_string()));
-
-        // Notify all should not fail
-        group.notify_all().unwrap();
-
-        // Notify specific channels
-        group.notify_channels(&["sensor1"]).unwrap();
-    }
-
-    #[test]
-    fn test_batch_notifier() {
-        let mut batch_notifier = BatchNotifier::new(NotifyCondition::WriteCount(3)).unwrap();
-
-        // First two writes should not trigger notification
-        assert!(!batch_notifier.record_write(None).unwrap());
-        assert!(!batch_notifier.record_write(None).unwrap());
-
-        // Third write should trigger
-        assert!(batch_notifier.record_write(None).unwrap());
-
-        // Reset and test buffer level condition
-        batch_notifier.set_condition(NotifyCondition::BufferLevel(5));
-
-        assert!(!batch_notifier.record_write(Some(3)).unwrap());
-        assert!(batch_notifier.record_write(Some(6)).unwrap());
-    }
-
-    #[test]
-    fn test_concurrent_notifications() {
-        let notifier = Arc::new(EventNotifier::new().unwrap());
-        let barrier = Arc::new(Barrier::new(3)); // 2 threads + main
-
-        let notify_handles: Vec<_> = (0..2)
-            .map(|_| {
-                let notifier = notifier.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    for _ in 0..10 {
-                        notifier.notify().unwrap();
-                        thread::sleep(Duration::from_millis(1));
-                    }
-                })
-            })
-            .collect();
-
-        barrier.wait();
-
-        // Let them run for a bit
-        thread::sleep(Duration::from_millis(50));
-
-        for handle in notify_handles {
-            handle.join().unwrap();
-        }
-
-        let stats = notifier.stats();
-        assert_eq!(stats.notify_count, 20); // 2 threads * 10 notifications each
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn test_eventfd_wait() {
-        let notifier = Arc::new(EventNotifier::new().unwrap());
-        let notifier_clone = notifier.clone();
-
-        let handle = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(10));
-            notifier_clone.notify().unwrap();
-        });
-
-        // This should succeed when the other thread notifies
-        let result = notifier.wait(Some(1000));
-        assert!(result.is_ok());
-
-        handle.join().unwrap();
-    }
-
-    #[test]
-    fn test_batch_time_interval() {
-        let batch_notifier = BatchNotifier::new(NotifyCondition::TimeInterval(3)).unwrap();
-
-        // First two should not notify
-        assert!(!batch_notifier.record_write(None).unwrap());
-        assert!(!batch_notifier.record_write(None).unwrap());
-
-        // Third should notify and reset
-        assert!(batch_notifier.record_write(None).unwrap());
-
-        // Should start over
-        assert!(!batch_notifier.record_write(None).unwrap());
-    }
 }

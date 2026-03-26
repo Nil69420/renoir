@@ -8,7 +8,9 @@ use super::zero_copy::{CapnProtoFormat, FlatBufferFormat};
 use super::FormatType;
 use crate::error::{RenoirError, Result};
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock};
+
+use parking_lot::RwLock;
 
 /// Registry for managing zero-copy message formats and schemas
 pub struct ZeroCopyFormatRegistry {
@@ -68,7 +70,7 @@ impl ZeroCopyFormatRegistry {
         if self.formats.contains_key(&format_type) {
             return Err(RenoirError::invalid_parameter(
                 "format_type",
-                &format!("Format {} already registered", format_type.name()),
+                format!("Format {} already registered", format_type.name()),
             ));
         }
 
@@ -89,13 +91,13 @@ impl ZeroCopyFormatRegistry {
         if !self.formats.contains_key(&schema.format_type) {
             return Err(RenoirError::invalid_parameter(
                 "schema",
-                &format!("Format {} not registered", schema.format_type.name()),
+                format!("Format {} not registered", schema.format_type.name()),
             ));
         }
 
         self.schemas
             .entry(schema.schema_name.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(schema);
 
         Ok(())
@@ -126,7 +128,7 @@ impl ZeroCopyFormatRegistry {
         if !self.formats.contains_key(&format_type) {
             return Err(RenoirError::invalid_parameter(
                 "format_type",
-                &format!("Format {} not registered", format_type.name()),
+                format!("Format {} not registered", format_type.name()),
             ));
         }
 
@@ -366,9 +368,7 @@ pub fn global_registry() -> &'static RwLock<ZeroCopyFormatRegistry> {
 /// Register a schema globally
 pub fn register_global_schema(schema: SchemaInfo) -> Result<()> {
     let registry = global_registry();
-    let mut registry = registry
-        .write()
-        .map_err(|_| RenoirError::memory("Registry lock poisoned".to_string()))?;
+    let mut registry = registry.write();
     registry.register_schema(schema)
 }
 
@@ -377,14 +377,14 @@ pub fn get_global_format(
     format_type: &FormatType,
 ) -> Option<Arc<dyn ZeroCopyFormat + Send + Sync>> {
     let registry = global_registry();
-    let registry = registry.read().ok()?;
+    let registry = registry.read();
     registry.get_format(format_type)
 }
 
 /// Get format recommendation from global registry
 pub fn get_global_recommendation(use_case: &UseCase) -> FormatType {
     let registry = global_registry();
-    let registry = registry.read().expect("Registry lock poisoned");
+    let registry = registry.read();
     registry.recommend_format(*use_case)
 }
 
@@ -394,52 +394,14 @@ fn topic_matches_pattern(topic_name: &str, pattern: &str) -> bool {
         return true;
     }
 
-    if pattern.ends_with("/*") {
-        let prefix = &pattern[..pattern.len() - 2];
+    if let Some(prefix) = pattern.strip_suffix("/*") {
         return topic_name.starts_with(prefix);
     }
 
-    if pattern.starts_with("*/") {
-        let suffix = &pattern[2..];
+    if let Some(suffix) = pattern.strip_prefix("*/") {
         return topic_name.ends_with(suffix);
     }
 
     // Exact match
     topic_name == pattern
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_topic_pattern_matching() {
-        assert!(topic_matches_pattern("sensor/imu", "*"));
-        assert!(topic_matches_pattern("sensor/imu", "sensor/*"));
-        assert!(topic_matches_pattern("sensor/imu", "*/imu"));
-        assert!(topic_matches_pattern("sensor/imu", "sensor/imu"));
-        assert!(!topic_matches_pattern("sensor/imu", "control/*"));
-    }
-
-    #[test]
-    fn test_format_registration() {
-        let registry = ZeroCopyFormatRegistry::new();
-
-        // Should have default formats
-        assert!(registry.get_format(&FormatType::FlatBuffers).is_some());
-        assert!(registry.get_format(&FormatType::CapnProto).is_some());
-    }
-
-    #[test]
-    fn test_schema_registration() {
-        let mut registry = ZeroCopyFormatRegistry::new();
-
-        let schema = SchemaInfo::new(FormatType::FlatBuffers, "test_schema".to_string(), 1, 12345);
-
-        registry.register_schema(schema.clone()).unwrap();
-
-        let retrieved = registry.get_latest_schema("test_schema").unwrap();
-        assert_eq!(retrieved.schema_version, 1);
-        assert_eq!(retrieved.schema_name, "test_schema");
-    }
 }

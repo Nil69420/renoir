@@ -26,9 +26,7 @@ impl OfficialFlatBufferFormat {
 
     /// Get or create a builder from the pool for better performance
     pub fn get_builder(&mut self) -> FlatBufferBuilder<'static> {
-        self.builder_pool
-            .pop()
-            .unwrap_or_else(|| FlatBufferBuilder::new())
+        self.builder_pool.pop().unwrap_or_default()
     }
 
     /// Return a builder to the pool for reuse
@@ -73,7 +71,7 @@ impl OfficialFlatBufferFormat {
 
         // Basic buffer validation - more specific validation would require schema
         // The verifier in this crate version has different API
-        drop(verifier); // Use verifier implicitly through validation
+        let _ = verifier;
 
         Ok(())
     }
@@ -219,37 +217,5 @@ impl ZeroCopyFormat for OfficialFlatBufferFormat {
 impl Default for OfficialFlatBufferFormat {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_official_flatbuffer_validation() {
-        let format = OfficialFlatBufferFormat::new();
-
-        // Test validation of invalid buffer
-        let invalid_data = vec![1, 2, 3];
-        assert!(format.validate_flatbuffer(&invalid_data).is_err());
-    }
-
-    #[test]
-    fn test_flatbuffer_creation_and_validation() {
-        let mut format = OfficialFlatBufferFormat::new();
-
-        let schema = SchemaInfo {
-            schema_name: "test_message".to_string(),
-            format_type: FormatType::FlatBuffers,
-            schema_version: 1,
-            schema_hash: 12345,
-        };
-
-        let test_data = vec![1, 2, 3, 4, 5];
-        let buffer = format.create_validated_buffer(&test_data, &schema).unwrap();
-
-        // Should be able to validate the buffer we just created
-        assert!(format.validate_flatbuffer(&buffer).is_ok());
     }
 }

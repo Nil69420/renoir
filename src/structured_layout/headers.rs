@@ -96,9 +96,15 @@ pub struct TopicDirectory {
     /// Number of valid entries
     pub entry_count: u32,
     /// Entries bitmap (bit per entry for quick validity check)
-    pub validity_bitmap: [u64; (MAX_TOPICS + 63) / 64],
+    pub validity_bitmap: [u64; MAX_TOPICS.div_ceil(64)],
     /// Directory entries
     pub entries: [TopicDirectoryEntry; MAX_TOPICS],
+}
+
+impl Default for TopicDirectory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TopicDirectory {
@@ -116,7 +122,7 @@ impl TopicDirectory {
 
         Self {
             entry_count: 0,
-            validity_bitmap: [0; (MAX_TOPICS + 63) / 64],
+            validity_bitmap: [0; MAX_TOPICS.div_ceil(64)],
             entries: [EMPTY_ENTRY; MAX_TOPICS],
         }
     }

@@ -335,8 +335,8 @@ mod concurrent_stress_tests {
                             // Do some work with the buffer
                             let slice = buffer.as_mut_slice();
                             let write_size = slice.len().min(1024);
-                            for j in 0..write_size {
-                                slice[j] = ((thread_id + i + j) % 256) as u8;
+                            for (j, byte) in slice.iter_mut().enumerate().take(write_size) {
+                                *byte = ((thread_id + i + j) % 256) as u8;
                             }
 
                             thread_buffers.push(buffer);
@@ -517,10 +517,10 @@ mod concurrent_stress_tests {
                     let second_idx = (thread_id + i + 1) % resource_count;
 
                     // Try to access two regions in sequence (potential deadlock pattern)
-                    if manager.get_region(&region_names[first_idx]).is_ok() {
-                        if manager.get_region(&region_names[second_idx]).is_ok() {
-                            op_count.fetch_add(1, Ordering::Relaxed);
-                        }
+                    if manager.get_region(&region_names[first_idx]).is_ok()
+                        && manager.get_region(&region_names[second_idx]).is_ok()
+                    {
+                        op_count.fetch_add(1, Ordering::Relaxed);
                     }
 
                     // Brief work simulation
@@ -537,9 +537,8 @@ mod concurrent_stress_tests {
         // Use timeout to detect potential deadlocks
         let mut completed_threads = 0;
         for handle in handles {
-            match handle.join() {
-                Ok(()) => completed_threads += 1,
-                Err(_) => {} // Thread panicked
+            if handle.join().is_ok() {
+                completed_threads += 1;
             }
 
             // Check if we're taking too long (potential deadlock)
@@ -600,17 +599,14 @@ mod concurrent_stress_tests {
                             .with_create(true);
 
                     // Rapid create-destroy cycle
-                    match manager.create_region(config) {
-                        Ok(_) => {
-                            created_counter.fetch_add(1, Ordering::Relaxed);
+                    if manager.create_region(config).is_ok() {
+                        created_counter.fetch_add(1, Ordering::Relaxed);
 
-                            // Immediately destroy
-                            if let Ok(()) = manager.remove_region(&region_name) {
-                                destroyed_counter.fetch_add(1, Ordering::Relaxed);
-                            }
-                            // If removal fails, region might have been removed by another thread
+                        // Immediately destroy
+                        if let Ok(()) = manager.remove_region(&region_name) {
+                            destroyed_counter.fetch_add(1, Ordering::Relaxed);
                         }
-                        Err(_) => {} // Creation might fail under high contention
+                        // If removal fails, region might have been removed by another thread
                     }
 
                     // Yield occasionally to allow other threads

@@ -9,21 +9,16 @@ use crate::{
 
 /// A reference-counted buffer with metadata
 #[derive(Debug, Clone)]
+#[allow(clippy::box_collection)]
 pub struct Buffer {
-    /// Pointer to the buffer data
     data: NonNull<u8>,
-    /// Size of the buffer in bytes
     size: usize,
-    /// Capacity of the allocated buffer
     capacity: usize,
-    /// Reference to the allocator that owns this buffer
     allocator: Arc<dyn Allocator>,
-    /// Sequence number for ordering
     sequence: u64,
-    /// Timestamp when buffer was allocated
     allocated_at: SystemTime,
-    /// Optional user-defined metadata
-    metadata: HashMap<String, String>,
+    /// Lazily allocated — None until first `set_metadata` call.
+    metadata: Option<Box<HashMap<String, String>>>,
 }
 
 impl Buffer {
@@ -46,7 +41,7 @@ impl Buffer {
             allocator,
             sequence: 0,
             allocated_at: SystemTime::now(),
-            metadata: HashMap::new(),
+            metadata: None,
         })
     }
 
@@ -70,7 +65,7 @@ impl Buffer {
             allocator,
             sequence: 0,
             allocated_at: SystemTime::now(),
-            metadata: HashMap::new(),
+            metadata: None,
         }
     }
 
@@ -86,11 +81,13 @@ impl Buffer {
 
     /// Get the buffer as a byte slice
     pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: `data` is valid for `size` bytes, allocated by our allocator.
         unsafe { slice::from_raw_parts(self.data.as_ptr(), self.size) }
     }
 
     /// Get the buffer as a mutable byte slice
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: `data` is valid for `size` bytes, and we have `&mut self` ensuring exclusive access.
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr(), self.size) }
     }
 
@@ -145,17 +142,17 @@ impl Buffer {
 
     /// Add metadata to the buffer
     pub fn set_metadata(&mut self, key: String, value: String) {
-        self.metadata.insert(key, value);
+        self.metadata
+            .get_or_insert_with(|| Box::new(HashMap::new()))
+            .insert(key, value);
     }
 
-    /// Get metadata from the buffer
     pub fn get_metadata(&self, key: &str) -> Option<&String> {
-        self.metadata.get(key)
+        self.metadata.as_ref().and_then(|m| m.get(key))
     }
 
-    /// Get all metadata
-    pub fn metadata(&self) -> &HashMap<String, String> {
-        &self.metadata
+    pub fn metadata(&self) -> Option<&HashMap<String, String>> {
+        self.metadata.as_deref()
     }
 
     /// Write data to the buffer
@@ -165,6 +162,7 @@ impl Buffer {
             return Err(RenoirError::insufficient_space(data.len(), available));
         }
 
+        // SAFETY: Bounds checked above; `offset + data.len() <= capacity` and `data` is a valid slice.
         unsafe {
             std::ptr::copy_nonoverlapping(
                 data.as_ptr(),
@@ -188,6 +186,7 @@ impl Buffer {
         }
 
         let mut data = vec![0u8; len];
+        // SAFETY: Bounds checked above; `offset + len <= size` and `data` has `len` bytes allocated.
         unsafe {
             std::ptr::copy_nonoverlapping(self.data.as_ptr().add(offset), data.as_mut_ptr(), len);
         }
@@ -197,6 +196,7 @@ impl Buffer {
 
     /// Zero the buffer contents
     pub fn zero(&mut self) {
+        // SAFETY: `data` is valid for `capacity` bytes and we have exclusive access via `&mut self`.
         unsafe {
             std::ptr::write_bytes(self.data.as_ptr(), 0, self.capacity);
         }
@@ -215,7 +215,7 @@ impl Drop for Buffer {
     fn drop(&mut self) {
         // The allocator will handle deallocation when the Arc is dropped
         if let Err(e) = self.allocator.deallocate(self.data, self.capacity) {
-            eprintln!("Warning: Failed to deallocate buffer: {:?}", e);
+            log::warn!("Failed to deallocate buffer: {:?}", e);
         }
     }
 }

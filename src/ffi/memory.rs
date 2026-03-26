@@ -1,3 +1,4 @@
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 //! FFI functions for memory management
 
 use std::{
@@ -75,7 +76,7 @@ pub extern "C" fn renoir_manager_create_with_control(
 
     match SharedMemoryManager::with_control_region(rust_config) {
         Ok(manager) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_manager(Arc::new(manager));
             id as RenoirManagerHandle
         }
@@ -87,7 +88,7 @@ pub extern "C" fn renoir_manager_create_with_control(
 #[no_mangle]
 pub extern "C" fn renoir_manager_create() -> RenoirManagerHandle {
     let manager = SharedMemoryManager::new();
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
     let id = registry.store_manager(Arc::new(manager));
     id as RenoirManagerHandle
 }
@@ -100,7 +101,7 @@ pub extern "C" fn renoir_manager_destroy(handle: RenoirManagerHandle) -> RenoirE
     }
 
     let id = handle as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.remove_manager(id).is_some() {
         RenoirErrorCode::Success
@@ -123,7 +124,7 @@ pub extern "C" fn renoir_region_create(
     let manager_id = manager as usize;
     let config = unsafe { &*config };
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let manager = match registry.get_manager(manager_id) {
         Some(mgr) => mgr,
         None => return RenoirErrorCode::InvalidParameter,
@@ -137,7 +138,7 @@ pub extern "C" fn renoir_region_create(
 
     match manager.create_region(rust_config) {
         Ok(region) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_region(region);
             unsafe {
                 *region_handle = id as RenoirRegionHandle;
@@ -165,7 +166,7 @@ pub extern "C" fn renoir_region_get(
         Err(_) => return RenoirErrorCode::InvalidParameter,
     };
 
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
     let manager = match registry.get_manager(manager_id) {
         Some(mgr) => mgr,
         None => return RenoirErrorCode::InvalidParameter,
@@ -174,7 +175,7 @@ pub extern "C" fn renoir_region_get(
 
     match manager.get_region(&name) {
         Ok(region) => {
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_region(region);
             unsafe {
                 *region_handle = id as RenoirRegionHandle;
@@ -193,7 +194,7 @@ pub extern "C" fn renoir_region_size(handle: RenoirRegionHandle) -> usize {
     }
 
     let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     registry
         .get_region(id)
@@ -209,7 +210,7 @@ pub extern "C" fn renoir_region_name(handle: RenoirRegionHandle) -> *mut c_char 
     }
 
     let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     registry
         .get_region(id)
@@ -234,7 +235,7 @@ pub extern "C" fn renoir_region_open(
     };
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -244,7 +245,7 @@ pub extern "C" fn renoir_region_open(
     match mgr.get_region(&name_str) {
         Ok(region) => {
             drop(registry);
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let id = registry.store_region(region);
             unsafe {
                 *region_handle = id as RenoirRegionHandle;
@@ -263,7 +264,7 @@ pub extern "C" fn renoir_region_close(handle: RenoirRegionHandle) -> RenoirError
     }
 
     let id = handle as usize;
-    let mut registry = HANDLE_REGISTRY.lock().unwrap();
+    let mut registry = HANDLE_REGISTRY.lock();
 
     if registry.regions.remove(&id).is_some() {
         RenoirErrorCode::Success
@@ -288,7 +289,7 @@ pub extern "C" fn renoir_region_destroy(
     };
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -312,7 +313,7 @@ pub extern "C" fn renoir_region_stats(
     }
 
     let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let region = match registry.get_region(id) {
         Some(r) => r,
@@ -351,7 +352,7 @@ pub extern "C" fn renoir_manager_list_regions(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -433,7 +434,7 @@ pub extern "C" fn renoir_manager_has_region(
     };
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -454,7 +455,7 @@ pub extern "C" fn renoir_manager_total_memory_usage(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -479,7 +480,7 @@ pub extern "C" fn renoir_manager_region_count(
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -501,7 +502,7 @@ pub extern "C" fn renoir_manager_flush_all(manager: RenoirManagerHandle) -> Reno
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -522,7 +523,7 @@ pub extern "C" fn renoir_manager_clear_all(manager: RenoirManagerHandle) -> Reno
     }
 
     let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let mgr = match registry.get_manager(manager_id) {
         Some(m) => m,
@@ -548,7 +549,7 @@ pub extern "C" fn renoir_region_metadata(
     }
 
     let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let region = match registry.get_region(id) {
         Some(r) => r,
@@ -593,7 +594,7 @@ pub extern "C" fn renoir_region_create_bump_allocator(
     }
 
     let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock().unwrap();
+    let registry = HANDLE_REGISTRY.lock();
 
     let region = match registry.get_region(id) {
         Some(r) => r,
@@ -608,7 +609,7 @@ pub extern "C" fn renoir_region_create_bump_allocator(
     match crate::allocators::BumpAllocator::new(memory_slice) {
         Ok(allocator) => {
             drop(registry);
-            let mut registry = HANDLE_REGISTRY.lock().unwrap();
+            let mut registry = HANDLE_REGISTRY.lock();
             let alloc_id = registry.next_id;
             registry.next_id += 1;
             registry

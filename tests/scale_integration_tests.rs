@@ -53,7 +53,7 @@ mod scale_integration_tests {
             let region = region_result.unwrap();
             regions.push(region.clone());
 
-            let pool_config = BufferPoolConfig::new(&format!("scale_pool_{}", i))
+            let pool_config = BufferPoolConfig::new(format!("scale_pool_{}", i))
                 .with_buffer_size(1024) // Smaller buffers for embedded systems
                 .with_initial_count(buffers_per_region / 2) // Fewer initial buffers
                 .with_max_count(buffers_per_region)
@@ -484,7 +484,7 @@ mod scale_integration_tests {
         let temp_dir = TempDir::new().unwrap();
         let manager = SharedMemoryManager::new();
 
-        let region_sizes = vec![
+        let region_sizes: Vec<usize> = vec![
             256 * 1024,  // 256KB
             512 * 1024,  // 512KB
             1024 * 1024, // 1MB
@@ -504,7 +504,7 @@ mod scale_integration_tests {
             match region_result {
                 Ok(region) => {
                     // Test large buffer allocation
-                    let pool_config = BufferPoolConfig::new(&format!("large_pool_{}", i))
+                    let pool_config = BufferPoolConfig::new(format!("large_pool_{}", i))
                         .with_buffer_size(8 * 1024) // 8KB buffers
                         .with_initial_count(10)
                         .with_max_count(region_size / (8 * 1024) / 2) // Half the theoretical max

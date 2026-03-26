@@ -98,10 +98,10 @@ impl AtomicSequence {
     pub fn mark_ready(&self, new_seq: SequenceNumber) -> SyncResult<()> {
         match self.compare_exchange_weak(special::WRITING, new_seq) {
             Ok(_) => Ok(()),
-            Err(_) => {
-                // Slot wasn't in WRITING state - this is a bug
-                panic!("mark_ready called on slot not in WRITING state");
-            }
+            Err(_) => Err(super::SyncError::InvalidState {
+                expected: "WRITING",
+                actual: "other",
+            }),
         }
     }
 
@@ -243,7 +243,7 @@ impl Default for GlobalSequenceGenerator {
 
 thread_local! {
     /// Thread-local sequence generator for per-thread efficiency
-    static LOCAL_SEQUENCE: std::cell::RefCell<u64> = std::cell::RefCell::new(special::FIRST_DATA);
+    static LOCAL_SEQUENCE: std::cell::RefCell<u64> = const { std::cell::RefCell::new(special::FIRST_DATA) };
 }
 
 /// Get next sequence number from thread-local generator (fastest option)
@@ -255,81 +255,4 @@ pub fn next_local_sequence() -> SequenceNumber {
         *val += 1;
         *val
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::Arc;
-    use std::thread;
-
-    #[test]
-    fn test_atomic_sequence_basic() {
-        let seq = AtomicSequence::new();
-        assert_eq!(seq.load_relaxed(), special::EMPTY);
-
-        seq.store_release(42);
-        assert_eq!(seq.load_acquire(), 42);
-    }
-
-    #[test]
-    fn test_sequence_states() {
-        assert!(AtomicSequence::is_empty(special::EMPTY));
-        assert!(AtomicSequence::is_writing(special::WRITING));
-        assert!(AtomicSequence::is_ready(special::FIRST_DATA));
-        assert!(AtomicSequence::is_ready(100));
-    }
-
-    #[test]
-    fn test_claim_and_ready() {
-        let seq = AtomicSequence::new();
-
-        // Claim empty slot
-        assert!(seq.try_claim_for_write(special::EMPTY));
-        assert_eq!(seq.load_relaxed(), special::WRITING);
-
-        // Mark ready
-        seq.mark_ready(special::FIRST_DATA).unwrap();
-        assert_eq!(seq.load_relaxed(), special::FIRST_DATA);
-    }
-
-    #[test]
-    fn test_consistency_checker() {
-        let seq = Arc::new(AtomicSequence::with_initial(special::FIRST_DATA));
-        let checker = SequenceChecker::new(seq.clone());
-
-        let result = checker.consistent_read(|| 42, 5);
-        assert_eq!(result.unwrap(), 42);
-    }
-
-    #[test]
-    fn test_global_sequence_generator() {
-        let gen = GlobalSequenceGenerator::new();
-        let first = gen.next();
-        let second = gen.next();
-        assert_eq!(second, first + 1);
-    }
-
-    #[test]
-    fn test_concurrent_access() {
-        let seq = Arc::new(AtomicSequence::new());
-        let handles: Vec<_> = (0..4)
-            .map(|_| {
-                let seq = seq.clone();
-                thread::spawn(move || {
-                    for _i in 0..100 {
-                        let _ = seq.fetch_increment();
-                        thread::yield_now();
-                    }
-                })
-            })
-            .collect();
-
-        for handle in handles {
-            handle.join().unwrap();
-        }
-
-        // Should have incremented 4 * 100 = 400 times
-        assert_eq!(seq.load_relaxed(), 400);
-    }
 }

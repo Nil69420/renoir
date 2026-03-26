@@ -2,9 +2,11 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex, RwLock},
-    time::{Duration, SystemTime},
+    sync::Arc,
+    time::{Instant, SystemTime},
 };
+
+use parking_lot::{Condvar, Mutex, RwLock};
 
 use crate::{
     allocators::{Allocator, PoolAllocator},
@@ -21,15 +23,11 @@ use super::{
 /// A pool of pre-allocated buffers for efficient memory management
 #[derive(Debug)]
 pub struct BufferPool {
-    /// Configuration
     config: BufferPoolConfig,
-    /// Pool allocator
     allocator: Arc<PoolAllocator>,
-    /// Available buffers
     available: Mutex<VecDeque<Buffer>>,
-    /// Currently allocated buffers (for tracking)
+    buffer_returned: Condvar,
     allocated: RwLock<HashMap<usize, SystemTime>>,
-    /// Statistics
     stats: RwLock<BufferPoolStats>,
 }
 
@@ -48,6 +46,8 @@ impl BufferPool {
             ));
         }
 
+        // SAFETY: `memory_region` provides a valid pointer for `total_size` bytes
+        // and outlives the allocator via `Arc`.
         let allocator = unsafe {
             Arc::new(PoolAllocator::from_raw(
                 memory_region.as_mut_ptr_unsafe::<u8>(),
@@ -87,6 +87,7 @@ impl BufferPool {
             config,
             allocator,
             available: Mutex::new(available),
+            buffer_returned: Condvar::new(),
             allocated: RwLock::new(HashMap::new()),
             stats: RwLock::new(stats),
         })
@@ -94,72 +95,80 @@ impl BufferPool {
 
     /// Get a buffer from the pool
     pub fn get_buffer(&self) -> Result<Buffer> {
-        let start_time = SystemTime::now();
+        // Try to get from available buffers first
+        {
+            let mut available = self.available.lock();
+            if let Some(mut buffer) = available.pop_front() {
+                buffer.set_sequence(next_buffer_sequence());
+                self.track_allocation(&buffer);
+                self.update_allocation_stats();
+                return Ok(buffer);
+            }
+        }
 
-        loop {
-            // Try to get from available buffers first
-            {
-                let mut available = self.available.lock().unwrap();
+        // Try to allocate a new buffer if under max limit
+        if self.can_allocate_new() {
+            if let Ok(buffer) = self.create_new_buffer() {
+                self.track_allocation(&buffer);
+                self.update_allocation_stats();
+                self.increment_total_allocated();
+                return Ok(buffer);
+            }
+        }
+
+        // No buffer available — wait on Condvar if timeout is configured
+        if let Some(timeout) = self.config.allocation_timeout {
+            let deadline = Instant::now() + timeout;
+            let mut available = self.available.lock();
+            loop {
                 if let Some(mut buffer) = available.pop_front() {
                     buffer.set_sequence(next_buffer_sequence());
-
                     self.track_allocation(&buffer);
                     self.update_allocation_stats();
-
                     return Ok(buffer);
                 }
-            }
 
-            // Try to allocate a new buffer if under max limit
-            if self.can_allocate_new() {
-                match self.create_new_buffer() {
-                    Ok(buffer) => {
-                        self.track_allocation(&buffer);
-                        self.update_allocation_stats();
-                        self.increment_total_allocated();
-                        return Ok(buffer);
-                    }
-                    Err(_) => {
-                        // Allocation failed, continue to timeout check
-                    }
-                }
-            }
-
-            // Check timeout
-            if let Some(timeout) = self.config.allocation_timeout {
-                if start_time.elapsed().unwrap_or_default() >= timeout {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
                     self.record_allocation_failure();
                     return Err(RenoirError::buffer_full("buffer_pool"));
                 }
-            } else {
-                self.record_allocation_failure();
-                return Err(RenoirError::buffer_full("buffer_pool"));
-            }
 
-            // Brief pause before retrying
-            std::thread::sleep(Duration::from_micros(10));
+                let result = self.buffer_returned.wait_for(&mut available, remaining);
+                if result.timed_out() {
+                    if let Some(mut buffer) = available.pop_front() {
+                        buffer.set_sequence(next_buffer_sequence());
+                        self.track_allocation(&buffer);
+                        self.update_allocation_stats();
+                        return Ok(buffer);
+                    }
+                    self.record_allocation_failure();
+                    return Err(RenoirError::buffer_full("buffer_pool"));
+                }
+            }
+        } else {
+            self.record_allocation_failure();
+            Err(RenoirError::buffer_full("buffer_pool"))
         }
     }
 
     /// Return a buffer to the pool
     pub fn return_buffer(&self, buffer: Buffer) -> Result<()> {
-        // Remove from allocated tracking
         {
-            let mut allocated = self.allocated.write().unwrap();
+            let mut allocated = self.allocated.write();
             allocated.remove(&(buffer.sequence() as usize));
         }
 
-        // Update stats
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.currently_in_use = stats.currently_in_use.saturating_sub(1);
             stats.total_deallocations += 1;
         }
 
-        // Return to pool
         {
-            let mut available = self.available.lock().unwrap();
+            let mut available = self.available.lock();
             available.push_back(buffer);
+            self.buffer_returned.notify_one();
         }
 
         Ok(())
@@ -167,7 +176,7 @@ impl BufferPool {
 
     /// Get current statistics
     pub fn stats(&self) -> BufferPoolStats {
-        self.stats.read().unwrap().clone()
+        self.stats.read().clone()
     }
 
     /// Get pool configuration
@@ -177,23 +186,23 @@ impl BufferPool {
 
     /// Get number of available buffers
     pub fn available_count(&self) -> usize {
-        self.available.lock().unwrap().len()
+        self.available.lock().len()
     }
 
     /// Get number of allocated buffers
     pub fn allocated_count(&self) -> usize {
-        self.allocated.read().unwrap().len()
+        self.allocated.read().len()
     }
 
     /// Check if pool can expand
     pub fn can_expand(&self) -> bool {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read();
         stats.total_allocated < self.config.max_count
     }
 
     /// Shrink pool by removing excess available buffers
     pub fn shrink(&self, target_available: usize) -> usize {
-        let mut available = self.available.lock().unwrap();
+        let mut available = self.available.lock();
         let current_count = available.len();
 
         if current_count <= target_available {
@@ -211,7 +220,7 @@ impl BufferPool {
 
         // Update stats
         {
-            let mut stats = self.stats.write().unwrap();
+            let mut stats = self.stats.write();
             stats.total_allocated = stats.total_allocated.saturating_sub(removed);
         }
 
@@ -221,7 +230,7 @@ impl BufferPool {
     // Private helper methods
 
     fn can_allocate_new(&self) -> bool {
-        let stats = self.stats.read().unwrap();
+        let stats = self.stats.read();
         stats.total_allocated < self.config.max_count
     }
 
@@ -236,12 +245,12 @@ impl BufferPool {
     }
 
     fn track_allocation(&self, buffer: &Buffer) {
-        let mut allocated = self.allocated.write().unwrap();
+        let mut allocated = self.allocated.write();
         allocated.insert(buffer.sequence() as usize, SystemTime::now());
     }
 
     fn update_allocation_stats(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.currently_in_use += 1;
         stats.total_allocations += 1;
         if stats.currently_in_use > stats.peak_usage {
@@ -250,12 +259,12 @@ impl BufferPool {
     }
 
     fn increment_total_allocated(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.total_allocated += 1;
     }
 
     fn record_allocation_failure(&self) {
-        let mut stats = self.stats.write().unwrap();
+        let mut stats = self.stats.write();
         stats.allocation_failures += 1;
     }
 }

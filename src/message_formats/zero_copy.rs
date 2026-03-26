@@ -15,6 +15,7 @@ use crate::error::{RenoirError, Result};
 use std::collections::HashMap;
 
 /// FlatBuffers zero-copy format implementation
+#[derive(Default)]
 pub struct FlatBufferFormat {
     schema_registry: HashMap<String, SchemaInfo>,
 }
@@ -22,9 +23,7 @@ pub struct FlatBufferFormat {
 impl FlatBufferFormat {
     /// Create new FlatBuffers format
     pub fn new() -> Self {
-        Self {
-            schema_registry: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Register a schema for use with FlatBuffers
@@ -147,6 +146,7 @@ impl ZeroCopyFormat for FlatBufferFormat {
 }
 
 /// Cap'n Proto zero-copy format implementation
+#[derive(Default)]
 pub struct CapnProtoFormat {
     schema_registry: HashMap<String, SchemaInfo>,
 }
@@ -154,9 +154,7 @@ pub struct CapnProtoFormat {
 impl CapnProtoFormat {
     /// Create new Cap'n Proto format
     pub fn new() -> Self {
-        Self {
-            schema_registry: HashMap::new(),
-        }
+        Self::default()
     }
 
     /// Register a schema for use with Cap'n Proto
@@ -269,8 +267,6 @@ impl CapnProtoFormat {
         Ok(fields)
     }
 }
-
-/// Helper functions for creating zero-copy data structures
 
 /// Create a FlatBuffer-compatible sensor data message
 pub fn create_sensor_data_flatbuffer(

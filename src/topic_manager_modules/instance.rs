@@ -1,6 +1,7 @@
 //! Individual topic instance with appropriate ring buffer and configuration
 
 use std::{
+    collections::HashSet,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -8,6 +9,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+
+use parking_lot::Mutex;
 
 use crate::{
     error::{RenoirError, Result},
@@ -28,24 +31,19 @@ pub type SubscriberHandle = usize;
 /// Individual topic instance with appropriate ring buffer and configuration
 #[derive(Debug)]
 pub struct TopicInstance {
-    /// Topic identifier
     pub topic_id: TopicId,
-    /// Topic configuration
     pub config: TopicConfig,
-    /// Memory region for this topic
     pub memory_region: Arc<SharedMemoryRegion>,
-    /// Memory region name for cleanup
     pub region_name: String,
-    /// Ring buffer (either SPSC or MPMC)
     pub ring: TopicRingType,
-    /// Buffer registry for large messages
     pub buffer_registry: Arc<BufferPoolRegistry>,
-    /// Topic statistics
     pub stats: Arc<TopicStats>,
-    /// Next publisher handle
     next_pub_handle: AtomicUsize,
-    /// Next subscriber handle
     next_sub_handle: AtomicUsize,
+    /// Active publisher handles
+    publisher_handles: Mutex<HashSet<PublisherHandle>>,
+    /// Active subscriber handles
+    subscriber_handles: Mutex<HashSet<SubscriberHandle>>,
 }
 
 impl TopicInstance {
@@ -79,6 +77,8 @@ impl TopicInstance {
             stats,
             next_pub_handle: AtomicUsize::new(1),
             next_sub_handle: AtomicUsize::new(1),
+            publisher_handles: Mutex::new(HashSet::new()),
+            subscriber_handles: Mutex::new(HashSet::new()),
         })
     }
 
@@ -100,12 +100,18 @@ impl TopicInstance {
         }
 
         let handle = self.next_pub_handle.fetch_add(1, Ordering::SeqCst);
+        self.publisher_handles.lock().insert(handle);
         self.stats.add_publisher();
         Ok(handle)
     }
 
-    /// Remove a publisher from this topic
-    pub fn remove_publisher(&self, _handle: PublisherHandle) -> Result<()> {
+    pub fn remove_publisher(&self, handle: PublisherHandle) -> Result<()> {
+        if !self.publisher_handles.lock().remove(&handle) {
+            return Err(RenoirError::invalid_parameter(
+                "handle",
+                "Publisher handle not found",
+            ));
+        }
         self.stats.remove_publisher();
         Ok(())
     }
@@ -128,12 +134,18 @@ impl TopicInstance {
         }
 
         let handle = self.next_sub_handle.fetch_add(1, Ordering::SeqCst);
+        self.subscriber_handles.lock().insert(handle);
         self.stats.add_subscriber();
         Ok(handle)
     }
 
-    /// Remove a subscriber from this topic
-    pub fn remove_subscriber(&self, _handle: SubscriberHandle) -> Result<()> {
+    pub fn remove_subscriber(&self, handle: SubscriberHandle) -> Result<()> {
+        if !self.subscriber_handles.lock().remove(&handle) {
+            return Err(RenoirError::invalid_parameter(
+                "handle",
+                "Subscriber handle not found",
+            ));
+        }
         self.stats.remove_subscriber();
         Ok(())
     }
@@ -227,6 +239,22 @@ impl TopicInstance {
     pub fn is_active(&self) -> bool {
         self.stats.active_publishers.load(Ordering::Relaxed) > 0
             && self.stats.active_subscribers.load(Ordering::Relaxed) > 0
+    }
+
+    pub fn publisher_count(&self) -> usize {
+        self.publisher_handles.lock().len()
+    }
+
+    pub fn subscriber_count(&self) -> usize {
+        self.subscriber_handles.lock().len()
+    }
+
+    pub fn publisher_handles(&self) -> Vec<PublisherHandle> {
+        self.publisher_handles.lock().iter().copied().collect()
+    }
+
+    pub fn subscriber_handles(&self) -> Vec<SubscriberHandle> {
+        self.subscriber_handles.lock().iter().copied().collect()
     }
 
     /// Get the number of messages in the ring buffer

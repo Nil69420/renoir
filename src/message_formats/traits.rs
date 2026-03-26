@@ -22,7 +22,7 @@ pub trait ZeroCopyFormat: Send + Sync {
         if schema.format_type != self.format_type() {
             return Err(RenoirError::invalid_parameter(
                 "schema",
-                &format!(
+                format!(
                     "Schema format {} doesn't match format {}",
                     schema.format_type.name(),
                     self.name()

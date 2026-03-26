@@ -619,4 +619,253 @@ mod sync_patterns_tests {
         let notify_stats = notifier.stats();
         assert!(notify_stats.notify_count >= processed as u64);
     }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_swmr_slot_access() {
+        let ring = SWMRRing::<String>::new(4).unwrap();
+        let mut writer = ring.writer();
+        let reader = ring.reader();
+
+        writer.force_write("slot0".to_string(), 0).unwrap();
+        writer.force_write("slot2".to_string(), 2).unwrap();
+
+        let (data0, _) = reader.read_slot(0).unwrap().unwrap();
+        assert_eq!(data0, "slot0");
+
+        let (data2, _) = reader.read_slot(2).unwrap().unwrap();
+        assert_eq!(data2, "slot2");
+
+        assert!(reader.read_slot(1).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_reader_tracking() {
+        let manager = EpochManager::new();
+        let reader = manager.register_reader();
+
+        let epoch = reader.enter();
+        assert_eq!(epoch, renoir::sync::epoch::epoch_values::INITIAL);
+
+        let status = reader.status();
+        assert!(status.active);
+        assert_eq!(
+            status.current_epoch,
+            renoir::sync::epoch::epoch_values::INITIAL
+        );
+
+        reader.leave();
+        let status = reader.status();
+        assert!(!status.active);
+    }
+
+    #[test]
+    fn test_epoch_statistics() {
+        struct TestObject {
+            _data: Vec<u8>,
+            reclaimed: Arc<AtomicUsize>,
+        }
+        impl EpochReclaim for TestObject {
+            fn reclaim(&mut self) {
+                self.reclaimed.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let manager = EpochManager::new();
+        let _reader1 = manager.register_reader();
+        let reader2 = manager.register_reader();
+
+        reader2.enter();
+
+        for i in 0..3 {
+            let obj = TestObject {
+                _data: vec![i; 10],
+                reclaimed: Arc::new(AtomicUsize::new(0)),
+            };
+            manager.defer_reclaim(obj);
+        }
+
+        let stats = manager.stats();
+        assert_eq!(stats.total_readers, 2);
+        assert_eq!(stats.active_readers, 1);
+        assert_eq!(stats.pending_reclamations, 3);
+    }
+
+    #[test]
+    fn test_notifier_enable_disable() {
+        let notifier = EventNotifier::new().unwrap();
+
+        notifier.set_enabled(false);
+        assert!(!notifier.is_enabled());
+
+        notifier.notify().unwrap();
+
+        notifier.set_enabled(true);
+        assert!(notifier.is_enabled());
+    }
+
+    #[test]
+    fn test_concurrent_notifications() {
+        let notifier = Arc::new(EventNotifier::new().unwrap());
+        let barrier = Arc::new(Barrier::new(3));
+
+        let notify_handles: Vec<_> = (0..2)
+            .map(|_| {
+                let notifier = notifier.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    for _ in 0..10 {
+                        notifier.notify().unwrap();
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                })
+            })
+            .collect();
+
+        barrier.wait();
+
+        thread::sleep(Duration::from_millis(50));
+
+        for handle in notify_handles {
+            handle.join().unwrap();
+        }
+
+        let stats = notifier.stats();
+        assert_eq!(stats.notify_count, 20);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_eventfd_wait() {
+        let notifier = Arc::new(EventNotifier::new().unwrap());
+        let notifier_clone = notifier.clone();
+
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            notifier_clone.notify().unwrap();
+        });
+
+        let result = notifier.wait(Some(1000));
+        assert!(result.is_ok());
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_batch_time_interval() {
+        let batch_notifier = BatchNotifier::new(NotifyCondition::TimeInterval(3)).unwrap();
+
+        assert!(!batch_notifier.record_write(None).unwrap());
+        assert!(!batch_notifier.record_write(None).unwrap());
+
+        assert!(batch_notifier.record_write(None).unwrap());
+
+        assert!(!batch_notifier.record_write(None).unwrap());
+    }
+
+    #[test]
+    fn test_atomic_sequence_basic() {
+        let seq = AtomicSequence::new();
+        assert_eq!(seq.load_relaxed(), special::EMPTY);
+
+        seq.store_release(42);
+        assert_eq!(seq.load_acquire(), 42);
+    }
+
+    #[test]
+    fn test_sequence_states() {
+        assert!(AtomicSequence::is_empty(special::EMPTY));
+        assert!(AtomicSequence::is_writing(special::WRITING));
+        assert!(AtomicSequence::is_ready(special::FIRST_DATA));
+        assert!(AtomicSequence::is_ready(100));
+    }
+
+    #[test]
+    fn test_claim_and_ready() {
+        let seq = AtomicSequence::new();
+
+        assert!(seq.try_claim_for_write(special::EMPTY));
+        assert_eq!(seq.load_relaxed(), special::WRITING);
+
+        seq.mark_ready(special::FIRST_DATA).unwrap();
+        assert_eq!(seq.load_relaxed(), special::FIRST_DATA);
+    }
+
+    #[test]
+    fn test_consistency_checker() {
+        let seq = Arc::new(AtomicSequence::with_initial(special::FIRST_DATA));
+        let checker = SequenceChecker::new(seq.clone());
+
+        let result = checker.consistent_read(|| 42, 5);
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_global_sequence_generator() {
+        let gen = GlobalSequenceGenerator::new();
+        let first = gen.next();
+        let second = gen.next();
+        assert_eq!(second, first + 1);
+    }
+
+    #[test]
+    fn test_sequence_concurrent_access() {
+        let seq = Arc::new(AtomicSequence::new());
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let seq = seq.clone();
+                thread::spawn(move || {
+                    for _i in 0..100 {
+                        let _ = seq.fetch_increment();
+                        thread::yield_now();
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        assert_eq!(seq.load_relaxed(), 400);
+    }
+
+    #[test]
+    fn test_mio_notification_creation() {
+        let notification = renoir::sync::mio_notify::MioEventNotification::new();
+        assert!(notification.is_ok());
+
+        if let Ok(notif) = notification {
+            assert!(notif.is_enabled());
+            let (notify_count, wait_count) = notif.get_stats();
+            assert_eq!(notify_count, 0);
+            assert_eq!(wait_count, 0);
+        }
+    }
+
+    #[test]
+    fn test_mio_condition_notifier() {
+        let mut notifier = renoir::sync::mio_notify::MioConditionNotifier::new();
+
+        let result = notifier.add_condition("test_condition".to_string(), NotifyCondition::Always);
+        assert!(result.is_ok());
+
+        let notify_result = notifier.notify_condition("test_condition");
+        assert!(notify_result.is_ok());
+    }
+
+    #[test]
+    fn test_mio_notification_enable_disable() {
+        let notification = renoir::sync::mio_notify::MioEventNotification::new().unwrap();
+
+        assert!(notification.is_enabled());
+
+        notification.set_enabled(false);
+        assert!(!notification.is_enabled());
+
+        notification.set_enabled(true);
+        assert!(notification.is_enabled());
+    }
 }

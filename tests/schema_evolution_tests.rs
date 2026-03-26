@@ -721,4 +721,198 @@ mod schema_evolution_integration_tests {
 
         Ok(())
     }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_backward_compatibility_optional_field_added() -> Result<()> {
+        let mut manager = SchemaEvolutionManager::new();
+
+        let old_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .version(1, 0, 0)
+            .add_field(FieldDefinition::new(
+                "field1".to_string(),
+                "u32".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .build(&mut manager)?;
+
+        let new_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .with_id(old_schema.schema_id)
+            .version(1, 1, 0)
+            .add_field(FieldDefinition::new(
+                "field1".to_string(),
+                "u32".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .add_field(FieldDefinition::new(
+                "field2".to_string(),
+                "string".to_string(),
+                false,
+                2,
+                1,
+            ))
+            .build(&mut manager)?;
+
+        let result = SchemaCompatibilityValidator::validate_backward_compatibility(
+            &old_schema,
+            &new_schema,
+        )?;
+
+        assert!(result.is_compatible);
+        assert_eq!(
+            result.compatibility_level,
+            CompatibilityLevel::FullCompatible
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_backward_compatibility_required_field_added() -> Result<()> {
+        let mut manager = SchemaEvolutionManager::new();
+
+        let old_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .version(1, 0, 0)
+            .add_field(FieldDefinition::new(
+                "field1".to_string(),
+                "u32".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .build(&mut manager)?;
+
+        let new_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .with_id(old_schema.schema_id)
+            .version(2, 0, 0)
+            .add_field(FieldDefinition::new(
+                "field1".to_string(),
+                "u32".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .add_field(FieldDefinition::new(
+                "field2".to_string(),
+                "string".to_string(),
+                true,
+                2,
+                1,
+            ))
+            .build(&mut manager)?;
+
+        let result = SchemaCompatibilityValidator::validate_backward_compatibility(
+            &old_schema,
+            &new_schema,
+        )?;
+
+        assert!(!result.is_compatible);
+        assert_eq!(result.compatibility_level, CompatibilityLevel::Breaking);
+        assert!(!result.violations.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_semantic_version_compatibility() {
+        let v1_0_0 = SemanticVersion::new(1, 0, 0);
+        let v1_1_0 = SemanticVersion::new(1, 1, 0);
+        let v1_0_1 = SemanticVersion::new(1, 0, 1);
+        let v2_0_0 = SemanticVersion::new(2, 0, 0);
+
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_0_0),
+            CompatibilityLevel::FullCompatible
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_1_0),
+            CompatibilityLevel::BackwardCompatible
+        );
+        assert_eq!(
+            v1_1_0.is_compatible_with(&v1_0_0),
+            CompatibilityLevel::ForwardCompatible
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v2_0_0),
+            CompatibilityLevel::Breaking
+        );
+        assert_eq!(
+            v1_0_0.is_compatible_with(&v1_0_1),
+            CompatibilityLevel::FullCompatible
+        );
+    }
+
+    #[test]
+    fn test_migration_plan_generation_inline() -> Result<()> {
+        let mut manager = SchemaEvolutionManager::new();
+        let schema_id = manager.generate_schema_id();
+
+        let _v1_schema = SchemaBuilder::new("migration_test".to_string(), FormatType::FlatBuffers)
+            .with_id(schema_id)
+            .version(1, 0, 0)
+            .add_field(FieldDefinition::new(
+                "old_field".to_string(),
+                "u32".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .build(&mut manager)?;
+
+        let v2_schema = SchemaBuilder::new("migration_test".to_string(), FormatType::FlatBuffers)
+            .with_id(schema_id)
+            .version(2, 0, 0)
+            .add_field(FieldDefinition::new(
+                "old_field".to_string(),
+                "u64".to_string(),
+                true,
+                1,
+                0,
+            ))
+            .add_field(
+                FieldDefinition::new("new_field".to_string(), "string".to_string(), true, 2, 1)
+                    .with_default("default_value".to_string()),
+            )
+            .build(&mut manager)?;
+
+        // Verify v2 schema was built successfully
+        assert_eq!(v2_schema.semantic_version, SemanticVersion::new(2, 0, 0));
+        assert_eq!(v2_schema.schema_id, schema_id);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_migration_plan_execution_inline() -> Result<()> {
+        let mut executor = SchemaMigrationExecutor::new();
+        let mut manager = SchemaEvolutionManager::new();
+
+        let from_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .version(1, 0, 0)
+            .build(&mut manager)?;
+
+        let to_schema = SchemaBuilder::new("test".to_string(), FormatType::FlatBuffers)
+            .with_id(from_schema.schema_id)
+            .version(2, 0, 0)
+            .build(&mut manager)?;
+
+        let plan = vec![MigrationStep::VersionBump {
+            from_version: 1,
+            to_version: 2,
+            is_major: true,
+        }];
+
+        let test_data = b"test data";
+        let result = executor.execute_migration_plan(test_data, plan, &from_schema, &to_schema)?;
+
+        assert!(!result.migrated_data.is_empty());
+        assert_eq!(result.executed_steps.len(), 1);
+
+        Ok(())
+    }
 }

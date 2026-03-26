@@ -9,9 +9,11 @@ use crate::shared_pools::SharedBufferPoolManager;
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
-    Arc, Mutex, RwLock,
+    Arc,
 };
 use std::time::{Duration, SystemTime};
+
+use parking_lot::{Mutex, RwLock};
 
 /// Unique identifier for readers in the epoch reclamation system
 pub type ReaderId = u64;
@@ -106,12 +108,7 @@ impl Default for ReclamationPolicy {
 /// Pending reclamation entry
 #[derive(Debug)]
 struct PendingReclamation {
-    /// Buffer descriptor to reclaim
     descriptor: BlobDescriptor,
-    /// Epoch when it became reclaimable
-    #[allow(dead_code)]
-    reclaim_epoch: Epoch,
-    /// Timestamp when it was marked for reclamation
     marked_at: SystemTime,
 }
 
@@ -136,12 +133,12 @@ impl ReaderState {
     }
 
     fn update_activity(&self) {
-        let mut last_activity = self.last_activity.lock().unwrap();
+        let mut last_activity = self.last_activity.lock();
         *last_activity = SystemTime::now();
     }
 
     fn is_stale(&self, timeout: Duration) -> bool {
-        let last_activity = self.last_activity.lock().unwrap();
+        let last_activity = self.last_activity.lock();
         last_activity.elapsed().unwrap_or(timeout) >= timeout
     }
 }
@@ -193,7 +190,7 @@ impl EpochReclaimer {
             .current_epoch
             .store(current_epoch, Ordering::SeqCst);
 
-        let mut readers = self.readers.write().unwrap();
+        let mut readers = self.readers.write();
         readers.insert(reader_id, reader_state);
 
         self.stats
@@ -204,7 +201,7 @@ impl EpochReclaimer {
 
     /// Unregister a reader
     pub fn unregister_reader(&self, reader_id: ReaderId) -> Result<()> {
-        let mut readers = self.readers.write().unwrap();
+        let mut readers = self.readers.write();
         if readers.remove(&reader_id).is_some() {
             self.stats
                 .readers_unregistered
@@ -220,7 +217,7 @@ impl EpochReclaimer {
 
     /// Update reader epoch (call when reader accesses data)
     pub fn update_reader_epoch(&self, reader_id: ReaderId) -> Result<Epoch> {
-        let readers = self.readers.read().unwrap();
+        let readers = self.readers.read();
         if let Some(reader_state) = readers.get(&reader_id) {
             reader_state.update_activity();
             let current_epoch = self.global_epoch.load(Ordering::SeqCst);
@@ -246,15 +243,11 @@ impl EpochReclaimer {
         let current_epoch = self.global_epoch.load(Ordering::SeqCst);
         let pending = PendingReclamation {
             descriptor,
-            reclaim_epoch: current_epoch,
             marked_at: SystemTime::now(),
         };
 
-        let mut reclamations = self.pending_reclamations.lock().unwrap();
-        reclamations
-            .entry(current_epoch)
-            .or_insert_with(Vec::new)
-            .push(pending);
+        let mut reclamations = self.pending_reclamations.lock();
+        reclamations.entry(current_epoch).or_default().push(pending);
 
         self.stats
             .items_marked_for_reclamation
@@ -273,7 +266,7 @@ impl EpochReclaimer {
 
     /// Try to advance the global epoch
     pub fn try_advance_epoch(&self) -> Result<bool> {
-        let mut last_advance = self.last_epoch_advance.lock().unwrap();
+        let mut last_advance = self.last_epoch_advance.lock();
         let should_advance =
             last_advance.elapsed().unwrap_or_default() >= self.policy.epoch_advance_interval;
 
@@ -300,7 +293,7 @@ impl EpochReclaimer {
         let min_reader_epoch = self.get_min_reader_epoch();
         let mut reclaimed_count = 0;
 
-        let mut reclamations = self.pending_reclamations.lock().unwrap();
+        let mut reclamations = self.pending_reclamations.lock();
         let mut epochs_to_remove = Vec::new();
 
         for (&epoch, pending_list) in reclamations.iter() {
@@ -314,7 +307,7 @@ impl EpochReclaimer {
                         }
                         Err(e) => {
                             // Log error but continue with other reclamations
-                            eprintln!("Failed to reclaim buffer: {}", e);
+                            log::warn!("Failed to reclaim buffer: {}", e);
                             self.stats
                                 .reclamation_errors
                                 .fetch_add(1, Ordering::Relaxed);
@@ -338,7 +331,7 @@ impl EpochReclaimer {
         let mut reclaimed_count = 0;
         let cutoff_time = SystemTime::now() - self.policy.max_age;
 
-        let mut reclamations = self.pending_reclamations.lock().unwrap();
+        let mut reclamations = self.pending_reclamations.lock();
         let mut epochs_to_remove = Vec::new();
 
         for (&epoch, pending_list) in reclamations.iter_mut() {
@@ -372,7 +365,7 @@ impl EpochReclaimer {
 
     /// Get minimum reader epoch (watermark)
     fn get_min_reader_epoch(&self) -> Epoch {
-        let readers = self.readers.read().unwrap();
+        let readers = self.readers.read();
         readers
             .values()
             .filter(|state| state.is_active.load(Ordering::SeqCst) == 1)
@@ -384,7 +377,7 @@ impl EpochReclaimer {
     /// Clean up stale readers
     fn cleanup_stale_readers(&self) -> Result<()> {
         let reader_timeout = self.policy.max_age;
-        let mut readers = self.readers.write().unwrap();
+        let mut readers = self.readers.write();
         let initial_count = readers.len();
 
         readers.retain(|_, state| {

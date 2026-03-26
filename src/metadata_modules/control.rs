@@ -2,9 +2,11 @@
 
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicU64, Arc, RwLock},
+    sync::{atomic::AtomicU64, Arc},
     time::SystemTime,
 };
+
+use parking_lot::RwLock;
 
 use crate::{
     error::{RenoirError, Result},
@@ -74,7 +76,7 @@ impl ControlHeader {
         if self.version != Self::VERSION {
             return Err(RenoirError::invalid_parameter(
                 "version",
-                &format!("Unsupported control header version: {}", self.version),
+                format!("Unsupported control header version: {}", self.version),
             ));
         }
 
@@ -184,7 +186,7 @@ impl ControlRegion {
 
     /// Save registry to shared memory
     fn save_registry_to_memory(&self) -> Result<()> {
-        let registry = self.registry.read().unwrap();
+        let registry = self.registry.read();
         let serialized = bincode::serialize(&*registry).map_err(|e| {
             RenoirError::serialization(format!("Failed to serialize registry: {}", e))
         })?;
@@ -234,7 +236,7 @@ impl ControlRegion {
         metadata.validate()?;
 
         {
-            let mut registry = self.registry.write().unwrap();
+            let mut registry = self.registry.write();
             if registry.contains_key(&metadata.name) {
                 return Err(RenoirError::region_exists(&metadata.name));
             }
@@ -252,7 +254,7 @@ impl ControlRegion {
     /// Unregister a region
     pub fn unregister_region(&self, name: &str) -> Result<()> {
         {
-            let mut registry = self.registry.write().unwrap();
+            let mut registry = self.registry.write();
             registry
                 .remove(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
@@ -266,20 +268,20 @@ impl ControlRegion {
 
     /// Get region registry entry
     pub fn get_region_entry(&self, name: &str) -> Option<RegionRegistryEntry> {
-        let registry = self.registry.read().unwrap();
+        let registry = self.registry.read();
         registry.get(name).cloned()
     }
 
     /// List all registered regions
     pub fn list_regions(&self) -> Vec<RegionRegistryEntry> {
-        let registry = self.registry.read().unwrap();
+        let registry = self.registry.read();
         registry.values().cloned().collect()
     }
 
     /// Add reference to a region
     pub fn add_region_ref(&self, name: &str) -> Result<()> {
         {
-            let mut registry = self.registry.write().unwrap();
+            let mut registry = self.registry.write();
             let entry = registry
                 .get_mut(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
@@ -294,7 +296,7 @@ impl ControlRegion {
     /// Remove reference from a region
     pub fn remove_region_ref(&self, name: &str) -> Result<bool> {
         let should_remove = {
-            let mut registry = self.registry.write().unwrap();
+            let mut registry = self.registry.write();
             let entry = registry
                 .get_mut(name)
                 .ok_or_else(|| RenoirError::region_not_found(name))?;
@@ -330,7 +332,7 @@ impl ControlRegion {
     /// Get control region statistics
     pub fn get_stats(&self) -> ControlStats {
         let header = unsafe { &*self.header };
-        let registry = self.registry.read().unwrap();
+        let registry = self.registry.read();
 
         ControlStats::new(
             registry.len(),
@@ -354,7 +356,7 @@ impl ControlRegion {
     /// Clean up stale entries (entries from dead processes)
     pub fn cleanup_stale_entries(&self, max_age_seconds: u64) -> Result<usize> {
         let stale_names: Vec<String> = {
-            let registry = self.registry.read().unwrap();
+            let registry = self.registry.read();
             registry
                 .iter()
                 .filter(|(_, entry)| entry.is_stale(max_age_seconds) && !entry.creator_alive())

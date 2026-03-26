@@ -12,7 +12,7 @@ use renoir::{
             create_pose_data_capnp, create_sensor_data_flatbuffer, CapnProtoFormat,
             FlatBufferFormat,
         },
-        FormatType,
+        FormatType, OfficialFlatBufferFormat,
     },
 };
 
@@ -51,7 +51,7 @@ mod zero_copy_integration_tests {
             assert_eq!(ts, timestamp);
             assert_eq!(val, sensor_value);
             assert_eq!(id, sensor_id);
-            assert!(accessor.buffer().len() > 0);
+            assert!(!accessor.buffer().is_empty());
         }
 
         Ok(())
@@ -194,17 +194,14 @@ mod zero_copy_integration_tests {
 
         // Validate all fields
         assert_eq!(accessor.get_u64("timestamp")?.unwrap_or(0), 1234567890);
-        assert_eq!(
-            accessor.get_string("device_name")?.as_deref().unwrap_or(""),
-            "IMU_01"
-        );
+        assert_eq!(accessor.get_string("device_name")?.unwrap_or(""), "IMU_01");
         assert_eq!(accessor.get_f64("temperature")?.unwrap_or(0.0), 36.5);
         assert_eq!(accessor.get_u32("status_flags")?.unwrap_or(0), 0x00FF);
 
         let cal_data = accessor.get_bytes("calibration_data")?.unwrap_or(&[]);
         assert_eq!(cal_data, &[0xDE, 0xAD, 0xBE, 0xEF]);
 
-        assert!(accessor.buffer().len() > 0);
+        assert!(!accessor.buffer().is_empty());
 
         Ok(())
     }
@@ -273,8 +270,8 @@ mod zero_copy_integration_tests {
         assert_eq!(cp_accessor.get_f64("position_y")?.unwrap(), 2.0);
 
         // Both should have non-zero buffer sizes
-        assert!(fb_accessor.buffer().len() > 0);
-        assert!(cp_accessor.buffer().len() > 0);
+        assert!(!fb_accessor.buffer().is_empty());
+        assert!(!cp_accessor.buffer().is_empty());
 
         Ok(())
     }
@@ -320,7 +317,33 @@ mod zero_copy_integration_tests {
         }
 
         // If we reach here without issues, zero-copy access is working
-        assert!(true);
         Ok(())
+    }
+
+    // === Tests migrated from inline modules ===
+
+    #[test]
+    fn test_official_flatbuffer_validation() {
+        let format = OfficialFlatBufferFormat::new();
+
+        let invalid_data = vec![1, 2, 3];
+        assert!(format.validate_flatbuffer(&invalid_data).is_err());
+    }
+
+    #[test]
+    fn test_flatbuffer_creation_and_validation() {
+        let mut format = OfficialFlatBufferFormat::new();
+
+        let schema = SchemaInfo::new(
+            FormatType::FlatBuffers,
+            "test_message".to_string(),
+            1,
+            12345,
+        );
+
+        let test_data = vec![1, 2, 3, 4, 5];
+        let buffer = format.create_validated_buffer(&test_data, &schema).unwrap();
+
+        assert!(format.validate_flatbuffer(&buffer).is_ok());
     }
 }

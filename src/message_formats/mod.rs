@@ -98,7 +98,7 @@ impl FormattedMessage {
         } else {
             Err(crate::error::RenoirError::invalid_parameter(
                 "schema",
-                &format!(
+                format!(
                     "Schema mismatch: expected {} v{}, got {} v{}",
                     expected.schema_name,
                     expected.schema_version,
