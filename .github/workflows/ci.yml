@@ -13,6 +13,9 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+permissions:
+  contents: read
+
 jobs:
   # Job 1: Code Quality and Linting
   lint:
@@ -269,6 +272,25 @@ jobs:
         cargo flamegraph --bench ringbuf_bench   -o flamegraph_ringbuf.svg   -- --bench 2>&1 || true
       continue-on-error: true
 
+    # ── gdb sampling/backtrace for benchmark binaries ──
+    - name: GDB backtrace (best effort)
+      run: |
+        echo '### gdb backtrace snapshot' >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        cargo build --release --bench allocator_bench --bench ringbuf_bench
+        BENCH_BIN=$(find target/release/deps -maxdepth 1 -type f -name 'ringbuf_bench-*' -executable | head -n1)
+        if [ -n "$BENCH_BIN" ]; then
+          timeout 90 gdb -q -batch \
+            -ex 'set pagination off' \
+            -ex 'run --bench' \
+            -ex 'thread apply all bt full' \
+            --args "$BENCH_BIN" 2>&1 | tail -80 >> $GITHUB_STEP_SUMMARY || true
+        else
+          echo 'No benchmark binary found for gdb snapshot' >> $GITHUB_STEP_SUMMARY
+        fi
+        echo '```' >> $GITHUB_STEP_SUMMARY
+      continue-on-error: true
+
     - name: Upload profiling artifacts
       uses: actions/upload-artifact@v4
       with:
@@ -286,6 +308,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
+      contents: read   # needed by actions/checkout (job-level overrides workflow-level)
       pages: write
       id-token: write
     environment:
@@ -298,6 +321,9 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+
+    - name: Configure GitHub Pages
+      uses: actions/configure-pages@v5
 
     - name: Cache cargo dependencies
       uses: actions/cache@v3
