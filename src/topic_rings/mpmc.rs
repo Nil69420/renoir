@@ -160,6 +160,12 @@ impl MPMCTopicRing {
     /// Peek at the next message without consuming it
     /// Returns a copy of the message at the head of the queue without advancing the read position
     /// Note: In MPMC mode, the message may be consumed by another thread between peek and consume
+    ///
+    /// # Safety note
+    /// Messages are assumed not to wrap around the ring buffer boundary.
+    /// `try_publish` enforces that each message fits contiguously from its write
+    /// position (modulo capacity), so this is safe as long as messages are
+    /// smaller than capacity.
     pub fn try_peek(&self) -> Result<Option<Message>> {
         let current_read = self.read_pos.load(Ordering::Acquire);
         let current_write = self.write_pos.load(Ordering::Acquire);
@@ -170,7 +176,13 @@ impl MPMCTopicRing {
 
         // Read message header
         let buffer_pos = current_read & (self.capacity - 1);
+
+        // Guard against wrap-around: if the message would span past the buffer
+        // end, the data is not contiguous and we cannot safely deserialize.
         let header = unsafe {
+            if buffer_pos + MessageHeader::SIZE > self.capacity {
+                return Ok(None); // Header wraps — skip
+            }
             let read_ptr = self.buffer.as_ptr().add(buffer_pos);
             self.deserialize_header(read_ptr)?
         };
@@ -180,6 +192,11 @@ impl MPMCTopicRing {
         // Check if we have enough data for the complete message
         if current_write.wrapping_sub(current_read) < message_size {
             return Ok(None); // Incomplete message
+        }
+
+        // Ensure the message doesn't wrap around the buffer boundary
+        if buffer_pos + message_size > self.capacity {
+            return Ok(None); // Message wraps — cannot safely read contiguously
         }
 
         // Read the complete message (but don't advance read position)

@@ -85,9 +85,14 @@ int main() {
     const char* messages[] = {"First", "Second", "Third"};
     for (int i = 0; i < 3; i++) {
         RenoirSequenceNumber seq = 0;
-        renoir_publish(publisher, reinterpret_cast<const uint8_t*>(messages[i]),
-                      strlen(messages[i]) + 1, nullptr, &seq);
-        std::cout << "   Published: \"" << messages[i] << "\" (seq: " << seq << ")" << std::endl;
+        result = renoir_publish(publisher, reinterpret_cast<const uint8_t*>(messages[i]),
+                               strlen(messages[i]) + 1, nullptr, &seq);
+        if (result == RenoirErrorCode::Success) {
+            std::cout << "   Published: \"" << messages[i] << "\" (seq: " << seq << ")" << std::endl;
+        } else {
+            std::cerr << "   Failed to publish \"" << messages[i]
+                      << "\" (error code: " << static_cast<int>(result) << ")" << std::endl;
+        }
     }
 
     // Test peek functionality

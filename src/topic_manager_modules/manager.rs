@@ -228,8 +228,8 @@ impl TopicManager {
         topics.len()
     }
 
-    /// Get buffer registry (internal use)  
-    pub fn buffer_registry(&self) -> &Arc<BufferPoolRegistry> {
+    /// Get buffer registry (crate-internal use only)
+    pub(crate) fn buffer_registry(&self) -> &Arc<BufferPoolRegistry> {
         &self.buffer_registry
     }
 

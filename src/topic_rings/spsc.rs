@@ -207,6 +207,12 @@ impl SPSCTopicRing {
 
     /// Peek at the next message without consuming it
     /// Returns a copy of the message at the head of the queue without advancing the read position
+    ///
+    /// # Safety note
+    /// Messages are assumed not to wrap around the ring buffer boundary.
+    /// `try_publish` enforces that each message fits contiguously from its write
+    /// position (modulo capacity), so this is safe as long as messages are
+    /// smaller than capacity.
     pub fn try_peek(&self) -> Result<Option<Message>> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let cached_write = self.cached_write_pos.load(Ordering::Relaxed);
@@ -224,7 +230,13 @@ impl SPSCTopicRing {
 
         // Read message header first
         let buffer_pos = read_pos & (self.capacity - 1);
+
+        // Guard against wrap-around: if the header would span past the buffer
+        // end, the data is not contiguous and we cannot safely deserialize.
         let header = unsafe {
+            if buffer_pos + MessageHeader::SIZE > self.capacity {
+                return Ok(None); // Header wraps — skip
+            }
             let read_ptr = self.buffer.as_ptr().add(buffer_pos);
             self.deserialize_header(read_ptr)?
         };
@@ -238,6 +250,11 @@ impl SPSCTopicRing {
             .wrapping_sub(read_pos);
         if available < message_size {
             return Ok(None); // Incomplete message
+        }
+
+        // Ensure the message doesn't wrap around the buffer boundary
+        if buffer_pos + message_size > self.capacity {
+            return Ok(None); // Message wraps — cannot safely read contiguously
         }
 
         // Read the complete message (but don't advance read position)
