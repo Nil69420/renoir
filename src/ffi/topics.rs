@@ -30,6 +30,26 @@ use super::{
     utils::{c_str_to_string, string_to_c_str, HANDLE_REGISTRY},
 };
 
+/// If `ptr` points at a `BlobHeader`-prefixed payload, advance past the header
+/// and return `(payload_start, payload_len)`. Otherwise return `(ptr, len)` unchanged.
+///
+/// This is called on every received message so that callers see the original
+/// payload irrespective of whether the large_payloads path was used on publish.
+unsafe fn unwrap_blob_if_present(ptr: *const u8, len: usize) -> (*const u8, usize) {
+    use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC};
+    if len >= BlobHeader::SIZE {
+        let magic = std::ptr::read_unaligned(ptr as *const u64);
+        if magic == BLOB_MAGIC {
+            let header = &*(ptr as *const BlobHeader);
+            let payload_size = header.payload_size as usize;
+            if BlobHeader::SIZE + payload_size <= len {
+                return (ptr.add(BlobHeader::SIZE), payload_size);
+            }
+        }
+    }
+    (ptr, len)
+}
+
 // ============================================================================
 // Topic Manager API
 // ============================================================================
@@ -705,11 +725,14 @@ pub extern "C" fn renoir_subscribe_read_next(
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
-                // Fill in payload pointer and length based on message type
+                // Fill in payload pointer and length based on message type.
+                // unwrap_blob_if_present strips the BlobHeader transparently when
+                // the publish_large path was used for oversized payloads.
                 match &msg.payload {
                     MessagePayload::Inline(data) => {
-                        (*message).payload_ptr = data.as_ptr();
-                        (*message).payload_len = data.len();
+                        let (ptr, len) = unwrap_blob_if_present(data.as_ptr(), data.len());
+                        (*message).payload_ptr = ptr;
+                        (*message).payload_len = len;
                     }
                     MessagePayload::Descriptor(desc) => {
                         // Resolve descriptor to actual buffer data
@@ -722,9 +745,13 @@ pub extern "C" fn renoir_subscribe_read_next(
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
 
-                                    // Return pointer and size
-                                    (*message).payload_ptr = buffer.as_ptr();
-                                    (*message).payload_len = desc.payload_size as usize;
+                                    // Strip BlobHeader if present, return actual payload
+                                    let (ptr, len) = unwrap_blob_if_present(
+                                        buffer.as_ptr(),
+                                        desc.payload_size as usize,
+                                    );
+                                    (*message).payload_ptr = ptr;
+                                    (*message).payload_len = len;
                                 }
                                 Err(_) => {
                                     // Failed to resolve descriptor
@@ -804,11 +831,14 @@ pub extern "C" fn renoir_subscribe_peek(
             let mut descriptor_buffer_id: Option<usize> = None;
 
             unsafe {
-                // Fill in payload pointer and length based on message type
+                // Fill in payload pointer and length based on message type.
+                // unwrap_blob_if_present strips the BlobHeader transparently when
+                // the publish_large path was used for oversized payloads.
                 match &msg.payload {
                     MessagePayload::Inline(data) => {
-                        (*message).payload_ptr = data.as_ptr();
-                        (*message).payload_len = data.len();
+                        let (ptr, len) = unwrap_blob_if_present(data.as_ptr(), data.len());
+                        (*message).payload_ptr = ptr;
+                        (*message).payload_len = len;
                     }
                     MessagePayload::Descriptor(desc) => {
                         // Resolve descriptor to actual buffer data
@@ -821,9 +851,13 @@ pub extern "C" fn renoir_subscribe_peek(
                                     registry.descriptor_buffers.insert(buf_id, buffer.clone());
                                     descriptor_buffer_id = Some(buf_id);
 
-                                    // Return pointer and size
-                                    (*message).payload_ptr = buffer.as_ptr();
-                                    (*message).payload_len = desc.payload_size as usize;
+                                    // Strip BlobHeader if present, return actual payload
+                                    let (ptr, len) = unwrap_blob_if_present(
+                                        buffer.as_ptr(),
+                                        desc.payload_size as usize,
+                                    );
+                                    (*message).payload_ptr = ptr;
+                                    (*message).payload_len = len;
                                 }
                                 Err(_) => {
                                     // Failed to resolve descriptor

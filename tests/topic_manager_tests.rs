@@ -275,6 +275,8 @@ mod tests {
         let config = TopicConfig {
             name: "size_test_topic".to_string(),
             max_payload_size: 100,
+            use_shared_pool: true,
+            shared_pool_threshold: 0, // all large blobs go to pool
             ..Default::default()
         };
 
@@ -285,9 +287,10 @@ mod tests {
         let normal_payload = vec![0u8; 50];
         assert!(publisher.publish(normal_payload).is_ok());
 
-        // Oversized payload should fail
+        // Oversized payloads are automatically routed through publish_large
+        // (BlobHeader wrapping + shared pool) rather than returned as errors.
         let oversized_payload = vec![0u8; 150];
-        assert!(publisher.publish(oversized_payload).is_err());
+        assert!(publisher.publish(oversized_payload).is_ok());
     }
 
     #[test]
