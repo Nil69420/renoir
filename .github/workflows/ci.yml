@@ -207,9 +207,9 @@ jobs:
         arguments: --all-features
       continue-on-error: true
 
-  # Job 6: Performance Benchmarks
+  # Job 6: Performance Benchmarks + Profiling (perf, flamegraph)
   benchmark:
-    name: Performance Benchmarks
+    name: Performance Benchmarks & Profiling
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     
@@ -229,26 +229,68 @@ jobs:
           target
         key: ${{ runner.os }}-bench-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Run benchmarks
+    - name: Install profiling tools
       run: |
-        # Run performance-critical tests in release mode for benchmarking
-        timeout 300 cargo test --release --test cpu_performance_tests -- --nocapture || true
-        timeout 300 cargo test --release --test memory_performance_tests -- --nocapture || true
+        sudo apt-get update
+        sudo apt-get install -y linux-tools-common linux-tools-generic gdb
+        cargo install flamegraph cargo-criterion
+
+    # ── Criterion benchmarks ──
+    - name: Run criterion benchmarks
+      run: |
+        timeout 600 cargo criterion --message-format=json > criterion_out.json 2>&1 || true
+        echo '### Criterion Benchmark Results' >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        cargo bench 2>&1 | tail -80 >> $GITHUB_STEP_SUMMARY || true
+        echo '```' >> $GITHUB_STEP_SUMMARY
       continue-on-error: true
 
-    - name: Install criterion (if benchmarks exist)
+    # ── perf stat on release tests ──
+    - name: Perf stat (CPU counters)
       run: |
-        if [ -d "benches" ]; then
-          cargo install cargo-criterion
-          cargo criterion || true
-        fi
+        cargo build --release --tests
+        echo '### perf stat — CPU Performance Counters' >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
+        # perf stat needs /proc/sys/kernel/perf_event_paranoid <= 1 in CI;
+        # fall back gracefully if unavailable.
+        sudo sysctl -w kernel.perf_event_paranoid=1 2>/dev/null || true
+        perf stat -e cache-misses,cache-references,instructions,cycles,branch-misses \
+          cargo test --release --test cpu_performance_tests -- --nocapture 2>&1 \
+          | tail -30 >> $GITHUB_STEP_SUMMARY || echo 'perf stat unavailable in this runner' >> $GITHUB_STEP_SUMMARY
+        echo '```' >> $GITHUB_STEP_SUMMARY
       continue-on-error: true
 
-  # Job 7: Documentation and Release
+    # ── Flamegraph generation ──
+    - name: Generate flamegraph
+      run: |
+        sudo sysctl -w kernel.perf_event_paranoid=1 2>/dev/null || true
+        # Build bench binary, then flamegraph the allocator benchmark (~60s)
+        cargo flamegraph --bench allocator_bench -o flamegraph_allocator.svg -- --bench 2>&1 || true
+        cargo flamegraph --bench ringbuf_bench   -o flamegraph_ringbuf.svg   -- --bench 2>&1 || true
+      continue-on-error: true
+
+    - name: Upload profiling artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: profiling-results
+        path: |
+          flamegraph_*.svg
+          criterion_out.json
+          target/criterion/
+        retention-days: 30
+      if: always()
+
+  # Job 7: Rustdoc → GitHub Pages
   docs:
-    name: Documentation & Release
+    name: Documentation (Rustdoc)
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     
     steps:
     - name: Checkout code
@@ -266,18 +308,19 @@ jobs:
           target
         key: ${{ runner.os }}-docs-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Build documentation
+    - name: Build rustdoc
       run: |
         cargo doc --all-features --no-deps --document-private-items
         echo '<meta http-equiv="refresh" content="0; url=renoir">' > target/doc/index.html
 
-    - name: Deploy documentation to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      if: github.ref == 'refs/heads/main'
+    - name: Upload Pages artifact
+      uses: actions/upload-pages-artifact@v3
       with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./target/doc
-        destination_dir: docs
+        path: target/doc
+
+    - name: Deploy to GitHub Pages
+      id: deploy
+      uses: actions/deploy-pages@v4
 
   # Job 8: Test Results Summary
   test_results:

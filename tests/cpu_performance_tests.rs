@@ -82,19 +82,14 @@ mod cpu_performance_tests {
         let consumed_counter = consumed_count.clone();
 
         let consumer = thread::spawn(move || {
-            let mut operations = 0;
-            let max_operations = 1000; // Limit operations to prevent infinite loop
-
-            while !stop_cons.load(Ordering::Relaxed) && operations < max_operations {
+            while !stop_cons.load(Ordering::Relaxed) {
                 match ring_cons.try_consume() {
                     Ok(Some(_message)) => {
                         consumed_counter.fetch_add(1, Ordering::Relaxed);
-                        operations += 1;
                     }
                     Ok(None) => {
                         // No message available
                         thread::yield_now();
-                        operations += 1; // Count no-op as operation to prevent infinite loops
                     }
                     Err(_) => break,
                 }

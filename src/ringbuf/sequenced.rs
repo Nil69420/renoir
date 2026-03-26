@@ -53,13 +53,11 @@ impl<T> SequencedRingBuffer<T> {
             NonNull::new(ptr).ok_or_else(|| RenoirError::memory("Failed to allocate sequences"))?
         };
 
-        // Initialize sequences - each slot is available for writing sequence i
-        // For a capacity-4 buffer, slot 0 can hold sequences 0, 4, 8...
-        // So we initialize to capacity offset before (i.e., -4 wrapped)
+        // Initialize sequences — slot i is ready for write-sequence i.
+        // Standard Disruptor initialisation: slot[i] = i.
         unsafe {
             for i in 0..capacity {
-                let init_seq = i.wrapping_sub(capacity);
-                std::ptr::write(sequences.as_ptr().add(i), AtomicUsize::new(init_seq));
+                std::ptr::write(sequences.as_ptr().add(i), AtomicUsize::new(i));
             }
         }
 
@@ -74,52 +72,83 @@ impl<T> SequencedRingBuffer<T> {
         })
     }
 
-    /// Try to claim a slot for writing
+    /// Try to claim a slot for writing (non-blocking)
+    ///
+    /// Returns `Err` if the buffer is full (the target slot hasn't been consumed yet).
+    /// Uses CAS to avoid advancing `producer_seq` unless the slot is actually available.
     pub fn try_claim(&self) -> Result<ClaimGuard<'_, T>> {
-        let seq = self.producer_seq.fetch_add(1, Ordering::Relaxed);
-        let index = seq & self.mask;
+        let mut seq = self.producer_seq.load(Ordering::Relaxed);
 
-        // Wait for the slot to be available
-        let expected_seq = seq.wrapping_sub(self.capacity);
-        let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
+        loop {
+            let index = seq & self.mask;
+            let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
 
-        // Spin until slot is available
-        while slot_seq.load(Ordering::Acquire) != expected_seq {
-            if slot_seq.load(Ordering::Acquire) == expected_seq {
-                break;
+            // Slot is available for writing when its sequence equals the
+            // producer sequence we're trying to claim.
+            let current = slot_seq.load(Ordering::Acquire);
+            if current != seq {
+                return Err(RenoirError::buffer_full("SequencedRingBuffer"));
             }
-            std::hint::spin_loop();
-        }
 
-        Ok(ClaimGuard {
-            buffer: self.buffer,
-            sequences: self.sequences,
-            index,
-            sequence: seq,
-            _phantom: PhantomData,
-        })
+            // Try to claim this sequence number
+            match self.producer_seq.compare_exchange_weak(
+                seq,
+                seq.wrapping_add(1),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    return Ok(ClaimGuard {
+                        buffer: self.buffer,
+                        sequences: self.sequences,
+                        index,
+                        sequence: seq,
+                        _phantom: PhantomData,
+                    });
+                }
+                Err(actual) => {
+                    // Another producer claimed this seq; retry with the updated value
+                    seq = actual;
+                }
+            }
+        }
     }
 
-    /// Try to read the next item
+    /// Try to read the next item (non-blocking)
+    ///
+    /// Uses CAS on `consumer_seq` so multiple consumers don't read the same slot.
     pub fn try_read(&self) -> Result<T> {
-        let seq = self.consumer_seq.load(Ordering::Relaxed);
-        let index = seq & self.mask;
+        let mut seq = self.consumer_seq.load(Ordering::Relaxed);
 
-        let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
-        let expected_seq = seq + 1;
+        loop {
+            let index = seq & self.mask;
+            let slot_seq = unsafe { &*self.sequences.as_ptr().add(index) };
 
-        // Check if data is available
-        if slot_seq.load(Ordering::Acquire) != expected_seq {
-            return Err(RenoirError::buffer_empty("SequencedRingBuffer"));
+            // Slot is readable when its sequence equals seq + 1
+            // (the writer stores seq + 1 after writing).
+            let current = slot_seq.load(Ordering::Acquire);
+            if current != seq.wrapping_add(1) {
+                return Err(RenoirError::buffer_empty("SequencedRingBuffer"));
+            }
+
+            // Try to claim this read slot
+            match self.consumer_seq.compare_exchange_weak(
+                seq,
+                seq.wrapping_add(1),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    let item = unsafe { std::ptr::read(self.buffer.as_ptr().add(index)) };
+                    // Mark slot as consumed — available for the NEXT write at (seq + capacity)
+                    slot_seq.store(seq.wrapping_add(self.capacity), Ordering::Release);
+                    return Ok(item);
+                }
+                Err(actual) => {
+                    seq = actual;
+                }
+            }
         }
-
-        let item = unsafe { std::ptr::read(self.buffer.as_ptr().add(index)) };
-
-        // Mark slot as consumed
-        slot_seq.store(seq.wrapping_add(self.capacity), Ordering::Release);
-        self.consumer_seq.store(seq + 1, Ordering::Release);
-
-        Ok(item)
     }
 
     /// Get buffer capacity
