@@ -16,7 +16,7 @@ use crate::{
     error::{RenoirError, Result},
     memory::SharedMemoryRegion,
     shared_pools::BufferPoolRegistry,
-    topic::{Message, TopicConfig, TopicPattern, TopicStats},
+    topic::{Message, MessagePayload, TopicConfig, TopicPattern, TopicStats},
     topic_rings::{MPMCTopicRing, SPSCTopicRing},
 };
 
@@ -175,10 +175,19 @@ impl TopicInstance {
                 Message::new_inline(self.topic_id, sequence, payload)
             };
 
-        match &self.ring {
+        let result = match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_publish(&message),
             TopicRingType::MPMC(ring) => ring.try_publish(&message),
+        };
+
+        // Return pool buffer on ring-full to prevent leak
+        if result.is_err() {
+            if let MessagePayload::Descriptor(ref desc) = message.payload {
+                let _ = self.buffer_registry.return_buffer(desc);
+            }
         }
+
+        result
     }
 
     /// Publish a large payload by wrapping it with a BlobHeader.
@@ -218,10 +227,19 @@ impl TopicInstance {
             Message::new_inline(self.topic_id, sequence, blob_data)
         };
 
-        match &self.ring {
+        let result = match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_publish(&message),
             TopicRingType::MPMC(ring) => ring.try_publish(&message),
+        };
+
+        // Return pool buffer on ring-full to prevent leak
+        if result.is_err() {
+            if let MessagePayload::Descriptor(ref desc) = message.payload {
+                let _ = self.buffer_registry.return_buffer(desc);
+            }
         }
+
+        result
     }
 
     /// Subscribe to messages from this topic
