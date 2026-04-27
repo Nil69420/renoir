@@ -429,24 +429,20 @@ impl SchemaMigrationExecutor {
             MigrationStep::AssignDefaultValue {
                 field_name,
                 default_value: _,
-            } => {
-                if !to_schema.fields.contains_key(field_name) {
-                    return Err(RenoirError::invalid_parameter(
-                        "field_name",
-                        format!("Field '{}' not found in target schema", field_name),
-                    ));
-                }
+            } if !to_schema.fields.contains_key(field_name) => {
+                return Err(RenoirError::invalid_parameter(
+                    "field_name",
+                    format!("Field '{}' not found in target schema", field_name),
+                ));
             }
             MigrationStep::CustomTransform {
                 function_name,
                 parameters: _,
-            } => {
-                if !self.migration_functions.contains_key(function_name) {
-                    return Err(RenoirError::invalid_parameter(
-                        "function_name",
-                        format!("Migration function '{}' not registered", function_name),
-                    ));
-                }
+            } if !self.migration_functions.contains_key(function_name) => {
+                return Err(RenoirError::invalid_parameter(
+                    "function_name",
+                    format!("Migration function '{}' not registered", function_name),
+                ));
             }
             _ => {} // Other steps are always valid
         }
