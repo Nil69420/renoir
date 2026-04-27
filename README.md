@@ -143,6 +143,16 @@ cargo build --release
 cargo test
 ```
 
+Recommended pre-push validation:
+
+```sh
+./build.sh
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+```
+
+This sequence verifies FFI/header generation, compile integrity, lint policy, and runtime behavior before distribution.
+
 The C header is generated at `target/include/renoir.h` during build.
 
 ### Feature Flags
@@ -164,25 +174,21 @@ cargo build --release --target armv7-unknown-linux-gnueabihf # ARMv7 (RPi 3)
 
 ## Architecture
 
-```
-src/
-  ffi/               C API -- topics, memory, buffers, types, version
-  memory/            Shared memory regions (file-backed, memfd, mlock)
-  allocators/        Sharded pool allocator, bump allocator with watermark
-  buffers/           Buffer pools with condvar-based wakeup
-  ringbuf/           Lock-free SPSC and sequenced ring buffers
-  sync/              SWMR, epoch reclamation, eventfd/mio notifications
-  topic/             Topic config, headers, stats
-  topic_manager_modules/  Publisher/subscriber lifecycle
-  topic_rings/       SPSC and MPMC ring implementations
-  shared_pools/      Cross-process buffer pool registry
-  message_formats/   FlatBuffers, schema evolution
-  large_payloads/    Chunking and reclamation
-  structured_layout/ Type-safe structured memory access
-  metadata_modules/  Control regions, sequence tracking
-examples/            C++ example programs
-tests/               Integration tests (19 files, 180+ tests)
-```
+Renoir is organized as layered modules with explicit ownership boundaries:
+
+| Layer | Purpose | Key paths |
+|------|---------|-----------|
+| C ABI boundary | Stable handle-based API for C/C++ and ROS2 integrations | `src/ffi/` |
+| Topic lifecycle | Publisher/subscriber creation, routing, and metadata orchestration | `src/topic_manager_modules/`, `src/topic/` |
+| Ring and pool core | Lock-free ring transport and shared buffer pool management | `src/topic_rings/`, `src/ringbuf/`, `src/shared_pools/`, `src/buffers/` |
+| Memory and synchronization | Region allocation and cross-thread/process synchronization primitives | `src/memory/`, `src/sync/`, `src/allocators/` |
+| Message and compatibility | Payload formats, layout evolution, and large-message handling | `src/message_formats/`, `src/structured_layout/`, `src/large_payloads/` |
+
+Operational characteristics:
+
+- Message handles define ownership and must be released explicitly at the FFI boundary.
+- Descriptor and payload paths validate pointer/length invariants before user-visible handoff.
+- Ring publish/consume paths are hardened for wraparound behavior and high-throughput contention.
 
 ## Requirements
 

@@ -1329,8 +1329,6 @@ mod tests {
             assert_eq!(len, small.len());
         }
     }
-<<<<<<< HEAD
-
     #[test]
     fn test_unwrap_blob_passthrough_wrong_version() {
         use crate::large_payloads::blob::{BlobHeader, BLOB_MAGIC};
@@ -1374,6 +1372,4 @@ mod tests {
             assert_eq!(len, buf.len());
         }
     }
-=======
->>>>>>> origin/main
 }
