@@ -129,7 +129,9 @@ impl SPSCTopicRing {
 
         // Serialize and write the message
         let write_pos = self.write_pos.load(Ordering::Relaxed);
-        unsafe { self.serialize_message(message, write_pos)?; }
+        unsafe {
+            self.serialize_message(message, write_pos)?;
+        }
 
         // Update write position
         let new_write_pos = write_pos.wrapping_add(message_size);
