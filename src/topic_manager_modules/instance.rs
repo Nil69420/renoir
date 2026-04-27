@@ -169,6 +169,8 @@ impl TopicInstance {
                     );
                 }
 
+                drop(buffer_data);
+
                 Message::new_descriptor(self.topic_id, sequence, descriptor)
             } else {
                 // Store inline in ring buffer
@@ -222,6 +224,9 @@ impl TopicInstance {
                     blob_data.len(),
                 );
             }
+
+            drop(buffer_data);
+
             Message::new_descriptor(self.topic_id, sequence, descriptor)
         } else {
             Message::new_inline(self.topic_id, sequence, blob_data)

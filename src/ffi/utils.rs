@@ -11,6 +11,7 @@ use crate::{
     allocators::Allocator,
     buffers::{Buffer, BufferPool},
     shared_pools::BufferPoolRegistry,
+    topic::MessagePayload,
     topic_manager_modules::{Publisher, Subscriber, TopicManager},
     SharedMemoryManager,
 };
@@ -188,11 +189,24 @@ impl HandleRegistry {
     }
 
     pub fn remove_message(&mut self, id: usize) -> bool {
-        // Clean up associated descriptor buffer if any
         if let Some(buf_id) = self.message_to_descriptor_buffer.remove(&id) {
             self.descriptor_buffers.remove(&buf_id);
         }
-        self.received_messages.remove(&id).is_some()
+
+        let message = match self.received_messages.remove(&id) {
+            Some(message) => message,
+            None => return false,
+        };
+
+        if let MessagePayload::Descriptor(ref desc) = message.payload {
+            for registry in self.buffer_registries.values() {
+                if registry.return_buffer(desc).is_ok() {
+                    break;
+                }
+            }
+        }
+
+        true
     }
 
     pub fn associate_descriptor_buffer(&mut self, message_id: usize, buffer_id: usize) {

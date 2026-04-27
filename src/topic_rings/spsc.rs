@@ -109,36 +109,27 @@ impl SPSCTopicRing {
     /// Get available space for writing (bytes)
     pub fn available_write_space(&self) -> usize {
         let write_pos = self.write_pos.load(Ordering::Relaxed);
-        let cached_read = self.cached_read_pos.load(Ordering::Relaxed);
+        let fresh_read = self.read_pos.load(Ordering::Acquire);
+        self.cached_read_pos.store(fresh_read, Ordering::Relaxed);
 
-        // If we don't have enough space, refresh the cached read position
-        if write_pos.wrapping_sub(cached_read) >= self.capacity {
-            let fresh_read = self.read_pos.load(Ordering::Acquire);
-            self.cached_read_pos.store(fresh_read, Ordering::Relaxed);
-            self.capacity - write_pos.wrapping_sub(fresh_read)
-        } else {
-            self.capacity - write_pos.wrapping_sub(cached_read)
-        }
+        let used = write_pos.wrapping_sub(fresh_read);
+        self.capacity.saturating_sub(used)
     }
 
     /// Try to publish a message (producer side)
     pub fn try_publish(&self, message: &Message) -> Result<()> {
         let message_size = message.total_size();
+        let avail = self.available_write_space();
 
         // Check if we have enough space
-        if self.available_write_space() < message_size {
+        if avail < message_size {
             self.stats.record_dropped();
             return Err(RenoirError::buffer_full("Topic ring is full"));
         }
 
         // Serialize and write the message
         let write_pos = self.write_pos.load(Ordering::Relaxed);
-        let buffer_pos = write_pos & (self.capacity - 1);
-
-        unsafe {
-            let write_ptr = self.buffer.as_ptr().add(buffer_pos);
-            self.serialize_message(message, write_ptr, message_size)?;
-        }
+        unsafe { self.serialize_message(message, write_pos)?; }
 
         // Update write position
         let new_write_pos = write_pos.wrapping_add(message_size);
@@ -159,41 +150,32 @@ impl SPSCTopicRing {
     pub fn try_consume(&self) -> Result<Option<Message>> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let cached_write = self.cached_write_pos.load(Ordering::Relaxed);
+        let mut available = cached_write.wrapping_sub(read_pos);
 
-        // Check if there's data available
-        if read_pos == cached_write {
-            // Refresh cached write position
+        if available < MessageHeader::SIZE {
             let fresh_write = self.write_pos.load(Ordering::Acquire);
             self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
+            available = fresh_write.wrapping_sub(read_pos);
 
-            if read_pos == fresh_write {
-                return Ok(None); // No data available
+            if available < MessageHeader::SIZE {
+                return Ok(None);
             }
         }
 
-        // Read message header first
-        let buffer_pos = read_pos & (self.capacity - 1);
-        let header = unsafe {
-            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
-            self.deserialize_header(read_ptr)?
-        };
+        let header = unsafe { self.deserialize_header(read_pos)? };
 
         let message_size = MessageHeader::SIZE + header.payload_length as usize;
 
-        // Check if we have the complete message
-        let available = self
-            .cached_write_pos
-            .load(Ordering::Relaxed)
-            .wrapping_sub(read_pos);
         if available < message_size {
-            return Ok(None); // Incomplete message
+            let fresh_write = self.write_pos.load(Ordering::Acquire);
+            self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
+            available = fresh_write.wrapping_sub(read_pos);
+            if available < message_size {
+                return Ok(None);
+            }
         }
 
-        // Read the complete message
-        let message = unsafe {
-            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
-            self.deserialize_message(&header, read_ptr)?
-        };
+        let message = unsafe { self.deserialize_message(&header, read_pos)? };
 
         // Update read position
         self.read_pos
@@ -216,52 +198,32 @@ impl SPSCTopicRing {
     pub fn try_peek(&self) -> Result<Option<Message>> {
         let read_pos = self.read_pos.load(Ordering::Relaxed);
         let cached_write = self.cached_write_pos.load(Ordering::Relaxed);
+        let mut available = cached_write.wrapping_sub(read_pos);
 
-        // Check if there's data available
-        if read_pos == cached_write {
-            // Refresh cached write position
+        if available < MessageHeader::SIZE {
             let fresh_write = self.write_pos.load(Ordering::Acquire);
             self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
+            available = fresh_write.wrapping_sub(read_pos);
 
-            if read_pos == fresh_write {
-                return Ok(None); // No data available
+            if available < MessageHeader::SIZE {
+                return Ok(None);
             }
         }
 
-        // Read message header first
-        let buffer_pos = read_pos & (self.capacity - 1);
-
-        // Guard against wrap-around: if the header would span past the buffer
-        // end, the data is not contiguous and we cannot safely deserialize.
-        let header = unsafe {
-            if buffer_pos + MessageHeader::SIZE > self.capacity {
-                return Ok(None); // Header wraps — skip
-            }
-            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
-            self.deserialize_header(read_ptr)?
-        };
+        let header = unsafe { self.deserialize_header(read_pos)? };
 
         let message_size = MessageHeader::SIZE + header.payload_length as usize;
 
-        // Check if we have the complete message
-        let available = self
-            .cached_write_pos
-            .load(Ordering::Relaxed)
-            .wrapping_sub(read_pos);
         if available < message_size {
-            return Ok(None); // Incomplete message
+            let fresh_write = self.write_pos.load(Ordering::Acquire);
+            self.cached_write_pos.store(fresh_write, Ordering::Relaxed);
+            available = fresh_write.wrapping_sub(read_pos);
+            if available < message_size {
+                return Ok(None);
+            }
         }
 
-        // Ensure the message doesn't wrap around the buffer boundary
-        if buffer_pos + message_size > self.capacity {
-            return Ok(None); // Message wraps — cannot safely read contiguously
-        }
-
-        // Read the complete message (but don't advance read position)
-        let message = unsafe {
-            let read_ptr = self.buffer.as_ptr().add(buffer_pos);
-            self.deserialize_message(&header, read_ptr)?
-        };
+        let message = unsafe { self.deserialize_message(&header, read_pos)? };
 
         // Note: read_pos is NOT updated - this is the key difference from try_consume
         Ok(Some(message))
@@ -279,29 +241,42 @@ impl SPSCTopicRing {
         self.try_consume()
     }
 
-    unsafe fn serialize_message(
-        &self,
-        message: &Message,
-        ptr: *mut u8,
-        _size: usize,
-    ) -> Result<()> {
-        // Write header
-        std::ptr::copy_nonoverlapping(
+    unsafe fn copy_into_ring(&self, abs_pos: usize, src: *const u8, len: usize) {
+        let start = abs_pos & (self.capacity - 1);
+        let first = usize::min(len, self.capacity - start);
+
+        std::ptr::copy_nonoverlapping(src, self.buffer.as_ptr().add(start), first);
+        if len > first {
+            std::ptr::copy_nonoverlapping(src.add(first), self.buffer.as_ptr(), len - first);
+        }
+    }
+
+    unsafe fn copy_from_ring(&self, abs_pos: usize, dst: *mut u8, len: usize) {
+        let start = abs_pos & (self.capacity - 1);
+        let first = usize::min(len, self.capacity - start);
+
+        std::ptr::copy_nonoverlapping(self.buffer.as_ptr().add(start), dst, first);
+        if len > first {
+            std::ptr::copy_nonoverlapping(self.buffer.as_ptr(), dst.add(first), len - first);
+        }
+    }
+
+    unsafe fn serialize_message(&self, message: &Message, write_pos: usize) -> Result<()> {
+        self.copy_into_ring(
+            write_pos,
             &message.header as *const MessageHeader as *const u8,
-            ptr,
             MessageHeader::SIZE,
         );
 
-        // Write payload
-        let payload_ptr = ptr.add(MessageHeader::SIZE);
+        let payload_pos = write_pos.wrapping_add(MessageHeader::SIZE);
         match &message.payload {
             crate::topic::MessagePayload::Inline(data) => {
-                std::ptr::copy_nonoverlapping(data.as_ptr(), payload_ptr, data.len());
+                self.copy_into_ring(payload_pos, data.as_ptr(), data.len());
             }
             crate::topic::MessagePayload::Descriptor(desc) => {
-                std::ptr::copy_nonoverlapping(
+                self.copy_into_ring(
+                    payload_pos,
                     desc as *const MessageDescriptor as *const u8,
-                    payload_ptr,
                     std::mem::size_of::<MessageDescriptor>(),
                 );
             }
@@ -310,8 +285,10 @@ impl SPSCTopicRing {
         Ok(())
     }
 
-    unsafe fn deserialize_header(&self, ptr: *const u8) -> Result<MessageHeader> {
-        let header: MessageHeader = std::ptr::read_unaligned(ptr as *const MessageHeader);
+    unsafe fn deserialize_header(&self, read_pos: usize) -> Result<MessageHeader> {
+        let mut header_bytes = [0u8; MessageHeader::SIZE];
+        self.copy_from_ring(read_pos, header_bytes.as_mut_ptr(), MessageHeader::SIZE);
+        let header: MessageHeader = std::ptr::read_unaligned(header_bytes.as_ptr() as *const _);
         header.validate()?;
         Ok(header)
     }
@@ -319,23 +296,19 @@ impl SPSCTopicRing {
     unsafe fn deserialize_message(
         &self,
         header: &MessageHeader,
-        ptr: *const u8,
+        read_pos: usize,
     ) -> Result<Message> {
-        let payload_ptr = ptr.add(MessageHeader::SIZE);
+        let payload_pos = read_pos.wrapping_add(MessageHeader::SIZE);
 
         let payload = if header.payload_length <= std::mem::size_of::<MessageDescriptor>() as u32 {
-            // This might be a descriptor
+            let mut desc_bytes = [0u8; std::mem::size_of::<MessageDescriptor>()];
+            self.copy_from_ring(payload_pos, desc_bytes.as_mut_ptr(), desc_bytes.len());
             let desc: MessageDescriptor =
-                std::ptr::read_unaligned(payload_ptr as *const MessageDescriptor);
+                std::ptr::read_unaligned(desc_bytes.as_ptr() as *const MessageDescriptor);
             crate::topic::MessagePayload::Descriptor(desc)
         } else {
-            // Inline payload
             let mut data = vec![0u8; header.payload_length as usize];
-            std::ptr::copy_nonoverlapping(
-                payload_ptr,
-                data.as_mut_ptr(),
-                header.payload_length as usize,
-            );
+            self.copy_from_ring(payload_pos, data.as_mut_ptr(), data.len());
             crate::topic::MessagePayload::Inline(data)
         };
 

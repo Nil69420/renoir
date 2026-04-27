@@ -107,14 +107,20 @@ impl SharedBufferPool {
 
         let buffer = {
             let mut buffers = self.buffers.write();
-            buffers.remove(&descriptor.buffer_handle).ok_or_else(|| {
+            let buffer = buffers.remove(&descriptor.buffer_handle).ok_or_else(|| {
                 RenoirError::invalid_parameter("buffer_handle", "Buffer handle not found")
-            })?
+            })?;
+
+            match Arc::try_unwrap(buffer) {
+                Ok(owned) => owned,
+                Err(shared) => {
+                    buffers.insert(descriptor.buffer_handle, shared);
+                    return Ok(());
+                }
+            }
         };
 
-        // Return to underlying pool
-        self.buffer_pool
-            .return_buffer(Arc::try_unwrap(buffer).unwrap())?;
+        self.buffer_pool.return_buffer(buffer)?;
 
         self.active_count.fetch_sub(1, Ordering::Relaxed);
 
