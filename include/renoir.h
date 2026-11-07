@@ -49,6 +49,8 @@
 
 #define BROADCAST_RING_MAGIC 4774731856095628871
 
+#define BROADCAST_HEADER_PROBE_BYTES HEADER_BYTES
+
 /**
  * Magic number identifying an MPMC ring control block in shared memory
  */

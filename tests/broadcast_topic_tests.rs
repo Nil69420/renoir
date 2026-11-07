@@ -117,6 +117,36 @@ fn test_spmc_rejects_shared_pool_and_oversize_payloads() {
 }
 
 #[test]
+fn test_spmc_region_header_is_readable_for_introspection() {
+    use std::io::Read;
+    let name = unique("bcast_info");
+    let manager = TopicManager::new().unwrap();
+    manager.create_topic(config(&name, 64, 256)).unwrap();
+    let publisher = manager.create_publisher(&name).unwrap();
+    for _ in 0..3 {
+        publisher.publish(vec![1u8; 16]).unwrap();
+    }
+    let prefix = format!("renoir_topic_{}_", name);
+    let path = std::fs::read_dir("/tmp")
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        .expect("region file not found")
+        .path();
+    let mut head = [0u8; renoir::topic_rings::BROADCAST_HEADER_PROBE_BYTES];
+    std::fs::File::open(path)
+        .unwrap()
+        .read_exact(&mut head)
+        .unwrap();
+    let info = renoir::topic_rings::BroadcastTopicRing::read_control_info(&head).unwrap();
+    assert_eq!(info.published, 3);
+    assert_eq!(info.payload_capacity, 256);
+    assert!(info.slot_count >= 2);
+    assert_eq!(info.waiters, 0);
+    assert_eq!(info.session, 1);
+}
+
+#[test]
 fn test_spmc_second_publisher_rejected() {
     let name = unique("bcast_onepub");
     let manager = TopicManager::new().unwrap();

@@ -26,6 +26,9 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   `renoir_subscribe_read_next` no longer polls on SPMC topics. Publishers skip
   the wake syscall when no subscriber is waiting.
 
+- `renoir-cli topics` lists SPMC rings (slots, payload size, published count,
+  waiters) by reading only the ring header.
+
 ### Changed
 - Breaking: SPMC topics use a new ring layout (`BROADCAST_RING_MAGIC`).
   Previously SPMC aliased the SPSC ring, whose single read cursor was

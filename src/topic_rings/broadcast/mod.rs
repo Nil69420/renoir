@@ -339,6 +339,42 @@ impl BroadcastTopicRing {
     }
 }
 
+pub const BROADCAST_HEADER_PROBE_BYTES: usize = HEADER_BYTES;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BroadcastControlInfo {
+    pub slot_count: u64,
+    pub payload_capacity: u64,
+    pub published: u64,
+    pub waiters: u32,
+    pub session: u8,
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
+    let raw: [u8; 8] = bytes.get(offset..offset + 8)?.try_into().ok()?;
+    Some(u64::from_ne_bytes(raw))
+}
+
+fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let raw: [u8; 4] = bytes.get(offset..offset + 4)?.try_into().ok()?;
+    Some(u32::from_ne_bytes(raw))
+}
+
+impl BroadcastTopicRing {
+    pub fn read_control_info(memory: &[u8]) -> Option<BroadcastControlInfo> {
+        if read_u64(memory, std::mem::offset_of!(BroadcastHeader, magic))? != BROADCAST_RING_MAGIC {
+            return None;
+        }
+        Some(BroadcastControlInfo {
+            slot_count: read_u64(memory, std::mem::offset_of!(BroadcastHeader, slot_count))?,
+            payload_capacity: read_u64(memory, std::mem::offset_of!(BroadcastHeader, payload_cap))?,
+            published: read_u64(memory, std::mem::offset_of!(BroadcastHeader, write_idx))?,
+            waiters: read_u32(memory, std::mem::offset_of!(BroadcastHeader, waiters))?,
+            session: *memory.get(std::mem::offset_of!(BroadcastHeader, session))?,
+        })
+    }
+}
+
 fn now_ns() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

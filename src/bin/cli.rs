@@ -959,6 +959,11 @@ fn handle_topics_commands(matches: &clap::ArgMatches) -> Result<()> {
     Ok(())
 }
 
+struct BroadcastRow {
+    name: String,
+    info: renoir::topic_rings::BroadcastControlInfo,
+}
+
 struct TopicRow {
     name: String,
     ring_type: &'static str,
@@ -971,6 +976,7 @@ fn print_topics_table() -> Result<()> {
         .map_err(|e| renoir::error::RenoirError::from_io(e, "Failed to read /tmp"))?;
 
     let mut rows: Vec<TopicRow> = Vec::new();
+    let mut broadcast_rows: Vec<BroadcastRow> = Vec::new();
 
     for entry in entries.flatten() {
         let file_name = entry.file_name();
@@ -980,6 +986,15 @@ fn print_topics_table() -> Result<()> {
         }
 
         let path = entry.path();
+
+        if let Some(info) = probe_broadcast(&path) {
+            broadcast_rows.push(BroadcastRow {
+                name: name.to_string(),
+                info,
+            });
+            continue;
+        }
+
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
             Err(_) => continue,
@@ -1005,8 +1020,36 @@ fn print_topics_table() -> Result<()> {
         }
     }
 
-    if rows.is_empty() {
+    if rows.is_empty() && broadcast_rows.is_empty() {
         println!("No topic rings found (no /tmp/renoir_topic_* regions)");
+        return Ok(());
+    }
+
+    if !broadcast_rows.is_empty() {
+        println!(
+            "{:<45} {:<5} {:>8} {:>12} {:>12} {:>8} {:>8}",
+            "Topic", "Type", "Slots", "MaxPayload", "Published", "Waiters", "Session"
+        );
+        for row in &broadcast_rows {
+            println!(
+                "{:<45} {:<5} {:>8} {:>12} {:>12} {:>8} {:>8}",
+                row.name,
+                "SPMC",
+                row.info.slot_count,
+                row.info.payload_capacity,
+                row.info.published,
+                row.info.waiters,
+                if row.info.session == 0 {
+                    "clean"
+                } else {
+                    "live"
+                },
+            );
+        }
+        println!();
+    }
+
+    if rows.is_empty() {
         return Ok(());
     }
 
@@ -1031,6 +1074,14 @@ fn print_topics_table() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn probe_broadcast(path: &std::path::Path) -> Option<renoir::topic_rings::BroadcastControlInfo> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; renoir::topic_rings::BROADCAST_HEADER_PROBE_BYTES];
+    file.read_exact(&mut head).ok()?;
+    renoir::topic_rings::BroadcastTopicRing::read_control_info(&head)
 }
 
 /// Current wall-clock time in nanoseconds since the UNIX epoch

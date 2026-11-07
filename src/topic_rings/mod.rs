@@ -11,7 +11,8 @@ pub mod spsc;
 
 // Re-export main types
 pub use broadcast::{
-    BroadcastCursor, BroadcastReservation, BroadcastTopicRing, ReadInto, BROADCAST_RING_MAGIC,
+    BroadcastControlInfo, BroadcastCursor, BroadcastReservation, BroadcastTopicRing, ReadInto,
+    BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
 };
 pub use mpmc::{MPMCTopicRing, MPMC_RING_MAGIC};
 pub use spsc::{
