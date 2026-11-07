@@ -1,0 +1,12 @@
+[package]
+name = "renoir-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "renoir_python"
+crate-type = ["cdylib"]
+
+[dependencies]
+renoir = { path = ".." }
+pyo3 = { version = "0.29", features = ["extension-module"] }
