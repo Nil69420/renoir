@@ -188,7 +188,7 @@ fn test_from_memory_rejects_undersized_and_too_few_slots() {
 
 #[test]
 fn test_broadcast_concurrent_no_torn_reads() {
-    const TOTAL: u64 = 200_000;
+    const TOTAL: u64 = if cfg!(miri) { 3_000 } else { 200_000 };
     let (ring, _mem) = make_ring(8, 256);
     let start = Arc::new(AtomicBool::new(false));
     let done = Arc::new(AtomicBool::new(false));

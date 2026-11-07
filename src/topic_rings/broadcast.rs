@@ -1,7 +1,7 @@
 use std::{
     ptr::NonNull,
     sync::{
-        atomic::{fence, AtomicU64, Ordering},
+        atomic::{fence, AtomicU32, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -18,6 +18,8 @@ pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
 const HEADER_BYTES: usize = 64;
 const SLOT_HEADER_BYTES: usize = 16;
 const SLOT_ALIGN: usize = 64;
+const MESSAGE_AREA_BYTES: usize = 64;
+const PAYLOAD_OFFSET: usize = SLOT_HEADER_BYTES + MESSAGE_AREA_BYTES;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -36,9 +38,11 @@ const _: () = assert!(std::mem::size_of::<BroadcastHeader>() <= HEADER_BYTES);
 #[repr(C)]
 struct SlotHeader {
     seq: AtomicU64,
-    len: u32,
+    len: AtomicU32,
     reserved: u32,
 }
+
+const _: () = assert!(MessageHeader::SIZE <= MESSAGE_AREA_BYTES);
 
 const _: () = assert!(std::mem::size_of::<SlotHeader>() == SLOT_HEADER_BYTES);
 
@@ -72,7 +76,7 @@ unsafe impl Send for BroadcastTopicRing {}
 unsafe impl Sync for BroadcastTopicRing {}
 
 fn stride_for(payload_cap: usize) -> usize {
-    (SLOT_HEADER_BYTES + MessageHeader::SIZE + payload_cap).div_ceil(SLOT_ALIGN) * SLOT_ALIGN
+    (PAYLOAD_OFFSET + payload_cap.next_multiple_of(8)).div_ceil(SLOT_ALIGN) * SLOT_ALIGN
 }
 
 impl BroadcastTopicRing {
@@ -209,17 +213,13 @@ impl BroadcastTopicRing {
             let sh = slot as *mut SlotHeader;
             (*sh).seq.store(2 * idx - 1, Ordering::Relaxed);
             fence(Ordering::Release);
-            std::ptr::write(std::ptr::addr_of_mut!((*sh).len), data.len() as u32);
-            std::ptr::copy_nonoverlapping(
-                &message.header as *const MessageHeader as *const u8,
+            (*sh).len.store(data.len() as u32, Ordering::Relaxed);
+            atomic_store_bytes(
                 slot.add(SLOT_HEADER_BYTES),
+                &message.header as *const MessageHeader as *const u8,
                 MessageHeader::SIZE,
             );
-            std::ptr::copy_nonoverlapping(
-                data.as_ptr(),
-                slot.add(SLOT_HEADER_BYTES + MessageHeader::SIZE),
-                data.len(),
-            );
+            atomic_store_bytes(slot.add(PAYLOAD_OFFSET), data.as_ptr(), data.len());
             (*sh).seq.store(2 * idx, Ordering::Release);
         }
         self.write_idx().store(idx, Ordering::Release);
@@ -272,20 +272,16 @@ impl BroadcastTopicRing {
                     continue;
                 }
 
-                let len = std::ptr::read(std::ptr::addr_of!((*sh).len)) as usize;
+                let len = (*sh).len.load(Ordering::Relaxed) as usize;
                 let mut header_bytes = [0u8; MessageHeader::SIZE];
-                std::ptr::copy_nonoverlapping(
+                atomic_load_bytes(
                     slot.add(SLOT_HEADER_BYTES),
                     header_bytes.as_mut_ptr(),
                     MessageHeader::SIZE,
                 );
                 let payload = if len <= self.payload_cap {
                     let mut data = vec![0u8; len];
-                    std::ptr::copy_nonoverlapping(
-                        slot.add(SLOT_HEADER_BYTES + MessageHeader::SIZE),
-                        data.as_mut_ptr(),
-                        len,
-                    );
+                    atomic_load_bytes(slot.add(PAYLOAD_OFFSET), data.as_mut_ptr(), len);
                     Some(data)
                 } else {
                     None
@@ -346,4 +342,34 @@ fn now_ns() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64
+}
+
+unsafe fn atomic_store_bytes(dst: *mut u8, src: *const u8, len: usize) {
+    let words = len / 8;
+    for i in 0..words {
+        let w = std::ptr::read_unaligned(src.add(i * 8) as *const u64);
+        (*(dst.add(i * 8) as *const AtomicU64)).store(w, Ordering::Relaxed);
+    }
+    let rem = len % 8;
+    if rem != 0 {
+        let mut tail = [0u8; 8];
+        std::ptr::copy_nonoverlapping(src.add(words * 8), tail.as_mut_ptr(), rem);
+        (*(dst.add(words * 8) as *const AtomicU64))
+            .store(u64::from_ne_bytes(tail), Ordering::Relaxed);
+    }
+}
+
+unsafe fn atomic_load_bytes(src: *const u8, dst: *mut u8, len: usize) {
+    let words = len / 8;
+    for i in 0..words {
+        let w = (*(src.add(i * 8) as *const AtomicU64)).load(Ordering::Relaxed);
+        std::ptr::write_unaligned(dst.add(i * 8) as *mut u64, w);
+    }
+    let rem = len % 8;
+    if rem != 0 {
+        let tail = (*(src.add(words * 8) as *const AtomicU64))
+            .load(Ordering::Relaxed)
+            .to_ne_bytes();
+        std::ptr::copy_nonoverlapping(tail.as_ptr(), dst.add(words * 8), rem);
+    }
 }
