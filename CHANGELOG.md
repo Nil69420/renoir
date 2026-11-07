@@ -40,6 +40,10 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - `tools/soak/renoir_soak.c`: C-ABI soak and latency test for camera and IMU
   streams.
 
+### Fixed
+- Creating the same SPMC topic from several processes at once could fail or
+  reset a live ring; header initialisation is now race-free.
+
 ### Changed
 - Topic regions are now created in `$RENOIR_SHM_DIR`, else `/dev/shm`, else
   `/tmp` (previously always `/tmp`), so rings live in RAM instead of being

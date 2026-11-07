@@ -12,7 +12,7 @@ use crate::{
 };
 
 use crate::topic_rings::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
-use crate::topic_rings::spsc::{SESSION_DIRTY, SESSION_MARKER_OFFSET};
+use crate::topic_rings::spsc::SESSION_MARKER_OFFSET;
 
 pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
 
@@ -51,6 +51,7 @@ const _: () = assert!(HEADER_BYTES.is_multiple_of(64));
 
 const _: () = assert!(std::mem::size_of::<SlotHeader>() == SLOT_HEADER_BYTES);
 
+mod init;
 mod types;
 mod wait;
 mod zero_copy;
@@ -125,32 +126,7 @@ impl BroadcastTopicRing {
         }
 
         let header_ptr = memory.cast::<BroadcastHeader>();
-        let existing_magic = unsafe { (*header_ptr.as_ptr()).magic };
-        if existing_magic == BROADCAST_RING_MAGIC {
-            let (count, str_, cap) = unsafe {
-                let h = &*header_ptr.as_ptr();
-                (h.slot_count, h.stride, h.payload_cap)
-            };
-            if count != slot_count || str_ != stride || cap != payload_cap {
-                return Err(RenoirError::invalid_parameter(
-                    "ring",
-                    "Existing broadcast ring has a different geometry",
-                ));
-            }
-        } else {
-            unsafe {
-                header_ptr.as_ptr().write(BroadcastHeader {
-                    magic: BROADCAST_RING_MAGIC,
-                    slot_count,
-                    session: SESSION_DIRTY,
-                    stride,
-                    payload_cap,
-                    write_idx: AtomicU64::new(0),
-                    wake: AtomicU32::new(0),
-                    waiters: AtomicU32::new(0),
-                });
-            }
-        }
+        init::attach_header(header_ptr.as_ptr(), slot_count, stride, payload_cap)?;
 
         Ok(Self {
             header: header_ptr,

@@ -5,6 +5,7 @@ use renoir::topic::MessagePayload;
 use renoir::{Message, TopicConfig, TopicManager, TopicPattern};
 
 const CHILD_ENV: &str = "RENOIR_BCAST_CHILD";
+const RACE_ENV: &str = "RENOIR_BCAST_RACE_GO";
 const TOPIC_ENV: &str = "RENOIR_BCAST_TOPIC";
 const READY_ENV: &str = "RENOIR_BCAST_READY";
 const CROSS_TOTAL: u64 = 500;
@@ -239,4 +240,44 @@ fn run_child() {
         }
     }
     assert_eq!(subscriber.overruns(), 0);
+}
+
+#[test]
+fn test_simultaneous_first_creation_by_many_processes() {
+    if let Some(go) = std::env::var_os(RACE_ENV) {
+        let name = std::env::var(TOPIC_ENV).unwrap();
+        while !std::path::Path::new(&go).exists() {
+            std::hint::spin_loop();
+        }
+        let manager = TopicManager::new().unwrap();
+        manager.create_topic(config(&name, 1024, 4096)).unwrap();
+        let _sub = manager.create_subscriber(&name).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        return;
+    }
+    let name = unique("bcast_race");
+    let go = std::env::temp_dir().join(format!("renoir_race_go_{}", name));
+    let _ = std::fs::remove_file(&go);
+    let exe = std::env::current_exe().unwrap();
+    let mut children = Vec::new();
+    for _ in 0..6 {
+        children.push(
+            Command::new(&exe)
+                .args([
+                    "--exact",
+                    "test_simultaneous_first_creation_by_many_processes",
+                ])
+                .env(RACE_ENV, &go)
+                .env(TOPIC_ENV, &name)
+                .spawn()
+                .expect("failed to spawn racer"),
+        );
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    std::fs::write(&go, b"go").unwrap();
+    for mut child in children {
+        let status = child.wait().unwrap();
+        assert!(status.success(), "racer failed: {}", status);
+    }
+    let _ = std::fs::remove_file(&go);
 }

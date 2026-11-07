@@ -387,6 +387,59 @@ fn test_wake_latency_is_far_below_polling_interval() {
 }
 
 #[test]
+fn test_concurrent_first_attach_never_sees_or_resets_a_half_built_header() {
+    let rounds = if cfg!(miri) { 3 } else { 300 };
+    let threads = 8usize;
+    let payload_cap = 64usize;
+    let ring_bytes = BroadcastTopicRing::slot_stride(payload_cap) * 8;
+    let total = BroadcastTopicRing::required_memory_size(ring_bytes, payload_cap);
+    for _ in 0..rounds {
+        let mut memory = vec![0u64; total / 8 + 1];
+        let base = memory.as_mut_ptr() as usize;
+        let words = memory.len();
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let handles: Vec<_> = (0..threads)
+            .map(|i| {
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    let ptr = std::ptr::NonNull::new(base as *mut u8).unwrap();
+                    let ring = unsafe {
+                        BroadcastTopicRing::from_memory(
+                            ptr,
+                            words * 8,
+                            ring_bytes,
+                            payload_cap,
+                            Arc::new(TopicStats::default()),
+                        )
+                    }
+                    .expect("attach must succeed");
+                    if i == 0 {
+                        ring.try_publish(&msg(1, 8)).unwrap();
+                    }
+                    ring.slot_count()
+                })
+            })
+            .collect();
+        let counts: Vec<usize> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(counts.iter().all(|c| *c == counts[0]));
+        let ptr = std::ptr::NonNull::new(base as *mut u8).unwrap();
+        let ring = unsafe {
+            BroadcastTopicRing::from_memory(
+                ptr,
+                words * 8,
+                ring_bytes,
+                payload_cap,
+                Arc::new(TopicStats::default()),
+            )
+        }
+        .unwrap();
+        assert_eq!(ring.published_count(), 1);
+        drop(memory);
+    }
+}
+
+#[test]
 fn test_broadcast_concurrent_no_torn_reads() {
     const TOTAL: u64 = if cfg!(miri) { 3_000 } else { 200_000 };
     let (ring, _mem) = make_ring(8, 256);
