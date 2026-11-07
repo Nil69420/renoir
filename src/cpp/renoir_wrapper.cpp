@@ -155,6 +155,53 @@ bool Publisher::tryPublish(const std::vector<uint8_t>& payload, RenoirSequenceNu
     return true;
 }
 
+Reservation Publisher::reserve(size_t size) {
+    uint8_t* data = nullptr;
+    RenoirReservedBufferHandle handle = nullptr;
+    checkResult(renoir_publish_reserve(handle_, size, &data, &handle), "reserve publish buffer");
+    return Reservation(handle_, data, size, handle);
+}
+
+Reservation::Reservation(Reservation&& other) noexcept
+    : pub_(other.pub_), data_(other.data_), capacity_(other.capacity_), handle_(other.handle_) {
+    other.handle_ = nullptr;
+    other.data_ = nullptr;
+}
+
+Reservation& Reservation::operator=(Reservation&& other) noexcept {
+    if (this != &other) {
+        discard();
+        pub_ = other.pub_;
+        data_ = other.data_;
+        capacity_ = other.capacity_;
+        handle_ = other.handle_;
+        other.handle_ = nullptr;
+        other.data_ = nullptr;
+    }
+    return *this;
+}
+
+Reservation::~Reservation() {
+    discard();
+}
+
+RenoirSequenceNumber Reservation::commit(size_t length) {
+    RenoirSequenceNumber seq = 0;
+    RenoirReservedBufferHandle handle = handle_;
+    handle_ = nullptr;
+    checkResult(renoir_publish_commit(pub_, handle, length, nullptr, &seq), "commit reservation");
+    data_ = nullptr;
+    return seq;
+}
+
+void Reservation::discard() {
+    if (handle_ != nullptr) {
+        renoir_publish_discard(pub_, handle_);
+        handle_ = nullptr;
+        data_ = nullptr;
+    }
+}
+
 bool Publisher::hasSubscribers() const {
     bool result = false;
     checkResult(renoir_publisher_has_subscribers(handle_, &result), "publisher has subscribers");
@@ -202,6 +249,29 @@ ReceivedMessage Subscriber::readNext(uint64_t timeout_ms) {
     RenoirReceivedMessage msg = {};
     checkResult(renoir_subscribe_read_next(handle_, &msg, timeout_ms), "read next message");
     return ReceivedMessage(msg, msg.handle);
+}
+
+ReadResult Subscriber::readInto(uint8_t* buffer, size_t capacity, size_t* length,
+                                RenoirMessageMetadata* metadata) {
+    size_t out_len = 0;
+    RenoirErrorCode result = renoir_subscribe_read_into(handle_, buffer, capacity, &out_len, metadata);
+    if (length) {
+        *length = out_len;
+    }
+    if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
+        return ReadResult::Empty;
+    }
+    if (result == RenoirErrorCode::RenoirErrorCode_InsufficientSpace) {
+        return ReadResult::TooSmall;
+    }
+    checkResult(result, "read into buffer");
+    return ReadResult::Message;
+}
+
+uint64_t Subscriber::overruns() const {
+    uint64_t value = 0;
+    checkResult(renoir_subscriber_overruns(handle_, &value), "read subscriber overruns");
+    return value;
 }
 
 bool Subscriber::peek(ReceivedMessage* message) {

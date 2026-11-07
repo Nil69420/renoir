@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use crate::{
     error::Result,
     topic::{Message, TopicStats},
-    topic_rings::BroadcastCursor,
+    topic_rings::{BroadcastCursor, BroadcastReservation, ReadInto},
 };
 
 use super::{
@@ -60,6 +60,22 @@ impl Publisher {
 
         self.publish(payload)?;
         Ok(true)
+    }
+
+    pub fn supports_zero_copy(&self) -> bool {
+        self.topic.supports_zero_copy()
+    }
+
+    pub fn reserve(&self, len: usize) -> Result<BroadcastReservation> {
+        self.topic.reserve(len)
+    }
+
+    pub fn commit(&self, reservation: BroadcastReservation, len: usize) -> Result<u64> {
+        self.topic.commit_reserved(reservation, len)
+    }
+
+    pub fn discard(&self, reservation: BroadcastReservation) {
+        self.topic.discard_reserved(reservation)
     }
 
     /// Get topic statistics
@@ -148,6 +164,15 @@ impl Subscriber {
     /// between peek and the next subscribe call
     pub fn peek(&self) -> Result<Option<Message>> {
         self.topic.peek_with(&self.cursor)
+    }
+
+    pub fn read_into(&self, dst: &mut [u8]) -> Result<ReadInto> {
+        let result = self.topic.read_into_with(&self.cursor, dst)?;
+        if let ReadInto::Message { sequence, .. } = result {
+            self.last_sequence
+                .store(sequence as usize, Ordering::Relaxed);
+        }
+        Ok(result)
     }
 
     pub fn overruns(&self) -> u64 {

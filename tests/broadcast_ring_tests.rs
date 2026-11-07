@@ -6,7 +6,8 @@ use std::thread;
 
 use renoir::topic::MessagePayload;
 use renoir::topic::TopicStats;
-use renoir::topic_rings::{BroadcastCursor, BroadcastTopicRing};
+use renoir::topic::{MessageHeader, FORMAT_TYPE_INLINE};
+use renoir::topic_rings::{BroadcastCursor, BroadcastTopicRing, ReadInto};
 use renoir::Message;
 
 fn make_ring(slots: usize, payload_cap: usize) -> (Arc<BroadcastTopicRing>, Vec<u64>) {
@@ -184,6 +185,67 @@ fn test_from_memory_rejects_undersized_and_too_few_slots() {
         BroadcastTopicRing::from_memory(ptr, 128, 1024, 1024, Arc::new(TopicStats::default()))
     };
     assert!(one_slot.is_err());
+}
+
+fn zc_header(seq: u64, len: usize) -> MessageHeader {
+    let mut h = MessageHeader::new(1, seq, len as u32);
+    h.set_format_type(FORMAT_TYPE_INLINE);
+    h.set_no_checksum();
+    h
+}
+
+#[test]
+fn test_reserve_commit_is_invisible_until_commit_and_readable_after() {
+    let (ring, _mem) = make_ring(8, 128);
+    let mut cursor = ring.cursor_latest();
+    let r = ring.reserve(64).unwrap();
+    unsafe { std::ptr::write_bytes(r.payload_ptr(), 0x42, 64) };
+    assert!(ring.try_consume(&mut cursor).unwrap().is_none());
+    assert!(ring.reserve(8).is_err());
+    ring.commit(r, &zc_header(1, 64), 64).unwrap();
+    let m = ring.try_consume(&mut cursor).unwrap().unwrap();
+    assert_eq!(payload_of(&m), &vec![0x42u8; 64]);
+    assert_eq!(ring.published_count(), 1);
+}
+
+#[test]
+fn test_discarded_reservation_publishes_nothing_and_slot_is_reusable() {
+    let (ring, _mem) = make_ring(8, 128);
+    let mut cursor = ring.cursor_latest();
+    let r = ring.reserve(64).unwrap();
+    ring.discard(r);
+    assert_eq!(ring.published_count(), 0);
+    let r = ring.reserve(16).unwrap();
+    unsafe { std::ptr::write_bytes(r.payload_ptr(), 0x07, 16) };
+    ring.commit(r, &zc_header(1, 16), 16).unwrap();
+    let m = ring.try_consume(&mut cursor).unwrap().unwrap();
+    assert_eq!(payload_of(&m), &vec![0x07u8; 16]);
+    assert!(ring.reserve(1000).is_err());
+}
+
+#[test]
+fn test_read_into_copies_to_caller_buffer_and_reports_too_small_without_consuming() {
+    let (ring, _mem) = make_ring(8, 128);
+    let mut cursor = ring.cursor_latest();
+    ring.try_publish(&msg(1, 40)).unwrap();
+    let mut small = [0u8; 8];
+    assert_eq!(
+        ring.read_into(&mut cursor, &mut small).unwrap(),
+        ReadInto::TooSmall(40)
+    );
+    let mut buf = [0u8; 128];
+    match ring.read_into(&mut cursor, &mut buf).unwrap() {
+        ReadInto::Message { len, sequence, .. } => {
+            assert_eq!(len, 40);
+            assert_eq!(sequence, 1);
+            assert!(buf[..40].iter().all(|b| *b == 1));
+        }
+        other => panic!("unexpected {:?}", other),
+    }
+    assert_eq!(
+        ring.read_into(&mut cursor, &mut buf).unwrap(),
+        ReadInto::Empty
+    );
 }
 
 #[test]

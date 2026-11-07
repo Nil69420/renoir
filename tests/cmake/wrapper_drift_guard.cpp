@@ -16,6 +16,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 using namespace renoir;
 
@@ -199,6 +200,59 @@ static void test_topics() {
     std::cout << "  topics ok\n";
 }
 
+static void test_broadcast_zero_copy() {
+    TopicManager manager;
+    std::string name = "/drift/zc_" + std::to_string(getpid());
+
+    TopicOptions options;
+    options.pattern = 1; // SPMC broadcast
+    options.ring_capacity = 1024;
+    options.max_payload_size = 4096;
+    manager.registerTopic(name, options);
+
+    Publisher publisher = manager.createPublisher(name);
+    Subscriber sub_a = manager.createSubscriber(name);
+    Subscriber sub_b = manager.createSubscriber(name);
+
+    std::vector<uint8_t> buf(4096);
+    size_t len = 0;
+    assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Empty);
+
+    {
+        Reservation r = publisher.reserve(100);
+        assert(r.data() != nullptr);
+        for (size_t i = 0; i < 100; ++i) r.data()[i] = 0x5A;
+        RenoirSequenceNumber seq = r.commit(100);
+        assert(seq == 1);
+        (void)seq;
+    }
+    for (Subscriber* sub : {&sub_a, &sub_b}) {
+        RenoirMessageMetadata meta = {};
+        assert(sub->readInto(buf.data(), buf.size(), &len, &meta) == ReadResult::Message);
+        assert(len == 100);
+        assert(buf[0] == 0x5A && buf[99] == 0x5A);
+        assert(meta.sequence_number == 1);
+        (void)meta;
+    }
+
+    {
+        Reservation dropped = publisher.reserve(50);
+        (void)dropped;
+    }
+    {
+        Reservation r = publisher.reserve(10);
+        r.data()[0] = 1;
+        r.commit(10);
+    }
+    uint8_t tiny[4];
+    assert(sub_a.readInto(tiny, sizeof(tiny), &len) == ReadResult::TooSmall);
+    assert(len == 10);
+    assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Message);
+    assert(sub_a.overruns() == 0);
+    (void)tiny;
+    std::cout << "  broadcast zero-copy ok\n";
+}
+
 int main() {
     std::cout << "Renoir C++ wrapper drift guard\n";
     test_version();
@@ -206,6 +260,7 @@ int main() {
     test_manager_and_region();
     test_buffer_pool();
     test_topics();
+    test_broadcast_zero_copy();
     std::cout << "drift guard passed\n";
     return 0;
 }

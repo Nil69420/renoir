@@ -40,6 +40,7 @@ pub struct HandleRegistry {
     pub subscriber_to_manager: HashMap<usize, usize>, // Maps subscriber_id -> manager_id
     pub publisher_to_manager: HashMap<usize, usize>,  // Maps publisher_id -> manager_id
     pub reserved_buffers: HashMap<usize, Vec<u8>>,
+    pub reserved_slots: HashMap<usize, (Arc<Publisher>, crate::topic_rings::BroadcastReservation)>,
     pub received_messages: HashMap<usize, crate::topic::Message>,
     pub descriptor_buffers: HashMap<usize, Arc<Buffer>>, // Keeps descriptor buffers alive
     pub message_to_descriptor_buffer: HashMap<usize, usize>, // Maps message_id -> descriptor_buffer_id
@@ -70,6 +71,7 @@ impl HandleRegistry {
             subscriber_to_manager: HashMap::new(),
             publisher_to_manager: HashMap::new(),
             reserved_buffers: HashMap::new(),
+            reserved_slots: HashMap::new(),
             received_messages: HashMap::new(),
             descriptor_buffers: HashMap::new(),
             message_to_descriptor_buffer: HashMap::new(),

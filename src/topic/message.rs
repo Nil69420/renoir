@@ -82,6 +82,18 @@ impl Message {
         }
     }
 
+    /// Create an inline message without computing a payload checksum
+    pub fn new_inline_unchecked(topic_id: u32, sequence: u64, payload: Vec<u8>) -> Self {
+        let mut header = MessageHeader::new(topic_id, sequence, payload.len() as u32);
+        header.set_format_type(FORMAT_TYPE_INLINE);
+        header.set_no_checksum();
+
+        Self {
+            header,
+            payload: MessagePayload::Inline(payload),
+        }
+    }
+
     /// Create a new descriptor-based message
     pub fn new_descriptor(topic_id: u32, sequence: u64, descriptor: MessageDescriptor) -> Self {
         // For descriptor messages, the payload_length is the size of the descriptor itself,

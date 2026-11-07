@@ -15,6 +15,9 @@ pub const FORMAT_TYPE_INLINE: u8 = 1;
 /// Format type marker for descriptor payloads (reserved byte 0)
 pub const FORMAT_TYPE_DESCRIPTOR: u8 = 2;
 
+/// Reserved byte 1 flag: payload checksum intentionally not computed
+pub const FLAG_NO_CHECKSUM: u8 = 1;
+
 /// Maximum topic name length
 pub const MAX_TOPIC_NAME_LENGTH: usize = 255;
 
@@ -95,6 +98,12 @@ impl MessageHeader {
     /// Set message format type in reserved bytes (backward compatible)
     pub fn set_format_type(&mut self, format_type: u8) {
         self.reserved[0] = format_type;
+    }
+
+    /// Mark the header as carrying no payload checksum
+    pub fn set_no_checksum(&mut self) {
+        self.checksum = 0;
+        self.reserved[1] = FLAG_NO_CHECKSUM;
     }
 
     /// Get message format type from reserved bytes

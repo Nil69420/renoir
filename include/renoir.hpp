@@ -303,6 +303,33 @@ private:
 /**
  * @brief RAII wrapper for topic publishers
  */
+class Reservation {
+public:
+    Reservation(const Reservation&) = delete;
+    Reservation& operator=(const Reservation&) = delete;
+    Reservation(Reservation&& other) noexcept;
+    Reservation& operator=(Reservation&& other) noexcept;
+    ~Reservation();
+
+    uint8_t* data() const { return data_; }
+    size_t capacity() const { return capacity_; }
+    RenoirSequenceNumber commit(size_t length);
+    void discard();
+
+private:
+    friend class Publisher;
+    Reservation(RenoirPublisherHandle pub, uint8_t* data, size_t capacity,
+                RenoirReservedBufferHandle handle)
+        : pub_(pub), data_(data), capacity_(capacity), handle_(handle) {}
+
+    RenoirPublisherHandle pub_ = nullptr;
+    uint8_t* data_ = nullptr;
+    size_t capacity_ = 0;
+    RenoirReservedBufferHandle handle_ = nullptr;
+};
+
+enum class ReadResult { Empty, Message, TooSmall };
+
 class Publisher {
 public:
     Publisher() = delete;
@@ -316,6 +343,7 @@ public:
     void publish(const std::vector<uint8_t>& payload, RenoirSequenceNumber* sequence = nullptr);
     bool tryPublish(const std::vector<uint8_t>& payload,
                     RenoirSequenceNumber* sequence = nullptr);
+    Reservation reserve(size_t size);
     bool hasSubscribers() const;
     RenoirTopicStats stats() const;
     std::string topicName() const;
@@ -341,6 +369,9 @@ public:
     ~Subscriber();
 
     ReceivedMessage readNext(uint64_t timeout_ms = 1000);
+    ReadResult readInto(uint8_t* buffer, size_t capacity, size_t* length,
+                        RenoirMessageMetadata* metadata = nullptr);
+    uint64_t overruns() const;
     bool peek(ReceivedMessage* message);
     size_t drain();
     bool hasMessages() const;

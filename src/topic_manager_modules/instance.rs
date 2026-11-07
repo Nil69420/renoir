@@ -17,7 +17,10 @@ use crate::{
     memory::SharedMemoryRegion,
     shared_pools::BufferPoolRegistry,
     topic::{Message, MessagePayload, TopicConfig, TopicPattern, TopicStats},
-    topic_rings::{BroadcastCursor, BroadcastTopicRing, MPMCTopicRing, SPSCTopicRing},
+    topic_rings::{
+        BroadcastCursor, BroadcastReservation, BroadcastTopicRing, MPMCTopicRing, ReadInto,
+        SPSCTopicRing,
+    },
 };
 
 use super::manager::TopicId;
@@ -225,7 +228,11 @@ impl TopicInstance {
                 Message::new_descriptor(self.topic_id, sequence, descriptor)
             } else {
                 // Store inline in ring buffer
-                Message::new_inline(self.topic_id, sequence, payload)
+                if matches!(self.ring, TopicRingType::Broadcast(_)) {
+                    Message::new_inline_unchecked(self.topic_id, sequence, payload)
+                } else {
+                    Message::new_inline(self.topic_id, sequence, payload)
+                }
             };
 
         let result = match &self.ring {
@@ -308,6 +315,58 @@ impl TopicInstance {
             TopicRingType::Broadcast(_) => Err(RenoirError::invalid_parameter(
                 "pattern",
                 "Broadcast topics require a per-subscriber cursor",
+            )),
+        }
+    }
+
+    pub fn supports_zero_copy(&self) -> bool {
+        matches!(self.ring, TopicRingType::Broadcast(_))
+    }
+
+    pub fn reserve(&self, len: usize) -> Result<BroadcastReservation> {
+        match &self.ring {
+            TopicRingType::Broadcast(ring) => ring.reserve(len),
+            _ => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "Zero-copy reservation requires an SPMC (broadcast) topic",
+            )),
+        }
+    }
+
+    pub fn commit_reserved(&self, reservation: BroadcastReservation, len: usize) -> Result<u64> {
+        match &self.ring {
+            TopicRingType::Broadcast(ring) => {
+                let sequence = self.stats.current_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+                let mut header =
+                    crate::topic::MessageHeader::new(self.topic_id, sequence, len as u32);
+                header.set_format_type(crate::topic::FORMAT_TYPE_INLINE);
+                header.set_no_checksum();
+                ring.commit(reservation, &header, len)?;
+                Ok(sequence)
+            }
+            _ => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "Zero-copy commit requires an SPMC (broadcast) topic",
+            )),
+        }
+    }
+
+    pub fn discard_reserved(&self, reservation: BroadcastReservation) {
+        if let TopicRingType::Broadcast(ring) = &self.ring {
+            ring.discard(reservation);
+        }
+    }
+
+    pub fn read_into_with(
+        &self,
+        cursor: &Mutex<Option<BroadcastCursor>>,
+        dst: &mut [u8],
+    ) -> Result<ReadInto> {
+        match (&self.ring, &mut *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.read_into(c, dst),
+            _ => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "read_into requires an SPMC (broadcast) topic",
             )),
         }
     }

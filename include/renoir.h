@@ -38,6 +38,11 @@
 #define FORMAT_TYPE_DESCRIPTOR 2
 
 /**
+ * Reserved byte 1 flag: payload checksum intentionally not computed
+ */
+#define FLAG_NO_CHECKSUM 1
+
+/**
  * Maximum topic name length
  */
 #define MAX_TOPIC_NAME_LENGTH 255
@@ -881,6 +886,12 @@ enum RenoirErrorCode renoir_publish_commit(RenoirPublisherHandle publisher,
                                            RenoirSequenceNumber *sequence);
 
 /**
+ * Abandon a reservation without publishing it
+ */
+enum RenoirErrorCode renoir_publish_discard(RenoirPublisherHandle publisher,
+                                            RenoirReservedBufferHandle reserved);
+
+/**
  * Create a subscriber for a topic
  */
 enum RenoirErrorCode renoir_subscriber_create(RenoirTopicManagerHandle manager,
@@ -973,6 +984,25 @@ const char *renoir_publisher_topic_name(RenoirPublisherHandle publisher);
  * Get topic name from subscriber
  */
 const char *renoir_subscriber_topic_name(RenoirSubscriberHandle subscriber);
+
+/**
+ * Copy the next message straight into a caller-owned buffer (SPMC topics)
+ *
+ * Returns `Success` with `*out_len` set, `BufferEmpty` if nothing is pending,
+ * or `InsufficientSpace` with `*out_len` set to the size needed (the message
+ * is not consumed in that case).
+ */
+enum RenoirErrorCode renoir_subscribe_read_into(RenoirSubscriberHandle subscriber,
+                                                uint8_t *buffer,
+                                                uintptr_t buffer_len,
+                                                uintptr_t *out_len,
+                                                struct RenoirMessageMetadata *metadata);
+
+/**
+ * Number of messages this subscriber lost because it fell behind (SPMC topics)
+ */
+enum RenoirErrorCode renoir_subscriber_overruns(RenoirSubscriberHandle subscriber,
+                                                uint64_t *out_overruns);
 
 /**
  * Free a C string allocated by this library

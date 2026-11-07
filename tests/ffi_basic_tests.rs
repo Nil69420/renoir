@@ -7,11 +7,13 @@
 use renoir::ffi::{
     renoir_buffer_pool_config, renoir_buffer_pool_create, renoir_free_string,
     renoir_manager_create, renoir_manager_destroy, renoir_message_release, renoir_publish,
-    renoir_publisher_create, renoir_publisher_destroy, renoir_subscribe_read_next,
-    renoir_subscriber_create, renoir_subscriber_destroy, renoir_topic_list, renoir_topic_list_free,
-    renoir_topic_manager_create, renoir_topic_manager_destroy, renoir_topic_register,
-    renoir_version_major, renoir_version_minor, renoir_version_patch, renoir_version_string,
-    RenoirBufferPoolConfig, RenoirBufferPoolHandle, RenoirErrorCode, RenoirPublisherHandle,
+    renoir_publish_commit, renoir_publish_discard, renoir_publish_reserve, renoir_publisher_create,
+    renoir_publisher_destroy, renoir_subscribe_read_into, renoir_subscribe_read_next,
+    renoir_subscriber_create, renoir_subscriber_destroy, renoir_subscriber_overruns,
+    renoir_topic_list, renoir_topic_list_free, renoir_topic_manager_create,
+    renoir_topic_manager_destroy, renoir_topic_register, renoir_version_major,
+    renoir_version_minor, renoir_version_patch, renoir_version_string, RenoirBufferPoolConfig,
+    RenoirBufferPoolHandle, RenoirErrorCode, RenoirMessageMetadata, RenoirPublisherHandle,
     RenoirReceivedMessage, RenoirRegionConfig, RenoirSequenceNumber, RenoirSubscriberHandle,
     RenoirTopicId, RenoirTopicInfo, RenoirTopicOptions,
 };
@@ -402,6 +404,203 @@ mod ffi_tests {
 
             renoir_message_release(msg.handle);
             renoir_subscriber_destroy(subscriber);
+            renoir_publisher_destroy(publisher);
+            renoir_topic_manager_destroy(manager);
+        }
+    }
+
+    #[test]
+    fn test_ffi_broadcast_zero_copy_round_trip() {
+        unsafe {
+            let manager = renoir_topic_manager_create();
+            let topic_name = CString::new(format!("/ffi/zc_{}", std::process::id())).unwrap();
+            let options = RenoirTopicOptions {
+                pattern: 1,
+                ring_capacity: 1024,
+                max_payload_size: 4096,
+                use_shared_pool: false,
+                shared_pool_threshold: 0,
+                enable_notifications: false,
+            };
+            let mut topic_id: RenoirTopicId = 0;
+            assert_eq!(
+                renoir_topic_register(manager, topic_name.as_ptr(), &options, &mut topic_id),
+                RenoirErrorCode::Success
+            );
+            let pub_opts = renoir::ffi::RenoirPublisherOptions {
+                batch_size: 1,
+                timeout_ms: 0,
+                priority: 0,
+                enable_batching: false,
+            };
+            let sub_opts = renoir::ffi::RenoirSubscriberOptions {
+                mode: 1,
+                batch_size: 1,
+                timeout_ms: 0,
+                queue_depth: 16,
+                enable_filtering: false,
+            };
+            let mut publisher: RenoirPublisherHandle = ptr::null_mut();
+            assert_eq!(
+                renoir_publisher_create(manager, topic_name.as_ptr(), &pub_opts, &mut publisher),
+                RenoirErrorCode::Success
+            );
+            let mut sub_a: RenoirSubscriberHandle = ptr::null_mut();
+            let mut sub_b: RenoirSubscriberHandle = ptr::null_mut();
+            assert_eq!(
+                renoir_subscriber_create(manager, topic_name.as_ptr(), &sub_opts, &mut sub_a),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(
+                renoir_subscriber_create(manager, topic_name.as_ptr(), &sub_opts, &mut sub_b),
+                RenoirErrorCode::Success
+            );
+
+            let mut buf = vec![0u8; 4096];
+            let mut out_len = 0usize;
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    sub_a,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::BufferEmpty
+            );
+
+            for i in 1..=5u8 {
+                let mut slot: *mut u8 = ptr::null_mut();
+                let mut handle = ptr::null_mut();
+                assert_eq!(
+                    renoir_publish_reserve(publisher, 100, &mut slot, &mut handle),
+                    RenoirErrorCode::Success
+                );
+                assert!(!slot.is_null());
+                let mut second: *mut u8 = ptr::null_mut();
+                let mut second_handle = ptr::null_mut();
+                assert_eq!(
+                    renoir_publish_reserve(publisher, 100, &mut second, &mut second_handle),
+                    RenoirErrorCode::InvalidParameter
+                );
+                std::slice::from_raw_parts_mut(slot, 100).fill(i);
+                assert_eq!(
+                    renoir_subscribe_read_into(
+                        sub_a,
+                        buf.as_mut_ptr(),
+                        buf.len(),
+                        &mut out_len,
+                        ptr::null_mut()
+                    ),
+                    RenoirErrorCode::BufferEmpty
+                );
+                let mut seq: RenoirSequenceNumber = 0;
+                assert_eq!(
+                    renoir_publish_commit(publisher, handle, 100, ptr::null(), &mut seq),
+                    RenoirErrorCode::Success
+                );
+                assert_eq!(seq, i as u64);
+
+                for sub in [sub_a, sub_b] {
+                    let mut meta: RenoirMessageMetadata = std::mem::zeroed();
+                    assert_eq!(
+                        renoir_subscribe_read_into(
+                            sub,
+                            buf.as_mut_ptr(),
+                            buf.len(),
+                            &mut out_len,
+                            &mut meta
+                        ),
+                        RenoirErrorCode::Success
+                    );
+                    assert_eq!(out_len, 100);
+                    assert!(buf[..100].iter().all(|b| *b == i));
+                    assert_eq!(meta.sequence_number, i as u64);
+                    assert!(meta.timestamp_ns > 0);
+                }
+            }
+
+            let mut slot: *mut u8 = ptr::null_mut();
+            let mut handle = ptr::null_mut();
+            assert_eq!(
+                renoir_publish_reserve(publisher, 100, &mut slot, &mut handle),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(
+                renoir_publish_discard(publisher, handle),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(
+                renoir_publish_reserve(publisher, 100, &mut slot, &mut handle),
+                RenoirErrorCode::Success
+            );
+            std::slice::from_raw_parts_mut(slot, 100).fill(9);
+            assert_eq!(
+                renoir_publish_commit(publisher, handle, 100, ptr::null(), ptr::null_mut()),
+                RenoirErrorCode::Success
+            );
+            let mut tiny = [0u8; 10];
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    sub_a,
+                    tiny.as_mut_ptr(),
+                    tiny.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::InsufficientSpace
+            );
+            assert_eq!(out_len, 100);
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    sub_a,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::Success
+            );
+            assert!(buf[..100].iter().all(|b| *b == 9));
+
+            for _ in 0..600 {
+                let mut slot: *mut u8 = ptr::null_mut();
+                let mut handle = ptr::null_mut();
+                assert_eq!(
+                    renoir_publish_reserve(publisher, 4096, &mut slot, &mut handle),
+                    RenoirErrorCode::Success
+                );
+                assert_eq!(
+                    renoir_publish_commit(publisher, handle, 4096, ptr::null(), ptr::null_mut()),
+                    RenoirErrorCode::Success
+                );
+            }
+            let mut overruns = 0u64;
+            assert_eq!(
+                renoir_subscriber_overruns(sub_b, &mut overruns),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(overruns, 0);
+            let mut drained = 0u64;
+            while renoir_subscribe_read_into(
+                sub_b,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut out_len,
+                ptr::null_mut(),
+            ) == RenoirErrorCode::Success
+            {
+                drained += 1;
+            }
+            assert_eq!(
+                renoir_subscriber_overruns(sub_b, &mut overruns),
+                RenoirErrorCode::Success
+            );
+            assert!(overruns > 0);
+            assert_eq!(drained + overruns, 601);
+
+            renoir_subscriber_destroy(sub_a);
+            renoir_subscriber_destroy(sub_b);
             renoir_publisher_destroy(publisher);
             renoir_topic_manager_destroy(manager);
         }

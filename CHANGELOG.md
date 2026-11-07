@@ -14,6 +14,13 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   `Subscriber::overruns`) and never block the publisher. Payloads are
   inline only, up to `max_payload_size`; `use_shared_pool` is rejected.
 
+- Zero-copy publishing for SPMC topics through the C API: `renoir_publish_reserve`
+  returns a pointer into the ring slot, `renoir_publish_commit` publishes it,
+  `renoir_publish_discard` abandons it. C++ gets an RAII `Reservation`.
+- `renoir_subscribe_read_into` copies the next message straight into a
+  caller-owned buffer without allocating; `renoir_subscriber_overruns` reports
+  messages a slow subscriber lost.
+
 ### Changed
 - Breaking: SPMC topics use a new ring layout (`BROADCAST_RING_MAGIC`).
   Previously SPMC aliased the SPSC ring, whose single read cursor was

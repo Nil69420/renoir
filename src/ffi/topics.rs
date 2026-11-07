@@ -538,6 +538,31 @@ pub extern "C" fn renoir_publish_reserve(
         return RenoirErrorCode::InvalidParameter;
     }
 
+    let pub_id = publisher as usize;
+    let pub_arc = {
+        let registry = HANDLE_REGISTRY.lock();
+        registry.get_publisher(pub_id)
+    };
+    if let Some(pub_arc) = pub_arc {
+        if pub_arc.supports_zero_copy() {
+            return match pub_arc.reserve(size) {
+                Ok(reservation) => {
+                    let ptr = reservation.payload_ptr();
+                    let mut registry = HANDLE_REGISTRY.lock();
+                    let id = registry.next_id;
+                    registry.next_id += 1;
+                    registry.reserved_slots.insert(id, (pub_arc, reservation));
+                    unsafe {
+                        *payload_ptr = ptr;
+                        *reserved = id as RenoirReservedBufferHandle;
+                    }
+                    RenoirErrorCode::Success
+                }
+                Err(e) => e.into(),
+            };
+        }
+    }
+
     // Allocate a buffer for zero-copy publishing
     let mut buffer = vec![0u8; size];
     let buffer_ptr = buffer.as_mut_ptr();
@@ -571,6 +596,19 @@ pub extern "C" fn renoir_publish_commit(
 
     let pub_id = publisher as usize;
     let buffer_id = reserved as usize;
+
+    let slot_entry = HANDLE_REGISTRY.lock().reserved_slots.remove(&buffer_id);
+    if let Some((pub_arc, reservation)) = slot_entry {
+        return match pub_arc.commit(reservation, actual_len) {
+            Ok(seq) => {
+                if !sequence.is_null() {
+                    unsafe { *sequence = seq };
+                }
+                RenoirErrorCode::Success
+            }
+            Err(e) => e.into(),
+        };
+    }
 
     // Get the reserved buffer
     let buffer = {
@@ -616,6 +654,28 @@ pub extern "C" fn renoir_publish_commit(
         }
         Err(e) => e.into(),
     }
+}
+
+/// Abandon a reservation without publishing it
+#[no_mangle]
+pub extern "C" fn renoir_publish_discard(
+    publisher: RenoirPublisherHandle,
+    reserved: RenoirReservedBufferHandle,
+) -> RenoirErrorCode {
+    if publisher.is_null() || reserved.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let id = reserved as usize;
+    let mut registry = HANDLE_REGISTRY.lock();
+    if let Some((pub_arc, reservation)) = registry.reserved_slots.remove(&id) {
+        drop(registry);
+        pub_arc.discard(reservation);
+        return RenoirErrorCode::Success;
+    }
+    if registry.reserved_buffers.remove(&id).is_some() {
+        return RenoirErrorCode::Success;
+    }
+    RenoirErrorCode::InvalidParameter
 }
 
 // ============================================================================
@@ -1242,6 +1302,80 @@ pub extern "C" fn renoir_subscriber_topic_name(
 
     let name = sub_handle.topic_name();
     string_to_c_str(name.to_string())
+}
+
+/// Copy the next message straight into a caller-owned buffer (SPMC topics)
+///
+/// Returns `Success` with `*out_len` set, `BufferEmpty` if nothing is pending,
+/// or `InsufficientSpace` with `*out_len` set to the size needed (the message
+/// is not consumed in that case).
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_read_into(
+    subscriber: RenoirSubscriberHandle,
+    buffer: *mut u8,
+    buffer_len: usize,
+    out_len: *mut usize,
+    metadata: *mut RenoirMessageMetadata,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || out_len.is_null() || (buffer.is_null() && buffer_len > 0) {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let dst: &mut [u8] = if buffer_len == 0 {
+        &mut []
+    } else {
+        unsafe { std::slice::from_raw_parts_mut(buffer, buffer_len) }
+    };
+    match sub.read_into(dst) {
+        Ok(crate::topic_rings::ReadInto::Message {
+            len,
+            sequence,
+            timestamp_ns,
+        }) => {
+            unsafe {
+                *out_len = len;
+                if !metadata.is_null() {
+                    (*metadata).timestamp_ns = timestamp_ns;
+                    (*metadata).sequence_number = sequence;
+                    (*metadata).source_id = 0;
+                    (*metadata).message_type = 0;
+                    (*metadata).flags = 0;
+                }
+            }
+            RenoirErrorCode::Success
+        }
+        Ok(crate::topic_rings::ReadInto::TooSmall(needed)) => {
+            unsafe { *out_len = needed };
+            RenoirErrorCode::InsufficientSpace
+        }
+        Ok(crate::topic_rings::ReadInto::Empty) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+/// Number of messages this subscriber lost because it fell behind (SPMC topics)
+#[no_mangle]
+pub extern "C" fn renoir_subscriber_overruns(
+    subscriber: RenoirSubscriberHandle,
+    out_overruns: *mut u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || out_overruns.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let registry = HANDLE_REGISTRY.lock();
+    match registry.get_subscriber(subscriber as usize) {
+        Some(s) => {
+            unsafe { *out_overruns = s.overruns() };
+            RenoirErrorCode::Success
+        }
+        None => RenoirErrorCode::InvalidParameter,
+    }
 }
 
 #[cfg(test)]
