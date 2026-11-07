@@ -94,10 +94,7 @@ impl TopicManager {
             // Topic names can contain '/' (e.g. "/sensors/imu"); the default
             // path derives from the region name, so sanitize it or the file
             // would land in a non-existent nested directory
-            file_path: Some(std::path::PathBuf::from(format!(
-                "/tmp/renoir_{}",
-                region_name.replace('/', "_")
-            ))),
+            file_path: Some(crate::memory::region_path(&region_name.replace('/', "_"))),
             create: true,
             permissions: 0o600,
         };

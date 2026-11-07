@@ -144,6 +144,29 @@ impl RegionConfig {
     pub fn default_file_path(&self) -> PathBuf {
         self.file_path
             .clone()
-            .unwrap_or_else(|| PathBuf::from(format!("/tmp/renoir_{}", self.name)))
+            .unwrap_or_else(|| region_path(&self.name))
     }
+}
+
+/// Directory holding file-backed regions: `RENOIR_SHM_DIR` if set, otherwise
+/// `/dev/shm` (RAM-backed) when it exists, otherwise `/tmp`.
+pub fn shm_dir() -> PathBuf {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(dir) = std::env::var_os("RENOIR_SHM_DIR") {
+            return PathBuf::from(dir);
+        }
+        let shm = PathBuf::from("/dev/shm");
+        if shm.is_dir() {
+            shm
+        } else {
+            PathBuf::from("/tmp")
+        }
+    })
+    .clone()
+}
+
+/// Full path of the region file for a region name
+pub fn region_path(name: &str) -> PathBuf {
+    shm_dir().join(format!("renoir_{}", name))
 }

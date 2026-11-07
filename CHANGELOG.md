@@ -36,6 +36,9 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   are now 64-byte aligned.
 
 ### Changed
+- Topic regions are now created in `$RENOIR_SHM_DIR`, else `/dev/shm`, else
+  `/tmp` (previously always `/tmp`), so rings live in RAM instead of being
+  written back to disk. `renoir-cli topics` scans the same directory.
 - Breaking: SPMC topics use a new ring layout (`BROADCAST_RING_MAGIC`).
   Previously SPMC aliased the SPSC ring, whose single read cursor was
   shared by all subscribers.

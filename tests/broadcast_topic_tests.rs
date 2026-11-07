@@ -127,12 +127,16 @@ fn test_spmc_region_header_is_readable_for_introspection() {
         publisher.publish(vec![1u8; 16]).unwrap();
     }
     let prefix = format!("renoir_topic_{}_", name);
-    let path = std::fs::read_dir("/tmp")
+    let path = std::fs::read_dir(renoir::memory::shm_dir())
         .unwrap()
         .flatten()
         .find(|e| e.file_name().to_string_lossy().starts_with(&prefix))
         .expect("region file not found")
         .path();
+    assert_eq!(path.parent().unwrap(), renoir::memory::shm_dir());
+    if std::env::var_os("RENOIR_SHM_DIR").is_none() && std::path::Path::new("/dev/shm").is_dir() {
+        assert_eq!(path.parent().unwrap(), std::path::Path::new("/dev/shm"));
+    }
     let mut head = [0u8; renoir::topic_rings::BROADCAST_HEADER_PROBE_BYTES];
     std::fs::File::open(path)
         .unwrap()

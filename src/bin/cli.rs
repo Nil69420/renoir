@@ -283,7 +283,7 @@ fn handle_region_commands(matches: &clap::ArgMatches) -> Result<()> {
             let file_path = create_matches
                 .get_one::<String>("file")
                 .map(PathBuf::from)
-                .or_else(|| Some(PathBuf::from(format!("/tmp/renoir_{}", name))));
+                .or_else(|| Some(renoir::memory::region_path(name)));
 
             let manager = SharedMemoryManager::new();
             let config = RegionConfig {
@@ -349,7 +349,7 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                 name: region_name.to_string(),
                 size: buffer_size * count * 2,
                 backing_type: BackingType::FileBacked,
-                file_path: Some(PathBuf::from(format!("/tmp/renoir_{}", region_name))),
+                file_path: Some(renoir::memory::region_path(region_name)),
                 create: true,
                 permissions: 0o644,
             };
@@ -936,7 +936,7 @@ fn show_info() -> Result<()> {
 }
 
 /// Introspect live topic rings: scan the file-backed topic region files in
-/// /tmp and report each ring's shared control block (capacity, positions,
+/// the shared memory directory and report each ring's shared control block (capacity, positions,
 /// utilization, pending bytes, oldest pending message latency).
 fn handle_topics_commands(matches: &clap::ArgMatches) -> Result<()> {
     let watch = matches.get_flag("watch");
@@ -972,8 +972,10 @@ struct TopicRow {
 }
 
 fn print_topics_table() -> Result<()> {
-    let entries = std::fs::read_dir("/tmp")
-        .map_err(|e| renoir::error::RenoirError::from_io(e, "Failed to read /tmp"))?;
+    let dir = renoir::memory::shm_dir();
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        renoir::error::RenoirError::from_io(e, "Failed to read shared memory directory")
+    })?;
 
     let mut rows: Vec<TopicRow> = Vec::new();
     let mut broadcast_rows: Vec<BroadcastRow> = Vec::new();
@@ -1021,7 +1023,10 @@ fn print_topics_table() -> Result<()> {
     }
 
     if rows.is_empty() && broadcast_rows.is_empty() {
-        println!("No topic rings found (no /tmp/renoir_topic_* regions)");
+        println!(
+            "No topic rings found (no renoir_topic_* regions in {})",
+            dir.display()
+        );
         return Ok(());
     }
 

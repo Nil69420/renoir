@@ -71,6 +71,13 @@ LD_LIBRARY_PATH=target/release ./first
 
 Expected output: `received 17 bytes: hello from renoir`
 
+## Where the shared memory lives
+
+Topic regions are files named `renoir_topic_*`. They are created in
+`$RENOIR_SHM_DIR` if set, otherwise in `/dev/shm` (RAM-backed tmpfs) when it
+exists, otherwise in `/tmp`. On a robot keep this on tmpfs: a disk-backed
+directory makes the kernel write the ring to flash continuously.
+
 ## 3. Cross-process pub/sub
 
 Topics are file-backed, so a second process can attach to the same region
