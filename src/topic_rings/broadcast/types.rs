@@ -32,11 +32,16 @@ impl BroadcastReservation {
 pub struct BroadcastCursor {
     pub(super) next: u64,
     pub(super) overruns: u64,
+    pub(super) skipped: u64,
 }
 
 impl BroadcastCursor {
     pub fn overruns(&self) -> u64 {
         self.overruns
+    }
+
+    pub fn skipped(&self) -> u64 {
+        self.skipped
     }
 
     pub fn next_index(&self) -> u64 {

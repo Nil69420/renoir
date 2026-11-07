@@ -1404,6 +1404,33 @@ pub extern "C" fn renoir_subscribe_wait(
     }
 }
 
+/// Drop unread messages so at most `keep` (minimum 1) of the newest remain (SPMC topics)
+///
+/// Use before reading when only fresh data matters, e.g. a vision pipeline
+/// that must not process stale frames. `out_skipped` may be null.
+#[no_mangle]
+pub extern "C" fn renoir_subscriber_skip_to_latest(
+    subscriber: RenoirSubscriberHandle,
+    keep: u64,
+    out_skipped: *mut u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let skipped = sub.skip_to_latest(keep);
+    if !out_skipped.is_null() {
+        unsafe { *out_skipped = skipped };
+    }
+    RenoirErrorCode::Success
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

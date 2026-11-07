@@ -261,6 +261,32 @@ fn test_read_into_copies_to_caller_buffer_and_reports_too_small_without_consumin
 }
 
 #[test]
+fn test_skip_to_latest_keeps_only_the_newest_unread_messages() {
+    let (ring, _mem) = make_ring(16, 64);
+    let mut cursor = ring.cursor_latest();
+    for i in 1..=10u64 {
+        ring.try_publish(&msg(i, 8)).unwrap();
+    }
+    assert_eq!(ring.skip_to_latest(&mut cursor, 1), 9);
+    assert_eq!(cursor.skipped(), 9);
+    assert_eq!(cursor.overruns(), 0);
+    assert_eq!(seq_of(&ring.try_consume(&mut cursor).unwrap().unwrap()), 10);
+    assert!(ring.try_consume(&mut cursor).unwrap().is_none());
+    assert_eq!(ring.skip_to_latest(&mut cursor, 1), 0);
+
+    for i in 11..=15u64 {
+        ring.try_publish(&msg(i, 8)).unwrap();
+    }
+    assert_eq!(ring.skip_to_latest(&mut cursor, 3), 2);
+    let mut got = Vec::new();
+    while let Some(m) = ring.try_consume(&mut cursor).unwrap() {
+        got.push(seq_of(&m));
+    }
+    assert_eq!(got, vec![13, 14, 15]);
+    assert_eq!(ring.skip_to_latest(&mut cursor, 0), 0);
+}
+
+#[test]
 fn test_wait_readable_times_out_when_nothing_is_published() {
     let (ring, _mem) = make_ring(8, 64);
     let cursor = ring.cursor_latest();

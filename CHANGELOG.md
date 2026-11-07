@@ -35,6 +35,11 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   helpers that initialise and validate untrusted payloads. Broadcast payloads
   are now 64-byte aligned.
 
+- `renoir_subscriber_skip_to_latest` / C++ `Subscriber::skipToLatest`: drop stale
+  unread messages so a slow vision consumer always reads fresh frames.
+- `tools/soak/renoir_soak.c`: C-ABI soak and latency test for camera and IMU
+  streams.
+
 ### Changed
 - Topic regions are now created in `$RENOIR_SHM_DIR`, else `/dev/shm`, else
   `/tmp` (previously always `/tmp`), so rings live in RAM instead of being

@@ -175,6 +175,10 @@ impl Subscriber {
         Ok(result)
     }
 
+    pub fn skip_to_latest(&self, keep: u64) -> u64 {
+        self.topic.skip_to_latest_with(&self.cursor, keep)
+    }
+
     pub fn wait_readable(&self, timeout: Option<Duration>) -> bool {
         self.topic.wait_readable_with(&self.cursor, timeout)
     }

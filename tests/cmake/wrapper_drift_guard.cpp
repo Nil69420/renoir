@@ -256,6 +256,15 @@ static void test_broadcast_zero_copy() {
     assert(len == 10);
     assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Message);
     assert(sub_a.overruns() == 0);
+    for (int i = 0; i < 5; ++i) {
+        Reservation r = publisher.reserve(4);
+        r.data()[0] = static_cast<uint8_t>(i);
+        r.commit(4);
+    }
+    assert(sub_a.skipToLatest(1) == 4);
+    assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Message);
+    assert(buf[0] == 4);
+    assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Empty);
     (void)tiny;
     std::cout << "  broadcast zero-copy ok\n";
 }

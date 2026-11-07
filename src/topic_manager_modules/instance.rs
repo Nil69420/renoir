@@ -395,6 +395,13 @@ impl TopicInstance {
         }
     }
 
+    pub fn skip_to_latest_with(&self, cursor: &Mutex<Option<BroadcastCursor>>, keep: u64) -> u64 {
+        match (&self.ring, &mut *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.skip_to_latest(c, keep),
+            _ => 0,
+        }
+    }
+
     pub fn wait_readable_with(
         &self,
         cursor: &Mutex<Option<BroadcastCursor>>,

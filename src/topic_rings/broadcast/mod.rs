@@ -179,6 +179,7 @@ impl BroadcastTopicRing {
         BroadcastCursor {
             next: self.published_count() + 1,
             overruns: 0,
+            skipped: 0,
         }
     }
 
@@ -187,6 +188,7 @@ impl BroadcastTopicRing {
         BroadcastCursor {
             next: w.saturating_sub(self.slot_count - 1).max(1),
             overruns: 0,
+            skipped: 0,
         }
     }
 
@@ -315,6 +317,19 @@ impl BroadcastTopicRing {
                 header,
                 payload: MessagePayload::Inline(payload),
             }));
+        }
+    }
+
+    pub fn skip_to_latest(&self, cursor: &mut BroadcastCursor, keep: u64) -> u64 {
+        let w = self.write_idx().load(Ordering::Acquire);
+        let target = w.saturating_sub(keep.max(1) - 1).max(1);
+        if target > cursor.next {
+            let skipped = target - cursor.next;
+            cursor.skipped += skipped;
+            cursor.next = target;
+            skipped
+        } else {
+            0
         }
     }
 

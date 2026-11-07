@@ -10,12 +10,13 @@ use renoir::ffi::{
     renoir_publish_commit, renoir_publish_discard, renoir_publish_reserve, renoir_publisher_create,
     renoir_publisher_destroy, renoir_subscribe_read_into, renoir_subscribe_read_next,
     renoir_subscribe_wait, renoir_subscriber_create, renoir_subscriber_destroy,
-    renoir_subscriber_overruns, renoir_topic_list, renoir_topic_list_free,
-    renoir_topic_manager_create, renoir_topic_manager_destroy, renoir_topic_register,
-    renoir_version_major, renoir_version_minor, renoir_version_patch, renoir_version_string,
-    RenoirBufferPoolConfig, RenoirBufferPoolHandle, RenoirErrorCode, RenoirMessageMetadata,
-    RenoirPublisherHandle, RenoirReceivedMessage, RenoirRegionConfig, RenoirSequenceNumber,
-    RenoirSubscriberHandle, RenoirTopicId, RenoirTopicInfo, RenoirTopicOptions,
+    renoir_subscriber_overruns, renoir_subscriber_skip_to_latest, renoir_topic_list,
+    renoir_topic_list_free, renoir_topic_manager_create, renoir_topic_manager_destroy,
+    renoir_topic_register, renoir_version_major, renoir_version_minor, renoir_version_patch,
+    renoir_version_string, RenoirBufferPoolConfig, RenoirBufferPoolHandle, RenoirErrorCode,
+    RenoirMessageMetadata, RenoirPublisherHandle, RenoirReceivedMessage, RenoirRegionConfig,
+    RenoirSequenceNumber, RenoirSubscriberHandle, RenoirTopicId, RenoirTopicInfo,
+    RenoirTopicOptions,
 };
 use std::ffi::CStr;
 #[cfg(feature = "c-api")]
@@ -576,6 +577,33 @@ mod ffi_tests {
                     RenoirErrorCode::Success
                 );
             }
+            let mut skipped = 0u64;
+            assert_eq!(
+                renoir_subscriber_skip_to_latest(sub_a, 1, &mut skipped),
+                RenoirErrorCode::Success
+            );
+            assert!(skipped > 0);
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    sub_a,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    sub_a,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::BufferEmpty
+            );
+
             let mut overruns = 0u64;
             assert_eq!(
                 renoir_subscriber_overruns(sub_b, &mut overruns),

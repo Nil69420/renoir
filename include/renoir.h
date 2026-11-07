@@ -1115,6 +1115,16 @@ enum RenoirErrorCode renoir_subscriber_overruns(RenoirSubscriberHandle subscribe
 enum RenoirErrorCode renoir_subscribe_wait(RenoirSubscriberHandle subscriber, uint64_t timeout_ms);
 
 /**
+ * Drop unread messages so at most `keep` (minimum 1) of the newest remain (SPMC topics)
+ *
+ * Use before reading when only fresh data matters, e.g. a vision pipeline
+ * that must not process stale frames. `out_skipped` may be null.
+ */
+enum RenoirErrorCode renoir_subscriber_skip_to_latest(RenoirSubscriberHandle subscriber,
+                                                      uint64_t keep,
+                                                      uint64_t *out_skipped);
+
+/**
  * Free a C string allocated by this library
  */
 void renoir_free_string(char *ptr);
