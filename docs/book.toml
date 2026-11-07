@@ -1,0 +1,7 @@
+[book]
+title = "Renoir Documentation"
+authors = ["Nilanjan Chowdhury"]
+language = "en"
+
+[build]
+create-missing = false

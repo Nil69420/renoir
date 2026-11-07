@@ -37,7 +37,7 @@ RenoirSubscriberHandle sub;
 renoir_subscriber_create(mgr, "/sensor/imu", &sub_opts, &sub);
 
 RenoirReceivedMessage msg;
-if (renoir_subscribe_read_next(sub, &msg) == Success) {
+if (renoir_subscribe_read_next(sub, &msg) == RenoirErrorCode_Success) {
     // msg.data, msg.data_len
     renoir_message_release(&msg);
 }
@@ -163,7 +163,6 @@ The C header is generated at `target/include/renoir.h` during build.
 | `memfd` | yes | `memfd_create` support (Linux) |
 | `c-api` | yes | C FFI bindings via `cbindgen` |
 | `cli` | no | Command-line tool |
-| `custom-allocator` | no | `mimalloc` global allocator |
 
 ### Cross-Compilation
 
@@ -182,13 +181,16 @@ Renoir is organized as layered modules with explicit ownership boundaries:
 | Topic lifecycle | Publisher/subscriber creation, routing, and metadata orchestration | `src/topic_manager_modules/`, `src/topic/` |
 | Ring and pool core | Lock-free ring transport and shared buffer pool management | `src/topic_rings/`, `src/ringbuf/`, `src/shared_pools/`, `src/buffers/` |
 | Memory and synchronization | Region allocation and cross-thread/process synchronization primitives | `src/memory/`, `src/sync/`, `src/allocators/` |
-| Message and compatibility | Payload formats, layout evolution, and large-message handling | `src/message_formats/`, `src/structured_layout/`, `src/large_payloads/` |
+| Message and compatibility | Payload formats, layout evolution, and large-message handling | `src/message_formats/`, `src/large_payloads/` |
 
 Operational characteristics:
 
 - Message handles define ownership and must be released explicitly at the FFI boundary.
 - Descriptor and payload paths validate pointer/length invariants before user-visible handoff.
 - Ring publish/consume paths are hardened for wraparound behavior and high-throughput contention.
+- Topic ring buffers live inside the topic's shared memory region, so topics configured with
+  file-backed regions support cross-process pub/sub: processes attaching to the same region
+  share the same ring state and message data.
 
 ## Requirements
 
@@ -210,4 +212,5 @@ GitHub Actions pipeline runs on every push and PR:
 
 ## License
 
-MIT OR Apache-2.0
+MIT OR Apache-2.0 — see [LICENSE-MIT](LICENSE-MIT) and
+[LICENSE-APACHE](LICENSE-APACHE) for the full license texts.

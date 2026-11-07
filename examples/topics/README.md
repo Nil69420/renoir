@@ -90,6 +90,27 @@ LD_LIBRARY_PATH=../../target/release ./topic_comprehensive_example
     Messages Dropped: 0
 ```
 
+### 4. Peek Example (`topic_peek_example.cpp`)
+
+**Purpose**: Demonstrates non-destructive message inspection
+
+**Features**:
+- `renoir_subscribe_peek()` to look at the next message without consuming it
+- Verifying that peeked messages match what publish wrote
+- Consuming after a peek to confirm the read position advances
+- SPSC topic configuration
+
+**Run**:
+```bash
+cd examples/build
+LD_LIBRARY_PATH=../../target/release ./topic_peek_example
+```
+
+**Key Concepts**:
+- `peek` returns a copy of the head message and does not advance the read position
+- A second peek returns the same message
+- `renoir_subscribe_read_next` consumes the message the peek previewed
+
 ## Building Examples
 
 ### Using build.sh (Recommended)
@@ -233,4 +254,3 @@ These examples demonstrate patterns suitable for ROS2 integration:
 
 - `/examples/buffers/` - Buffer pool and ring buffer examples
 - `/examples/region_manager/` - Shared memory region examples
-- `TOPIC_FFI_DESIGN.md` - Complete FFI API design document

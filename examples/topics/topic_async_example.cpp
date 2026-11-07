@@ -45,7 +45,7 @@ void producer_thread(RenoirPublisherHandle publisher) {
         auto result = renoir_publish(publisher, reinterpret_cast<const uint8_t*>(msg),
                                     strlen(msg) + 1, &metadata, &seq_out);
         
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "[Producer] Sent message #" << i << "\n";
         }
         
@@ -61,7 +61,7 @@ void consumer_event_loop(RenoirSubscriberHandle subscriber) {
     // Get event fd
     int event_fd = -1;
     auto result = renoir_subscriber_get_event_fd(subscriber, &event_fd);
-    if (result != RenoirErrorCode::Success || event_fd < 0) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success || event_fd < 0) {
         std::cerr << "[Consumer] Failed to get event fd\n";
         return;
     }
@@ -99,13 +99,13 @@ void consumer_event_loop(RenoirSubscriberHandle subscriber) {
             RenoirReceivedMessage msg = {};
             result = renoir_subscribe_read_next(subscriber, &msg, 0);  // 0 = non-blocking
             
-            if (result == RenoirErrorCode::Success) {
+            if (result == RenoirErrorCode::RenoirErrorCode_Success) {
                 messages_received++;
                 std::cout << "[Consumer] Received (event-driven): seq="
                           << msg.metadata.sequence_number
                           << ", data='" << reinterpret_cast<const char*>(msg.payload_ptr) << "'\n";
                 renoir_message_release(msg.handle);
-            } else if (result == RenoirErrorCode::BufferEmpty) {
+            } else if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
                 break;  // No more messages
             } else {
                 std::cerr << "[Consumer] Read failed\n";
@@ -131,7 +131,7 @@ void consumer_event_loop(RenoirSubscriberHandle subscriber) {
         RenoirReceivedMessage msg = {};
         auto result = renoir_subscribe_read_next(subscriber, &msg, 0);  // Non-blocking
         
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             messages_received++;
             std::cout << "[Consumer] Received: " 
                       << reinterpret_cast<const char*>(msg.payload_ptr) << "\n";

@@ -130,7 +130,7 @@ All functions return `RenoirErrorCode`. Always check return values:
 
 ```cpp
 RenoirErrorCode error = renoir_buffer_get(pool, &buffer);
-if (error != Success) {
+if (error != RenoirErrorCode_Success) {
     // Handle error
     return error;
 }

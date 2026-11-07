@@ -39,7 +39,7 @@ private:
     }
 
     void check_error(RenoirErrorCode error, const std::string& operation) {
-        if (error != Success) {
+        if (error != RenoirErrorCode_Success) {
             std::cerr << "Error in " << operation << ": " << static_cast<int>(error) << std::endl;
             cleanup();
             exit(1);
@@ -159,7 +159,7 @@ private:
             // Get buffer info
             RenoirBufferInfo info;
             error = renoir_buffer_info(buffer, &info);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "  Buffer size: " << info.size << " bytes" << std::endl;
                 std::cout << "  Buffer capacity: " << info.capacity << " bytes" << std::endl;
                 std::cout << "  Buffer alignment: " << info.alignment << " bytes" << std::endl;
@@ -211,7 +211,7 @@ private:
             for (int i = 0; i < alloc_count; ++i) {
                 RenoirBufferHandle buffer;
                 RenoirErrorCode error = renoir_buffer_get(buffer_pool, &buffer);
-                if (error == Success) {
+                if (error == RenoirErrorCode_Success) {
                     temp_buffers.push_back(buffer);
                 }
             }
@@ -221,7 +221,7 @@ private:
             // Get statistics
             RenoirBufferPoolStats stats;
             RenoirErrorCode error = renoir_buffer_pool_stats(buffer_pool, &stats);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "Current Usage: " << stats.currently_in_use 
                           << "/" << stats.total_allocated << std::endl;
                 std::cout << "Success Rate: " << std::fixed << std::setprecision(1) 
@@ -255,13 +255,13 @@ private:
                 RenoirBufferHandle buffer;
                 RenoirErrorCode error = renoir_buffer_get(buffer_pool, &buffer);
                 
-                if (error == Success) {
+                if (error == RenoirErrorCode_Success) {
                     // Simulate some work
                     std::this_thread::sleep_for(std::chrono::microseconds(10));
                     
                     // Return buffer
                     error = renoir_buffer_return(buffer_pool, buffer);
-                    if (error == Success) {
+                    if (error == RenoirErrorCode_Success) {
                         successful_operations++;
                     } else {
                         failed_operations++;
@@ -305,7 +305,7 @@ private:
         // Final pool statistics
         RenoirBufferPoolStats final_stats;
         RenoirErrorCode error = renoir_buffer_pool_stats(buffer_pool, &final_stats);
-        if (error == Success) {
+        if (error == RenoirErrorCode_Success) {
             std::cout << "\nFinal Pool Statistics:" << std::endl;
             print_pool_stats(final_stats);
         }
@@ -317,7 +317,7 @@ private:
         // Destroy buffer pool
         if (buffer_pool) {
             RenoirErrorCode error = renoir_buffer_pool_destroy(buffer_pool);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Buffer pool destroyed" << std::endl;
             }
             buffer_pool = nullptr;
@@ -326,7 +326,7 @@ private:
         // Close backing region
         if (backing_region) {
             RenoirErrorCode error = renoir_region_close(backing_region);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Backing region closed" << std::endl;
             }
             backing_region = nullptr;
@@ -335,7 +335,7 @@ private:
         // Destroy manager
         if (manager) {
             RenoirErrorCode error = renoir_manager_destroy(manager);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Manager destroyed" << std::endl;
             }
             manager = nullptr;

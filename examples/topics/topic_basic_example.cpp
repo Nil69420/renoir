@@ -42,7 +42,7 @@ int main() {
     
     RenoirTopicId topic_id;
     auto result = renoir_topic_register(manager, "/example/messages", &topic_opts, &topic_id);
-    if (result != RenoirErrorCode::Success) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success) {
         std::cerr << "Failed to register topic: " << static_cast<int>(result) << std::endl;
         renoir_topic_manager_destroy(manager);
         return 1;
@@ -59,7 +59,7 @@ int main() {
     
     RenoirPublisherHandle publisher = nullptr;
     result = renoir_publisher_create(manager, "/example/messages", &pub_opts, &publisher);
-    if (result != RenoirErrorCode::Success || publisher == nullptr) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success || publisher == nullptr) {
         std::cerr << "Failed to create publisher" << std::endl;
         renoir_topic_manager_destroy(manager);
         return 1;
@@ -77,7 +77,7 @@ int main() {
     
     RenoirSubscriberHandle subscriber = nullptr;
     result = renoir_subscriber_create(manager, "/example/messages", &sub_opts, &subscriber);
-    if (result != RenoirErrorCode::Success || subscriber == nullptr) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success || subscriber == nullptr) {
         std::cerr << "Failed to create subscriber" << std::endl;
         renoir_publisher_destroy(publisher);
         renoir_topic_manager_destroy(manager);
@@ -109,7 +109,7 @@ int main() {
             &seq_out
         );
         
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "   ✓ Published [seq=" << seq_out << "]: " << message_data << std::endl;
         }
     }
@@ -120,11 +120,11 @@ int main() {
         RenoirReceivedMessage msg = {};
         result = renoir_subscribe_read_next(subscriber, &msg, 1000);
         
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "   ✓ Received [seq=" << msg.metadata.sequence_number << "]: '"
                       << reinterpret_cast<const char*>(msg.payload_ptr) << "'" << std::endl;
             renoir_message_release(msg.handle);
-        } else if (result == RenoirErrorCode::BufferEmpty) {
+        } else if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
             std::cout << "   (timeout)" << std::endl;
             break;
         }
@@ -134,7 +134,7 @@ int main() {
     std::cout << "\n7. Statistics:" << std::endl;
     RenoirTopicStats stats = {};
     result = renoir_topic_stats(manager, "/example/messages", &stats);
-    if (result == RenoirErrorCode::Success) {
+    if (result == RenoirErrorCode::RenoirErrorCode_Success) {
         std::cout << "   Published: " << stats.messages_published << std::endl;
         std::cout << "   Consumed:  " << stats.messages_consumed << std::endl;
         std::cout << "   Dropped:   " << stats.messages_dropped << std::endl;
