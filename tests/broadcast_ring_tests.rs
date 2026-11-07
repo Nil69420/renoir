@@ -456,6 +456,49 @@ fn test_concurrent_first_attach_never_sees_or_resets_a_half_built_header() {
     }
 }
 
+fn corrupt_future_slot() -> (Arc<BroadcastTopicRing>, Vec<u64>) {
+    let (ring, mut mem) = make_ring(8, 64);
+    ring.try_publish(&msg(1, 8)).unwrap();
+    let words = mem.as_mut_ptr();
+    unsafe { words.add(64 / 8).write(2 * 100) };
+    (ring, mem)
+}
+
+fn must_finish<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("reader hung on a corrupt slot")
+}
+
+#[test]
+fn test_corrupt_future_slot_does_not_hang_try_consume() {
+    let (ring, mem) = corrupt_future_slot();
+    let r = must_finish(move || {
+        let mut cursor = ring.cursor_oldest();
+        let first = ring.try_consume(&mut cursor);
+        let second = ring.try_consume(&mut cursor);
+        let _keep = mem;
+        (first.is_err(), second.is_ok(), cursor.overruns())
+    });
+    assert_eq!(r, (true, true, 1));
+}
+
+#[test]
+fn test_corrupt_future_slot_does_not_hang_read_into() {
+    let (ring, mem) = corrupt_future_slot();
+    let r = must_finish(move || {
+        let mut cursor = ring.cursor_oldest();
+        let mut dst = [0u8; 64];
+        let first = ring.read_into(&mut cursor, &mut dst);
+        let _keep = mem;
+        first.is_err()
+    });
+    assert!(r);
+}
+
 #[test]
 fn test_broadcast_concurrent_no_torn_reads() {
     const TOTAL: u64 = if cfg!(miri) { 3_000 } else { 200_000 };

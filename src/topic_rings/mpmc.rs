@@ -196,17 +196,21 @@ impl MPMCTopicRing {
     /// memory (e.g. another process's shared region), without constructing
     /// a ring. Returns None if the memory doesn't contain a valid MPMC ring.
     pub fn read_control_info(memory: &[u8]) -> Option<RingControlInfo> {
+        use super::header_bytes::{read_u64, read_usize, valid_capacity};
         if memory.len() < std::mem::size_of::<MPMCRingHeader>() {
             return None;
         }
-        let header = unsafe { &*(memory.as_ptr() as *const MPMCRingHeader) };
-        if header.magic != MPMC_RING_MAGIC {
+        if read_u64(memory, std::mem::offset_of!(MPMCRingHeader, magic))? != MPMC_RING_MAGIC {
+            return None;
+        }
+        let capacity = read_usize(memory, std::mem::offset_of!(MPMCRingHeader, capacity))?;
+        if !valid_capacity(capacity, memory.len()) {
             return None;
         }
         Some(RingControlInfo {
-            capacity: header.capacity,
-            write_pos: header.write_pos.load(Ordering::Relaxed),
-            read_pos: header.read_pos.load(Ordering::Relaxed),
+            capacity,
+            write_pos: read_usize(memory, std::mem::offset_of!(MPMCRingHeader, write_pos))?,
+            read_pos: read_usize(memory, std::mem::offset_of!(MPMCRingHeader, read_pos))?,
         })
     }
 
@@ -220,6 +224,9 @@ impl MPMCTopicRing {
             return None;
         }
 
+        if info.capacity < MessageHeader::SIZE {
+            return None;
+        }
         let header_start = std::mem::size_of::<MPMCRingHeader>();
         let start = info.read_pos & (info.capacity - 1);
         let first = usize::min(MessageHeader::SIZE, info.capacity - start);

@@ -41,6 +41,10 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   streams.
 
 ### Fixed
+- `renoir-cli topics` and the ring header parsers no longer panic or read out of
+  bounds on corrupt or hostile region files (found by fuzzing).
+- A corrupt broadcast slot can no longer make a reader spin forever; it is skipped
+  and reported as an overrun.
 - `Subscriber::has_new_messages` / `renoir_subscriber_has_messages` and
   `pending_messages` now reflect the shared ring (they used process-local
   statistics and a constant 0).

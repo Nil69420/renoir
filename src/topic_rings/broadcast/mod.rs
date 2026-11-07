@@ -12,6 +12,7 @@ use crate::{
 };
 
 use crate::topic_rings::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
+use crate::topic_rings::header_bytes::{read_u32, read_u64};
 use crate::topic_rings::spsc::SESSION_MARKER_OFFSET;
 
 pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
@@ -19,6 +20,7 @@ pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
 const HEADER_BYTES: usize = 64;
 const SLOT_HEADER_BYTES: usize = 16;
 const SLOT_ALIGN: usize = 64;
+pub(super) const MAX_READ_ATTEMPTS: u32 = 64;
 const MESSAGE_AREA_BYTES: usize = 112;
 const PAYLOAD_OFFSET: usize = SLOT_HEADER_BYTES + MESSAGE_AREA_BYTES;
 
@@ -227,7 +229,12 @@ impl BroadcastTopicRing {
     }
 
     fn read_at(&self, cursor: &mut BroadcastCursor) -> Result<Option<Message>> {
+        let mut attempts = 0u32;
         loop {
+            attempts += 1;
+            if attempts > MAX_READ_ATTEMPTS {
+                return Err(self.abandon_slot(cursor));
+            }
             let w = self.write_idx().load(Ordering::Acquire);
             if cursor.next > w {
                 return Ok(None);
@@ -318,6 +325,12 @@ impl BroadcastTopicRing {
         }
     }
 
+    pub(super) fn abandon_slot(&self, cursor: &mut BroadcastCursor) -> RenoirError {
+        cursor.next += 1;
+        cursor.overruns += 1;
+        RenoirError::serialization("Corrupt or unstable broadcast slot skipped")
+    }
+
     fn skip_ahead(&self, cursor: &mut BroadcastCursor, write_idx: u64) {
         let keep = (self.slot_count * 3 / 4).max(1);
         let target = write_idx.saturating_sub(keep - 1).max(1);
@@ -350,16 +363,6 @@ pub struct BroadcastControlInfo {
     pub published: u64,
     pub waiters: u32,
     pub session: u8,
-}
-
-fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    let raw: [u8; 8] = bytes.get(offset..offset + 8)?.try_into().ok()?;
-    Some(u64::from_ne_bytes(raw))
-}
-
-fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    let raw: [u8; 4] = bytes.get(offset..offset + 4)?.try_into().ok()?;
-    Some(u32::from_ne_bytes(raw))
 }
 
 impl BroadcastTopicRing {

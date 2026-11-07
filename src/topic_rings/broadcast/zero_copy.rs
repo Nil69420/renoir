@@ -8,7 +8,7 @@ use crate::{
 use super::{
     now_ns,
     types::{BroadcastCursor, BroadcastReservation, ReadInto},
-    BroadcastTopicRing, SlotHeader, PAYLOAD_OFFSET, SLOT_HEADER_BYTES,
+    BroadcastTopicRing, SlotHeader, MAX_READ_ATTEMPTS, PAYLOAD_OFFSET, SLOT_HEADER_BYTES,
 };
 use crate::topic_rings::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
 
@@ -97,7 +97,12 @@ impl BroadcastTopicRing {
     }
 
     fn read_into_at(&self, cursor: &mut BroadcastCursor, dst: &mut [u8]) -> Result<ReadInto> {
+        let mut attempts = 0u32;
         loop {
+            attempts += 1;
+            if attempts > MAX_READ_ATTEMPTS {
+                return Err(self.abandon_slot(cursor));
+            }
             let w = self.write_idx().load(Ordering::Acquire);
             if cursor.next > w {
                 return Ok(ReadInto::Empty);

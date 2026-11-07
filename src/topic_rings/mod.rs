@@ -6,6 +6,7 @@
 pub(crate) mod atomic_bytes;
 pub mod broadcast;
 pub(crate) mod futex;
+mod header_bytes;
 pub mod mpmc;
 pub mod spsc;
 
