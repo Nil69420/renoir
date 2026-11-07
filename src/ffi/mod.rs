@@ -8,6 +8,7 @@
 
 pub mod buffers;
 pub mod memory;
+pub mod sensor;
 pub mod topics;
 pub mod types;
 pub mod utils;
@@ -55,6 +56,11 @@ pub use topics::{
 
 #[cfg(target_os = "linux")]
 pub use topics::{renoir_subscriber_get_event_fd, renoir_wait_event};
+
+pub use sensor::{
+    renoir_image_frame_header_init, renoir_image_frame_payload_size, renoir_image_frame_validate,
+    renoir_imu_sample_init, renoir_imu_sample_validate,
+};
 
 // Version API
 pub use version::{

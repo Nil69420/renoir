@@ -196,6 +196,17 @@ fn zc_header(seq: u64, len: usize) -> MessageHeader {
 }
 
 #[test]
+fn test_reserved_payload_offsets_are_64_byte_aligned() {
+    let (ring, mem) = make_ring(8, 1000);
+    let base = mem.as_ptr() as usize;
+    for i in 1..=20u64 {
+        let r = ring.reserve(1000).unwrap();
+        assert_eq!((r.payload_ptr() as usize - base) % 64, 0);
+        ring.commit(r, &zc_header(i, 1000), 1000).unwrap();
+    }
+}
+
+#[test]
 fn test_reserve_commit_is_invisible_until_commit_and_readable_after() {
     let (ring, _mem) = make_ring(8, 128);
     let mut cursor = ring.cursor_latest();

@@ -477,6 +477,7 @@ mod ffi_tests {
                     RenoirErrorCode::Success
                 );
                 assert!(!slot.is_null());
+                assert_eq!(slot as usize % 64, 0);
                 let mut second: *mut u8 = ptr::null_mut();
                 let mut second_handle = ptr::null_mut();
                 assert_eq!(

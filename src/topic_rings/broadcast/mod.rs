@@ -19,7 +19,7 @@ pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
 const HEADER_BYTES: usize = 64;
 const SLOT_HEADER_BYTES: usize = 16;
 const SLOT_ALIGN: usize = 64;
-const MESSAGE_AREA_BYTES: usize = 64;
+const MESSAGE_AREA_BYTES: usize = 112;
 const PAYLOAD_OFFSET: usize = SLOT_HEADER_BYTES + MESSAGE_AREA_BYTES;
 
 #[repr(C)]
@@ -46,6 +46,8 @@ struct SlotHeader {
 }
 
 const _: () = assert!(MessageHeader::SIZE <= MESSAGE_AREA_BYTES);
+const _: () = assert!(PAYLOAD_OFFSET.is_multiple_of(64));
+const _: () = assert!(HEADER_BYTES.is_multiple_of(64));
 
 const _: () = assert!(std::mem::size_of::<SlotHeader>() == SLOT_HEADER_BYTES);
 

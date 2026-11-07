@@ -56,7 +56,11 @@ include = [
     "RenoirControlStats",
     "RenoirMemoryStats",
     "RenoirRegionRegistryEntry",
-    "RenoirTopicInfo"
+    "RenoirTopicInfo",
+
+    # Sensor message layouts
+    "RenoirImageFrameHeader",
+    "RenoirImuSample"
 ]
 
 [parse]

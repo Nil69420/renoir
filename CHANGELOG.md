@@ -29,6 +29,12 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - `renoir-cli topics` lists SPMC rings (slots, payload size, published count,
   waiters) by reading only the ring header.
 
+- Shared sensor message layouts for the C ABI: `RenoirImageFrameHeader` (128 B,
+  camera intrinsics and stamp in the same message as the pixels) and
+  `RenoirImuSample` (128 B), with `renoir_image_frame_*` and `renoir_imu_sample_*`
+  helpers that initialise and validate untrusted payloads. Broadcast payloads
+  are now 64-byte aligned.
+
 ### Changed
 - Breaking: SPMC topics use a new ring layout (`BROADCAST_RING_MAGIC`).
   Previously SPMC aliased the SPSC ring, whose single read cursor was

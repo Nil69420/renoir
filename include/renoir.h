@@ -17,6 +17,30 @@
 #include <unistd.h>
 #include <poll.h>
 
+#define RENOIR_IMAGE_FRAME_MAGIC 1196247378
+
+#define RENOIR_IMAGE_FRAME_VERSION 1
+
+#define RENOIR_ENCODING_MONO8 0
+
+#define RENOIR_ENCODING_MONO16 1
+
+#define RENOIR_ENCODING_RGB8 2
+
+#define RENOIR_ENCODING_BGR8 3
+
+#define RENOIR_DISTORTION_NONE 0
+
+#define RENOIR_DISTORTION_PLUMB_BOB 1
+
+#define RENOIR_DISTORTION_EQUIDISTANT 2
+
+#define RENOIR_IMU_SAMPLE_MAGIC 1431128402
+
+#define RENOIR_IMU_SAMPLE_VERSION 1
+
+#define RENOIR_IMU_FLAG_ORIENTATION_VALID 1
+
 /**
  * Magic number for message header validation
  */
@@ -295,6 +319,41 @@ typedef struct RenoirRegionStats {
   uintptr_t topic_count;
   uint64_t allocation_count;
 } RenoirRegionStats;
+
+typedef struct RenoirImageFrameHeader {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t encoding;
+  uint64_t stamp_ns;
+  uint32_t width;
+  uint32_t height;
+  uint32_t stride;
+  uint32_t camera_id;
+  uint64_t frame_seq;
+  double fx;
+  double fy;
+  double cx;
+  double cy;
+  uint32_t distortion_model;
+  uint32_t flags;
+  double distortion[5];
+  uint32_t pixel_offset;
+  uint32_t reserved;
+} RenoirImageFrameHeader;
+
+typedef struct RenoirImuSample {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t flags;
+  uint64_t stamp_ns;
+  double gyro[3];
+  double accel[3];
+  double orientation[4];
+  uint64_t seq;
+  uint32_t imu_id;
+  uint32_t reserved0;
+  uint64_t reserved[2];
+} RenoirImuSample;
 
 typedef void *RenoirTopicManagerHandle;
 
@@ -773,6 +832,47 @@ enum RenoirErrorCode renoir_manager_flush_all(RenoirManagerHandle manager);
  * Clear all regions from manager
  */
 enum RenoirErrorCode renoir_manager_clear_all(RenoirManagerHandle manager);
+
+/**
+ * Total payload bytes for an image frame (header plus pixels); 0 if the
+ * geometry or encoding is invalid. A `stride` of 0 means tightly packed.
+ */
+uintptr_t renoir_image_frame_payload_size(uint32_t width,
+                                          uint32_t height,
+                                          uint32_t stride,
+                                          uint16_t encoding);
+
+/**
+ * Initialise an image frame header in caller memory (intrinsics default to zero).
+ */
+enum RenoirErrorCode renoir_image_frame_header_init(struct RenoirImageFrameHeader *header,
+                                                    uint32_t width,
+                                                    uint32_t height,
+                                                    uint32_t stride,
+                                                    uint16_t encoding,
+                                                    uint64_t stamp_ns,
+                                                    uint32_t camera_id,
+                                                    uint64_t frame_seq);
+
+/**
+ * Check that a received payload holds a well-formed image frame.
+ */
+enum RenoirErrorCode renoir_image_frame_validate(const uint8_t *payload, uintptr_t len);
+
+/**
+ * Initialise an IMU sample in caller memory; gyro and accel are 3 doubles each.
+ */
+enum RenoirErrorCode renoir_imu_sample_init(struct RenoirImuSample *sample,
+                                            uint64_t stamp_ns,
+                                            const double *gyro,
+                                            const double *accel,
+                                            uint32_t imu_id,
+                                            uint64_t seq);
+
+/**
+ * Check that a received payload holds a well-formed IMU sample.
+ */
+enum RenoirErrorCode renoir_imu_sample_validate(const uint8_t *payload, uintptr_t len);
 
 /**
  * Create a new topic manager.

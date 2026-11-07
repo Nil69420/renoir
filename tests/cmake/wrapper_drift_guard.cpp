@@ -12,6 +12,9 @@
 #include "renoir.hpp"
 
 #include <cassert>
+#include <cstring>
+#include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -118,6 +121,8 @@ static void test_buffer_pool() {
 
 static void test_topics() {
     TopicManager manager;
+    const std::string guard_topic = "/drift/guard_" + std::to_string(getpid());
+    const std::string mpmc_topic = "/drift/mpmc_" + std::to_string(getpid());
     assert(manager.topicCount() == 0);
 
     TopicOptions options;
@@ -125,21 +130,21 @@ static void test_topics() {
     options.ring_capacity = 16;
     options.max_payload_size = 1024;
 
-    RenoirTopicId topic_id = manager.registerTopic("/drift/guard", options);
+    RenoirTopicId topic_id = manager.registerTopic(guard_topic, options);
     assert(topic_id > 0);
     (void)topic_id;
-    assert(manager.lookupTopic("/drift/guard") == topic_id);
+    assert(manager.lookupTopic(guard_topic) == topic_id);
     assert(manager.topicCount() == 1);
     assert(!manager.listTopics().empty());
 
     {
-        Publisher publisher = manager.createPublisher("/drift/guard");
-        assert(publisher.topicName() == "/drift/guard");
+        Publisher publisher = manager.createPublisher(guard_topic);
+        assert(publisher.topicName() == guard_topic);
         (void)publisher.hasSubscribers();
         (void)publisher.stats();
 
-        Subscriber subscriber = manager.createSubscriber("/drift/guard");
-        assert(subscriber.topicName() == "/drift/guard");
+        Subscriber subscriber = manager.createSubscriber(guard_topic);
+        assert(subscriber.topicName() == guard_topic);
         assert(subscriber.pendingCount() == 0);
         assert(!subscriber.hasMessages());
 
@@ -160,7 +165,7 @@ static void test_topics() {
         // real (non-zero) values, not the Stage-0 hardcoded zeros.
         RenoirTopicStats pub_stats = publisher.stats();
         RenoirTopicStats sub_stats = subscriber.stats();
-        RenoirTopicStats topic_stats = manager.topicStats("/drift/guard");
+        RenoirTopicStats topic_stats = manager.topicStats(guard_topic);
 #ifdef NDEBUG
         (void)pub_stats;
         (void)sub_stats;
@@ -186,17 +191,17 @@ static void test_topics() {
     {
         TopicOptions mpmc_options = options;
         mpmc_options.pattern = 3; // MPMC
-        manager.registerTopic("/drift/mpmc", mpmc_options);
+        manager.registerTopic(mpmc_topic, mpmc_options);
 
-        Publisher mpmc_pub = manager.createPublisher("/drift/mpmc");
-        Subscriber mpmc_sub = manager.createSubscriber("/drift/mpmc");
+        Publisher mpmc_pub = manager.createPublisher(mpmc_topic);
+        Subscriber mpmc_sub = manager.createSubscriber(mpmc_topic);
         mpmc_pub.publish({'m', 'p', 'm', 'c'});
         ReceivedMessage mpmc_msg = mpmc_sub.readNext(1000);
         assert(mpmc_msg.size() == 4);
     }
 
-    manager.removeTopic("/drift/mpmc");
-    manager.removeTopic("/drift/guard");
+    manager.removeTopic(mpmc_topic);
+    manager.removeTopic(guard_topic);
     std::cout << "  topics ok\n";
 }
 
@@ -255,6 +260,60 @@ static void test_broadcast_zero_copy() {
     std::cout << "  broadcast zero-copy ok\n";
 }
 
+static_assert(sizeof(RenoirImageFrameHeader) == 128, "image frame header must be 128 bytes");
+static_assert(sizeof(RenoirImuSample) == 128, "imu sample must be 128 bytes");
+static_assert(offsetof(RenoirImageFrameHeader, stamp_ns) == 8, "stamp offset");
+static_assert(offsetof(RenoirImageFrameHeader, fx) == 40, "intrinsics offset");
+static_assert(offsetof(RenoirImageFrameHeader, pixel_offset) == 120, "pixel offset field");
+static_assert(offsetof(RenoirImuSample, gyro) == 16, "gyro offset");
+
+static void test_sensor_frame_round_trip() {
+    TopicManager manager;
+    std::string name = "/drift/frame_" + std::to_string(getpid());
+    const uint32_t width = 1280, height = 720;
+    size_t total = renoir_image_frame_payload_size(width, height, 0, RENOIR_ENCODING_MONO8);
+    assert(total == 128 + 921600);
+
+    TopicOptions options;
+    options.pattern = 1;
+    options.ring_capacity = 4096;
+    options.max_payload_size = total;
+    manager.registerTopic(name, options);
+    Publisher publisher = manager.createPublisher(name);
+    Subscriber subscriber = manager.createSubscriber(name);
+
+    {
+        Reservation r = publisher.reserve(total);
+        assert(reinterpret_cast<uintptr_t>(r.data()) % 64 == 0);
+        RenoirImageFrameHeader* hdr = reinterpret_cast<RenoirImageFrameHeader*>(r.data());
+        assert(renoir_image_frame_header_init(hdr, width, height, 0, RENOIR_ENCODING_MONO8,
+                                              123456789, 0, 1) == RenoirErrorCode::RenoirErrorCode_Success);
+        hdr->fx = 458.654;
+        uint8_t* pixels = r.data() + hdr->pixel_offset;
+        assert(reinterpret_cast<uintptr_t>(pixels) % 64 == 0);
+        std::memset(pixels, 0x7F, static_cast<size_t>(width) * height);
+        r.commit(total);
+    }
+
+    std::vector<uint8_t> buf(total);
+    size_t len = 0;
+    assert(subscriber.readInto(buf.data(), buf.size(), &len) == ReadResult::Message);
+    assert(len == total);
+    assert(renoir_image_frame_validate(buf.data(), len) == RenoirErrorCode::RenoirErrorCode_Success);
+    const RenoirImageFrameHeader* got = reinterpret_cast<const RenoirImageFrameHeader*>(buf.data());
+    assert(got->width == width && got->height == height && got->stride == width);
+    assert(got->stamp_ns == 123456789 && got->fx == 458.654);
+    assert(buf[got->pixel_offset] == 0x7F && buf[len - 1] == 0x7F);
+    assert(renoir_image_frame_validate(buf.data(), len - 1) != RenoirErrorCode::RenoirErrorCode_Success);
+
+    double gyro[3] = {0.1, 0.2, 0.3}, accel[3] = {0.0, 0.0, 9.81};
+    RenoirImuSample imu;
+    assert(renoir_imu_sample_init(&imu, 1000, gyro, accel, 0, 1) == RenoirErrorCode::RenoirErrorCode_Success);
+    assert(renoir_imu_sample_validate(reinterpret_cast<const uint8_t*>(&imu), sizeof(imu)) ==
+           RenoirErrorCode::RenoirErrorCode_Success);
+    std::cout << "  sensor frame + imu ok\n";
+}
+
 int main() {
     std::cout << "Renoir C++ wrapper drift guard\n";
     test_version();
@@ -263,6 +322,7 @@ int main() {
     test_buffer_pool();
     test_topics();
     test_broadcast_zero_copy();
+    test_sensor_frame_round_trip();
     std::cout << "drift guard passed\n";
     return 0;
 }
