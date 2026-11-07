@@ -1,7 +1,7 @@
 use std::{
     ptr::NonNull,
     sync::{
-        atomic::{fence, AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{fence, AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
 };
@@ -17,7 +17,7 @@ use crate::topic_rings::spsc::SESSION_MARKER_OFFSET;
 
 pub const BROADCAST_RING_MAGIC: u64 = 0x4243_4153_5452_4E47;
 
-const HEADER_BYTES: usize = 64;
+const HEADER_BYTES: usize = 192;
 const SLOT_HEADER_BYTES: usize = 16;
 const SLOT_ALIGN: usize = 64;
 pub(super) const MAX_READ_ATTEMPTS: u32 = 64;
@@ -29,16 +29,21 @@ const PAYLOAD_OFFSET: usize = SLOT_HEADER_BYTES + MESSAGE_AREA_BYTES;
 struct BroadcastHeader {
     magic: u64,
     slot_count: usize,
-    session: u8,
+    session: AtomicU8,
     stride: usize,
     payload_cap: usize,
+    pad_cold: [u8; 24],
     write_idx: AtomicU64,
+    pad_write: [u8; 56],
     wake: AtomicU32,
     waiters: AtomicU32,
+    pad_wake: [u8; 56],
 }
 
 const _: () = assert!(std::mem::offset_of!(BroadcastHeader, session) == SESSION_MARKER_OFFSET);
-const _: () = assert!(std::mem::size_of::<BroadcastHeader>() <= HEADER_BYTES);
+const _: () = assert!(std::mem::size_of::<BroadcastHeader>() == HEADER_BYTES);
+const _: () = assert!(std::mem::offset_of!(BroadcastHeader, write_idx) == 64);
+const _: () = assert!(std::mem::offset_of!(BroadcastHeader, wake) == 128);
 
 #[repr(C)]
 struct SlotHeader {
@@ -84,7 +89,12 @@ impl BroadcastTopicRing {
     }
 
     pub fn slot_count_for(ring_bytes: usize, payload_cap: usize) -> usize {
-        ring_bytes / stride_for(payload_cap)
+        let fit = ring_bytes / stride_for(payload_cap);
+        if fit == 0 {
+            0
+        } else {
+            1usize << (usize::BITS - 1 - fit.leading_zeros())
+        }
     }
 
     pub fn required_memory_size(ring_bytes: usize, payload_cap: usize) -> usize {
@@ -341,7 +351,7 @@ impl BroadcastTopicRing {
     }
 
     fn slot_ptr(&self, idx: u64) -> *mut u8 {
-        let i = ((idx - 1) % self.slot_count) as usize;
+        let i = ((idx - 1) & (self.slot_count - 1)) as usize;
         unsafe { self.slots.as_ptr().add(i * self.stride) }
     }
 

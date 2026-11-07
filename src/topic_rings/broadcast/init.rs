@@ -53,7 +53,7 @@ pub(super) unsafe fn attach_header(
             .is_ok()
         {
             ptr::addr_of_mut!((*header).slot_count).write(slot_count);
-            ptr::addr_of_mut!((*header).session).write(SESSION_DIRTY);
+            (*header).session.store(SESSION_DIRTY, Ordering::Relaxed);
             ptr::addr_of_mut!((*header).stride).write(stride);
             ptr::addr_of_mut!((*header).payload_cap).write(payload_cap);
             (*header).write_idx.store(0, Ordering::Relaxed);

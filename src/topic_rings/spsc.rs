@@ -4,7 +4,7 @@ use std::{
     os::fd::RawFd,
     ptr::NonNull,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -66,7 +66,7 @@ impl RingControlInfo {
 struct SPSCRingHeader {
     magic: u64,
     capacity: usize,
-    session: u8,
+    session: AtomicU8,
     write_pos: AtomicUsize,
     read_pos: AtomicUsize,
     cached_read_pos: AtomicUsize,
@@ -125,7 +125,7 @@ impl SPSCTopicRing {
                 .write(SPSCRingHeader {
                     magic: SPSC_RING_MAGIC,
                     capacity,
-                    session: SESSION_DIRTY,
+                    session: AtomicU8::new(SESSION_DIRTY),
                     write_pos: AtomicUsize::new(0),
                     read_pos: AtomicUsize::new(0),
                     cached_read_pos: AtomicUsize::new(0),
@@ -199,7 +199,7 @@ impl SPSCTopicRing {
                 header_ptr.as_ptr().write(SPSCRingHeader {
                     magic: SPSC_RING_MAGIC,
                     capacity,
-                    session: SESSION_DIRTY,
+                    session: AtomicU8::new(SESSION_DIRTY),
                     write_pos: AtomicUsize::new(0),
                     read_pos: AtomicUsize::new(0),
                     cached_read_pos: AtomicUsize::new(0),

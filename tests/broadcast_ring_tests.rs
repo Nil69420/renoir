@@ -460,7 +460,7 @@ fn corrupt_future_slot() -> (Arc<BroadcastTopicRing>, Vec<u64>) {
     let (ring, mut mem) = make_ring(8, 64);
     ring.try_publish(&msg(1, 8)).unwrap();
     let words = mem.as_mut_ptr();
-    unsafe { words.add(64 / 8).write(2 * 100) };
+    unsafe { words.add(192 / 8).write(2 * 100) };
     (ring, mem)
 }
 

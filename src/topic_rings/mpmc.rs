@@ -4,7 +4,7 @@ use std::{
     os::fd::RawFd,
     ptr::NonNull,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -33,7 +33,7 @@ pub use crate::topic_rings::spsc::{
 struct MPMCRingHeader {
     magic: u64,
     capacity: usize,
-    session: u8,
+    session: AtomicU8,
     write_pos: AtomicUsize,
     published_pos: AtomicUsize,
     read_pos: AtomicUsize,
@@ -91,7 +91,7 @@ impl MPMCTopicRing {
                 .write(MPMCRingHeader {
                     magic: MPMC_RING_MAGIC,
                     capacity,
-                    session: SESSION_DIRTY,
+                    session: AtomicU8::new(SESSION_DIRTY),
                     write_pos: AtomicUsize::new(0),
                     published_pos: AtomicUsize::new(0),
                     read_pos: AtomicUsize::new(0),
@@ -164,7 +164,7 @@ impl MPMCTopicRing {
                 header_ptr.as_ptr().write(MPMCRingHeader {
                     magic: MPMC_RING_MAGIC,
                     capacity,
-                    session: SESSION_DIRTY,
+                    session: AtomicU8::new(SESSION_DIRTY),
                     write_pos: AtomicUsize::new(0),
                     published_pos: AtomicUsize::new(0),
                     read_pos: AtomicUsize::new(0),

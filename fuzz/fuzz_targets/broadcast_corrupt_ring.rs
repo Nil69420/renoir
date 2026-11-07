@@ -20,13 +20,13 @@ fuzz_target!(|data: &[u8]| {
     };
     let bytes: &mut [u8] =
         unsafe { std::slice::from_raw_parts_mut(memory.as_mut_ptr() as *mut u8, memory.len() * 8) };
-    let skip = 64usize;
+    let skip = 192usize;
     let n = data.len().min(bytes.len() - skip);
     bytes[skip..skip + n].copy_from_slice(&data[..n]);
     let stride = BroadcastTopicRing::slot_stride(CAP);
     if let Some(&mode) = data.first() {
         let published = u64::from(mode % 24);
-        bytes[40..48].copy_from_slice(&published.to_ne_bytes());
+        bytes[64..72].copy_from_slice(&published.to_ne_bytes());
         for idx in 1..=published.min(SLOTS as u64) {
             let slot = skip + ((idx - 1) as usize % SLOTS) * stride;
             if mode & 0x40 == 0 {
