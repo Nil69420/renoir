@@ -84,6 +84,10 @@ harness = false
 name = "topic_rings_bench"
 harness = false
 
+[[bench]]
+name = "broadcast_frames_bench"
+harness = false
+
 [package.metadata.docs.rs]
 features = ["file-backed", "memfd", "c-api"]
 
