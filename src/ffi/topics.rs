@@ -112,12 +112,28 @@ pub extern "C" fn renoir_topic_manager_destroy(
 // Topic Registration API
 // ============================================================================
 
+/// Topic registration flag: discard messages left by a previous clean session
+/// when no live process holds the topic
+pub const RENOIR_TOPIC_FLAG_FRESH_START: u32 = 1;
+
 /// Register a new topic with the manager
 #[no_mangle]
 pub extern "C" fn renoir_topic_register(
     manager: RenoirTopicManagerHandle,
     topic_name: *const c_char,
     options: *const RenoirTopicOptions,
+    topic_id: *mut RenoirTopicId,
+) -> RenoirErrorCode {
+    renoir_topic_register_ex(manager, topic_name, options, 0, topic_id)
+}
+
+/// Register a new topic with the manager, with extra `RENOIR_TOPIC_FLAG_*` flags
+#[no_mangle]
+pub extern "C" fn renoir_topic_register_ex(
+    manager: RenoirTopicManagerHandle,
+    topic_name: *const c_char,
+    options: *const RenoirTopicOptions,
+    flags: u32,
     topic_id: *mut RenoirTopicId,
 ) -> RenoirErrorCode {
     if manager.is_null() || topic_name.is_null() || options.is_null() || topic_id.is_null() {
@@ -155,6 +171,7 @@ pub extern "C" fn renoir_topic_register(
         max_payload_size: options.max_payload_size,
         use_shared_pool: options.use_shared_pool,
         shared_pool_threshold: options.shared_pool_threshold,
+        fresh_start: flags & RENOIR_TOPIC_FLAG_FRESH_START != 0,
         enable_notifications: options.enable_notifications,
         qos: TopicQoS {
             reliability: Reliability::BestEffort,

@@ -233,6 +233,7 @@ static void test_broadcast_zero_copy() {
         (void)seq;
     }
     assert(sub_a.wait(100));
+    assert(sub_a.hasMessages() && sub_a.pendingCount() == 1);
     for (Subscriber* sub : {&sub_a, &sub_b}) {
         RenoirMessageMetadata meta = {};
         assert(sub->readInto(buf.data(), buf.size(), &len, &meta) == ReadResult::Message);
@@ -323,6 +324,35 @@ static void test_sensor_frame_round_trip() {
     std::cout << "  sensor frame + imu ok\n";
 }
 
+static void test_fresh_start_option() {
+    std::string name = "/drift/fresh_" + std::to_string(getpid());
+    TopicOptions options;
+    options.pattern = 0;
+    options.ring_capacity = 16;
+    options.max_payload_size = 256;
+    {
+        TopicManager first;
+        first.registerTopic(name, options);
+        Publisher p = first.createPublisher(name);
+        p.publish({'o', 'l', 'd'});
+    }
+    {
+        TopicManager keep;
+        keep.registerTopic(name, options);
+        Subscriber s = keep.createSubscriber(name);
+        assert(s.hasMessages());
+    }
+    {
+        TopicManager fresh;
+        TopicOptions o2 = options;
+        o2.fresh_start = true;
+        fresh.registerTopic(name, o2);
+        Subscriber s = fresh.createSubscriber(name);
+        assert(!s.hasMessages());
+    }
+    std::cout << "  fresh start ok\n";
+}
+
 int main() {
     std::cout << "Renoir C++ wrapper drift guard\n";
     test_version();
@@ -332,6 +362,7 @@ int main() {
     test_topics();
     test_broadcast_zero_copy();
     test_sensor_frame_round_trip();
+    test_fresh_start_option();
     std::cout << "drift guard passed\n";
     return 0;
 }

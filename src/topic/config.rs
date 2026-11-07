@@ -60,6 +60,9 @@ pub struct TopicConfig {
     pub qos: TopicQoS,
     /// Message format configuration
     pub message_format: TopicMessageFormat,
+    /// Discard any messages left in the region by a previous cleanly-exited
+    /// session when no live process holds it
+    pub fresh_start: bool,
 }
 
 impl Default for TopicConfig {
@@ -74,6 +77,7 @@ impl Default for TopicConfig {
             enable_notifications: true,
             qos: TopicQoS::default(),
             message_format: TopicMessageFormat::default(),
+            fresh_start: false,
         }
     }
 }

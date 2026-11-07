@@ -88,6 +88,7 @@ struct TopicOptions {
     bool use_shared_pool = false;
     size_t shared_pool_threshold = 4096;
     bool enable_notifications = true;
+    bool fresh_start = false;
 
     RenoirTopicOptions toC() const;
 };

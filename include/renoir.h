@@ -154,6 +154,12 @@
 #define MAX_CHUNKS_PER_MESSAGE 1024
 
 /**
+ * Topic registration flag: discard messages left by a previous clean session
+ * when no live process holds the topic
+ */
+#define RENOIR_TOPIC_FLAG_FRESH_START 1
+
+/**
  * Default size for control/metadata region (64KB)
  */
 #define DEFAULT_CONTROL_SIZE (64 * 1024)
@@ -909,6 +915,15 @@ enum RenoirErrorCode renoir_topic_register(RenoirTopicManagerHandle manager,
                                            const char *topic_name,
                                            const struct RenoirTopicOptions *options,
                                            RenoirTopicId *topic_id);
+
+/**
+ * Register a new topic with the manager, with extra `RENOIR_TOPIC_FLAG_*` flags
+ */
+enum RenoirErrorCode renoir_topic_register_ex(RenoirTopicManagerHandle manager,
+                                              const char *topic_name,
+                                              const struct RenoirTopicOptions *options,
+                                              uint32_t flags,
+                                              RenoirTopicId *topic_id);
 
 /**
  * Lookup an existing topic by name

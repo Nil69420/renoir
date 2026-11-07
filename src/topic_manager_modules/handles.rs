@@ -223,7 +223,7 @@ impl Subscriber {
 
     /// Get the number of pending messages in the ring buffer
     pub fn pending_messages(&self) -> usize {
-        self.topic.pending_messages()
+        self.topic.pending_with(&self.cursor)
     }
 
     /// Get the last consumed message sequence number
@@ -233,9 +233,7 @@ impl Subscriber {
 
     /// Check if there are new messages since last consumption
     pub fn has_new_messages(&self) -> bool {
-        let current_seq = self.topic.stats.current_sequence.load(Ordering::Relaxed);
-        let last_seq = self.last_sequence.load(Ordering::Relaxed);
-        current_seq > last_seq as u64
+        self.topic.has_pending_with(&self.cursor)
     }
 
     /// Check if the topic is active (has publishers)

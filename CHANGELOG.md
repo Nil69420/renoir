@@ -41,8 +41,16 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   streams.
 
 ### Fixed
+- `Subscriber::has_new_messages` / `renoir_subscriber_has_messages` and
+  `pending_messages` now reflect the shared ring (they used process-local
+  statistics and a constant 0).
 - Creating the same SPMC topic from several processes at once could fail or
   reset a live ring; header initialisation is now race-free.
+
+- `renoir_topic_register_ex` with `RENOIR_TOPIC_FLAG_FRESH_START` (C++
+  `TopicOptions::fresh_start`): discard messages left by a previous clean
+  session when no live process holds the topic. `TopicConfig` gained a
+  `fresh_start` field.
 
 ### Changed
 - Topic regions are now created in `$RENOIR_SHM_DIR`, else `/dev/shm`, else

@@ -48,6 +48,7 @@ mod tests {
                 reliability: Reliability::BestEffort,
                 history_depth: 10,
             },
+            fresh_start: false,
         };
 
         // Create topic
@@ -352,6 +353,64 @@ mod tests {
         // (BlobHeader wrapping + shared pool) rather than returned as errors.
         let oversized_payload = vec![0u8; 150];
         assert!(publisher.publish(oversized_payload).is_ok());
+    }
+
+    fn restart_roundtrip(fresh: bool) -> Option<Vec<u8>> {
+        let name = unique_name(if fresh {
+            "restart_fresh"
+        } else {
+            "restart_keep"
+        });
+        let make = |fresh_start: bool| TopicConfig {
+            name: name.clone(),
+            fresh_start,
+            ..Default::default()
+        };
+        {
+            let manager = TopicManager::new().unwrap();
+            manager.create_topic(make(false)).unwrap();
+            let publisher = manager.create_publisher(&name).unwrap();
+            publisher.publish(b"left behind".to_vec()).unwrap();
+        }
+        let manager = TopicManager::new().unwrap();
+        manager.create_topic(make(fresh)).unwrap();
+        let subscriber = manager.create_subscriber(&name).unwrap();
+        subscriber
+            .subscribe()
+            .unwrap()
+            .and_then(|m| match m.payload {
+                renoir::topic::MessagePayload::Inline(d) => Some(d),
+                _ => None,
+            })
+    }
+
+    #[test]
+    fn test_clean_restart_keeps_messages_by_default() {
+        assert_eq!(restart_roundtrip(false), Some(b"left behind".to_vec()));
+    }
+
+    #[test]
+    fn test_fresh_start_discards_messages_from_a_clean_session() {
+        assert_eq!(restart_roundtrip(true), None);
+    }
+
+    #[test]
+    fn test_fresh_start_does_not_wipe_a_ring_a_live_process_holds() {
+        let name = unique_name("live_fresh_topic");
+        let cfg = |fresh_start: bool| TopicConfig {
+            name: name.clone(),
+            fresh_start,
+            ..Default::default()
+        };
+        let owner = TopicManager::new().unwrap();
+        owner.create_topic(cfg(false)).unwrap();
+        let publisher = owner.create_publisher(&name).unwrap();
+        publisher.publish(b"live".to_vec()).unwrap();
+
+        let second = TopicManager::new().unwrap();
+        second.create_topic(cfg(true)).unwrap();
+        let subscriber = second.create_subscriber(&name).unwrap();
+        assert!(subscriber.subscribe().unwrap().is_some());
     }
 
     #[test]

@@ -296,6 +296,15 @@ impl BroadcastTopicRing {
         }
     }
 
+    pub fn pending(&self, cursor: &BroadcastCursor) -> usize {
+        let w = self.write_idx().load(Ordering::Acquire);
+        if cursor.next > w {
+            0
+        } else {
+            (w - cursor.next + 1).min(self.slot_count) as usize
+        }
+    }
+
     pub fn skip_to_latest(&self, cursor: &mut BroadcastCursor, keep: u64) -> u64 {
         let w = self.write_idx().load(Ordering::Acquire);
         let target = w.saturating_sub(keep.max(1) - 1).max(1);

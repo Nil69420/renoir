@@ -395,6 +395,20 @@ impl TopicInstance {
         }
     }
 
+    pub fn pending_with(&self, cursor: &Mutex<Option<BroadcastCursor>>) -> usize {
+        match (&self.ring, *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.pending(&c),
+            _ => self.pending_messages(),
+        }
+    }
+
+    pub fn has_pending_with(&self, cursor: &Mutex<Option<BroadcastCursor>>) -> bool {
+        match (&self.ring, *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.pending(&c) > 0,
+            _ => matches!(self.peek(), Ok(Some(_))),
+        }
+    }
+
     pub fn skip_to_latest_with(&self, cursor: &Mutex<Option<BroadcastCursor>>, keep: u64) -> u64 {
         match (&self.ring, &mut *cursor.lock()) {
             (TopicRingType::Broadcast(ring), Some(c)) => ring.skip_to_latest(c, keep),

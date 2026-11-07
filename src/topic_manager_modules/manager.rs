@@ -98,6 +98,11 @@ impl TopicManager {
             create: true,
             permissions: 0o600,
         };
+        if config.fresh_start {
+            if let Some(path) = &region_config.file_path {
+                reset_stale_region(path)?;
+            }
+        }
         let memory_region = self.memory_manager.create_region(region_config)?;
         let topic_instance = Arc::new(TopicInstance::new(
             topic_id,
@@ -325,5 +330,29 @@ impl TopicManager {
         };
 
         (ring_size + pool_size).max(1024 * 1024) // At least 1MB
+    }
+}
+
+fn reset_stale_region(path: &std::path::Path) -> Result<()> {
+    use nix::fcntl::{flock, FlockArg};
+    use std::os::fd::AsRawFd;
+
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(RenoirError::from_io(e, "Failed to open region for reset")),
+    };
+    match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
+        Ok(()) => {
+            file.set_len(0)
+                .map_err(|e| RenoirError::from_io(e, "Failed to reset stale region"))?;
+            Ok(())
+        }
+        Err(nix::errno::Errno::EWOULDBLOCK) => Ok(()),
+        Err(e) => Err(RenoirError::platform(format!("flock failed: {}", e))),
     }
 }

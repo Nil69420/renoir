@@ -56,7 +56,8 @@ TopicManager::~TopicManager() {
 RenoirTopicId TopicManager::registerTopic(const std::string& name, const TopicOptions& options) {
     RenoirTopicOptions c = options.toC();
     RenoirTopicId topic_id = 0;
-    checkResult(renoir_topic_register(handle_, name.c_str(), &c, &topic_id),
+    uint32_t flags = options.fresh_start ? RENOIR_TOPIC_FLAG_FRESH_START : 0;
+    checkResult(renoir_topic_register_ex(handle_, name.c_str(), &c, flags, &topic_id),
                 "register topic");
     return topic_id;
 }

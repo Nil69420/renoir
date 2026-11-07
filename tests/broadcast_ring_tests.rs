@@ -287,6 +287,23 @@ fn test_skip_to_latest_keeps_only_the_newest_unread_messages() {
 }
 
 #[test]
+fn test_pending_counts_unread_messages_and_is_capped_by_slots() {
+    let (ring, _mem) = make_ring(4, 64);
+    let mut cursor = ring.cursor_latest();
+    assert_eq!(ring.pending(&cursor), 0);
+    for i in 1..=3u64 {
+        ring.try_publish(&msg(i, 8)).unwrap();
+    }
+    assert_eq!(ring.pending(&cursor), 3);
+    ring.try_consume(&mut cursor).unwrap();
+    assert_eq!(ring.pending(&cursor), 2);
+    for i in 4..=20u64 {
+        ring.try_publish(&msg(i, 8)).unwrap();
+    }
+    assert_eq!(ring.pending(&cursor), 4);
+}
+
+#[test]
 fn test_wait_readable_times_out_when_nothing_is_published() {
     let (ring, _mem) = make_ring(8, 64);
     let cursor = ring.cursor_latest();
