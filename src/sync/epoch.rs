@@ -6,8 +6,6 @@
 //! can be safely reclaimed.
 
 use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::ptr::NonNull;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
     Arc,
@@ -233,17 +231,6 @@ impl EpochManager {
             safe_epoch,
         }
     }
-
-    /// Force reclamation of all objects (unsafe, for shutdown)
-    ///
-    /// # Safety
-    /// Caller must ensure no readers hold references to objects pending reclamation.
-    pub unsafe fn force_reclaim_all(&self) -> usize {
-        let mut pending = self.pending_reclaims.lock();
-        let total: usize = pending.values().map(|v| v.len()).sum();
-        pending.clear();
-        total
-    }
 }
 
 impl Default for EpochManager {
@@ -284,43 +271,6 @@ impl<T: Send + Sync> EpochReclaim for Vec<T> {
         self.clear();
     }
 }
-
-/// A guard that implements EpochReclaim for raw pointers
-pub struct PtrGuard<T> {
-    ptr: NonNull<T>,
-    _phantom: PhantomData<T>,
-}
-
-impl<T> PtrGuard<T> {
-    /// Create a new pointer guard (takes ownership of the pointer)
-    ///
-    /// # Safety
-    /// `ptr` must point to a valid, heap-allocated `T`. The caller transfers
-    /// ownership; the guard will deallocate on drop.
-    pub unsafe fn new(ptr: NonNull<T>) -> Self {
-        Self {
-            ptr,
-            _phantom: PhantomData,
-        }
-    }
-
-    /// Get the wrapped pointer
-    pub fn as_ptr(&self) -> *mut T {
-        self.ptr.as_ptr()
-    }
-}
-
-impl<T: Send + Sync> EpochReclaim for PtrGuard<T> {
-    fn reclaim(&mut self) {
-        unsafe {
-            std::ptr::drop_in_place(self.ptr.as_ptr());
-            std::alloc::dealloc(self.ptr.as_ptr() as *mut u8, std::alloc::Layout::new::<T>());
-        }
-    }
-}
-
-unsafe impl<T: Send> Send for PtrGuard<T> {}
-unsafe impl<T: Sync> Sync for PtrGuard<T> {}
 
 /// Reader tracker for participating in epoch-based reclamation
 pub struct ReaderTracker<'a> {
@@ -391,62 +341,4 @@ pub struct ReaderStatus {
     pub current_epoch: EpochNumber,
     /// Last sequence number seen
     pub last_sequence: SequenceNumber,
-}
-
-/// Shared epoch manager that can be used across threads
-pub struct SharedEpochManager {
-    manager: Arc<EpochManager>,
-}
-
-impl SharedEpochManager {
-    /// Create a new shared epoch manager
-    pub fn new() -> Self {
-        Self {
-            manager: Arc::new(EpochManager::new()),
-        }
-    }
-
-    /// Register a reader
-    pub fn register_reader(&self) -> ReaderTracker<'_> {
-        self.manager.register_reader()
-    }
-
-    /// Advance the global epoch
-    pub fn advance_epoch(&self) -> EpochNumber {
-        self.manager.advance_epoch()
-    }
-
-    /// Get current epoch
-    pub fn current_epoch(&self) -> EpochNumber {
-        self.manager.current_epoch()
-    }
-
-    /// Defer object reclamation
-    pub fn defer_reclaim<T: EpochReclaim + 'static>(&self, object: T) {
-        self.manager.defer_reclaim(object);
-    }
-
-    /// Try to reclaim safe objects
-    pub fn try_reclaim(&self) -> usize {
-        self.manager.try_reclaim()
-    }
-
-    /// Get statistics
-    pub fn stats(&self) -> EpochStats {
-        self.manager.stats()
-    }
-}
-
-impl Clone for SharedEpochManager {
-    fn clone(&self) -> Self {
-        Self {
-            manager: Arc::clone(&self.manager),
-        }
-    }
-}
-
-impl Default for SharedEpochManager {
-    fn default() -> Self {
-        Self::new()
-    }
 }

@@ -116,10 +116,6 @@ pub struct EvolutionAwareSchema {
     pub compatibility_rules: BTreeMap<u32, SchemaEvolutionRule>,
     /// Field definitions and metadata
     pub fields: HashMap<String, FieldDefinition>,
-    /// Deprecated fields still supported for backward compatibility
-    pub deprecated_fields: HashSet<String>,
-    /// Required migration version (if any)
-    pub requires_migration_from: Option<u32>,
 }
 
 /// Semantic versioning for schemas
@@ -138,7 +134,6 @@ pub struct FieldDefinition {
     pub is_required: bool,
     pub is_deprecated: bool,
     pub added_in_version: u32,
-    pub deprecated_in_version: Option<u32>,
     pub default_value: Option<String>,
     pub position: u32,
 }
@@ -191,17 +186,6 @@ impl SchemaEvolutionManager {
         let schema_id = self.name_to_id.get(name)?;
         let versions = self.schemas.get(schema_id)?;
         versions.iter().max_by_key(|s| &s.semantic_version)
-    }
-
-    /// Get a specific schema version
-    pub fn get_schema_version(
-        &self,
-        name: &str,
-        version: &SemanticVersion,
-    ) -> Option<&EvolutionAwareSchema> {
-        let schema_id = self.name_to_id.get(name)?;
-        let versions = self.schemas.get(schema_id)?;
-        versions.iter().find(|s| s.semantic_version == *version)
     }
 
     /// Check compatibility between two schema versions
@@ -511,7 +495,6 @@ impl FieldDefinition {
             is_required,
             is_deprecated: false,
             added_in_version,
-            deprecated_in_version: None,
             default_value: None,
             position,
         }
@@ -519,12 +502,6 @@ impl FieldDefinition {
 
     pub fn with_default(mut self, default_value: String) -> Self {
         self.default_value = Some(default_value);
-        self
-    }
-
-    pub fn deprecated_in(mut self, version: u32) -> Self {
-        self.is_deprecated = true;
-        self.deprecated_in_version = Some(version);
         self
     }
 }
@@ -592,8 +569,6 @@ impl SchemaBuilder {
             semantic_version: self.semantic_version,
             compatibility_rules: self.compatibility_rules,
             fields: self.fields,
-            deprecated_fields: HashSet::new(),
-            requires_migration_from: None,
         })
     }
 }

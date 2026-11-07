@@ -129,18 +129,25 @@ endif()
 
 # Compiler-specific options
 target_compile_options(renoir_cpp PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Werror -fstack-protector-strong>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:Debug>:-g -O0>
 )
+
+# Sanitizer options (address + undefined behavior)
+option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(renoir_cpp PRIVATE -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer)
+    target_link_options(renoir_cpp PRIVATE -fsanitize=address -fsanitize=undefined)
+endif()
 
 # Add alias for consistent naming
 add_library(renoir::cpp ALIAS renoir_cpp)
 
 # Examples
 if(BUILD_EXAMPLES)
-    add_subdirectory(examples/cmake)
+    add_subdirectory(examples)
 endif()
 
 # Tests

@@ -7,6 +7,9 @@
 //! ## Features
 //!
 //! - **Named shared memory regions**: File-backed and memfd support
+//! - **Cross-process topic pub/sub**: Topic rings are placed inside the
+//!   shared memory region, so publishers and subscribers in different
+//!   processes communicate through the same buffer (see `topic_rings`)
 //! - **Multiple allocation strategies**: Ring buffers, buffer pools, custom allocators
 //! - **Metadata management**: Control regions with sequence/versioning logic
 //! - **C API**: Stable interface for C++/ROS2 integration  
@@ -43,7 +46,6 @@ pub mod memory;
 pub mod metadata_modules;
 pub mod ringbuf;
 pub mod shared_pools;
-pub mod structured_layout;
 pub mod topic;
 pub mod topic_manager_modules;
 pub mod topic_rings;
@@ -62,10 +64,7 @@ pub mod ffi;
 
 // Main API re-exports
 pub use allocators::{Allocator, AllocatorExt, BumpAllocator, PoolAllocator};
-pub use buffers::{
-    AtomicBufferPoolStats, Buffer, BufferPool, BufferPoolConfig, BufferPoolConfigBuilder,
-    BufferPoolStats,
-};
+pub use buffers::{Buffer, BufferPool, BufferPoolConfig, BufferPoolStats};
 pub use error::{RenoirError, Result};
 pub use memory::SharedMemoryManager;
 pub use memory::{BackingType, RegionConfig, RegionMemoryStats, SharedMemoryRegion};
@@ -76,11 +75,8 @@ pub use ringbuf::{ClaimGuard, Consumer, Producer, RingBuffer, SequencedRingBuffe
 pub use shared_pools::{
     BufferHandle, BufferPoolRegistry, PoolId, SharedBufferPool, SharedBufferPoolManager,
 };
-pub use structured_layout::{
-    GlobalControlHeader, GlobalStats, StructuredMemoryRegion, TopicDirectory,
-};
 pub use sync::{
-    epoch::{EpochManager, EpochReclaim, ReaderTracker, SharedEpochManager},
+    epoch::{EpochManager, EpochReclaim, ReaderTracker},
     notify::{BatchNotifier, EventNotifier, NotificationGroup, NotifyCondition},
     sequence::{AtomicSequence, GlobalSequenceGenerator, SequenceChecker, SequenceNumber},
     swmr::{ReaderHandle, SWMRRing, SharedSWMRRing, WriterHandle},
@@ -92,9 +88,29 @@ pub use topic_rings::{MPMCTopicRing, SPSCTopicRing};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const VERSION_MAJOR: u32 = 0;
-pub const VERSION_MINOR: u32 = 3;
-pub const VERSION_PATCH: u32 = 0;
+
+const fn version_component(version: &str, index: usize) -> u32 {
+    let mut component = 0u32;
+    let mut current = 0usize;
+    let mut i = 0usize;
+    let bytes = version.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'.' {
+            current += 1;
+            if current > index {
+                break;
+            }
+        } else if current == index {
+            component = component * 10 + (bytes[i] - b'0') as u32;
+        }
+        i += 1;
+    }
+    component
+}
+
+pub const VERSION_MAJOR: u32 = version_component(VERSION, 0);
+pub const VERSION_MINOR: u32 = version_component(VERSION, 1);
+pub const VERSION_PATCH: u32 = version_component(VERSION, 2);
 
 /// Default configuration constants
 pub mod config {

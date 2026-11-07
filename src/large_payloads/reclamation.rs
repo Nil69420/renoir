@@ -4,7 +4,7 @@
 //! reclamation with per-reader watermarks.
 
 use super::blob::BlobDescriptor;
-use crate::error::{RenoirError, Result};
+use crate::error::Result;
 use crate::shared_pools::SharedBufferPoolManager;
 use std::collections::HashMap;
 use std::sync::{
@@ -109,7 +109,6 @@ impl Default for ReclamationPolicy {
 #[derive(Debug)]
 struct PendingReclamation {
     descriptor: BlobDescriptor,
-    marked_at: SystemTime,
 }
 
 /// Reader state for epoch tracking
@@ -130,11 +129,6 @@ impl ReaderState {
             last_activity: Mutex::new(SystemTime::now()),
             is_active: AtomicU64::new(1),
         }
-    }
-
-    fn update_activity(&self) {
-        let mut last_activity = self.last_activity.lock();
-        *last_activity = SystemTime::now();
     }
 
     fn is_stale(&self, timeout: Duration) -> bool {
@@ -199,40 +193,6 @@ impl EpochReclaimer {
         reader_id
     }
 
-    /// Unregister a reader
-    pub fn unregister_reader(&self, reader_id: ReaderId) -> Result<()> {
-        let mut readers = self.readers.write();
-        if readers.remove(&reader_id).is_some() {
-            self.stats
-                .readers_unregistered
-                .fetch_add(1, Ordering::Relaxed);
-            Ok(())
-        } else {
-            Err(RenoirError::invalid_parameter(
-                "reader_id",
-                "Reader not found",
-            ))
-        }
-    }
-
-    /// Update reader epoch (call when reader accesses data)
-    pub fn update_reader_epoch(&self, reader_id: ReaderId) -> Result<Epoch> {
-        let readers = self.readers.read();
-        if let Some(reader_state) = readers.get(&reader_id) {
-            reader_state.update_activity();
-            let current_epoch = self.global_epoch.load(Ordering::SeqCst);
-            reader_state
-                .current_epoch
-                .store(current_epoch, Ordering::SeqCst);
-            Ok(current_epoch)
-        } else {
-            Err(RenoirError::invalid_parameter(
-                "reader_id",
-                "Reader not found",
-            ))
-        }
-    }
-
     /// Mark blob descriptor for reclamation
     pub fn mark_for_reclamation(&self, descriptor: BlobDescriptor) -> Result<()> {
         if !descriptor.release() {
@@ -241,10 +201,7 @@ impl EpochReclaimer {
         }
 
         let current_epoch = self.global_epoch.load(Ordering::SeqCst);
-        let pending = PendingReclamation {
-            descriptor,
-            marked_at: SystemTime::now(),
-        };
+        let pending = PendingReclamation { descriptor };
 
         let mut reclamations = self.pending_reclamations.lock();
         reclamations.entry(current_epoch).or_default().push(pending);
@@ -326,43 +283,6 @@ impl EpochReclaimer {
         Ok(reclaimed_count)
     }
 
-    /// Force reclamation of old items (emergency cleanup)
-    pub fn force_reclaim_old(&self) -> Result<usize> {
-        let mut reclaimed_count = 0;
-        let cutoff_time = SystemTime::now() - self.policy.max_age;
-
-        let mut reclamations = self.pending_reclamations.lock();
-        let mut epochs_to_remove = Vec::new();
-
-        for (&epoch, pending_list) in reclamations.iter_mut() {
-            pending_list.retain(|pending| {
-                if pending.marked_at < cutoff_time {
-                    // Force reclaim this item
-                    if let Ok(()) = self.reclaim_buffer(&pending.descriptor) {
-                        reclaimed_count += 1;
-                        self.stats
-                            .items_force_reclaimed
-                            .fetch_add(1, Ordering::Relaxed);
-                    }
-                    false // Remove from pending list
-                } else {
-                    true // Keep in pending list
-                }
-            });
-
-            if pending_list.is_empty() {
-                epochs_to_remove.push(epoch);
-            }
-        }
-
-        // Remove empty epochs
-        for epoch in epochs_to_remove {
-            reclamations.remove(&epoch);
-        }
-
-        Ok(reclaimed_count)
-    }
-
     /// Get minimum reader epoch (watermark)
     fn get_min_reader_epoch(&self) -> Epoch {
         let readers = self.readers.read();
@@ -412,32 +332,4 @@ impl EpochReclaimer {
     pub fn get_statistics(&self) -> ReclamationStats {
         self.stats.clone()
     }
-
-    /// Perform maintenance (advance epoch, reclaim eligible, cleanup)
-    pub fn maintenance(&self) -> Result<MaintenanceResult> {
-        let epoch_advanced = self.try_advance_epoch()?;
-        let reclaimed = self.reclaim_eligible()?;
-        let force_reclaimed = if self.policy.aggressive_reclamation {
-            self.force_reclaim_old()?
-        } else {
-            0
-        };
-
-        Ok(MaintenanceResult {
-            epoch_advanced,
-            items_reclaimed: reclaimed,
-            items_force_reclaimed: force_reclaimed,
-        })
-    }
-}
-
-/// Result of maintenance operation
-#[derive(Debug)]
-pub struct MaintenanceResult {
-    /// Whether epoch was advanced
-    pub epoch_advanced: bool,
-    /// Number of items reclaimed normally
-    pub items_reclaimed: usize,
-    /// Number of items force reclaimed
-    pub items_force_reclaimed: usize,
 }

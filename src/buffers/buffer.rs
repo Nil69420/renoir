@@ -1,15 +1,14 @@
 //! Buffer implementation for memory management
 
-use std::{collections::HashMap, ptr::NonNull, slice, sync::Arc, time::SystemTime};
+use std::{ptr::NonNull, slice, sync::Arc, time::SystemTime};
 
 use crate::{
     allocators::Allocator,
     error::{RenoirError, Result},
 };
 
-/// A reference-counted buffer with metadata
+/// A reference-counted buffer
 #[derive(Debug, Clone)]
-#[allow(clippy::box_collection)]
 pub struct Buffer {
     data: NonNull<u8>,
     size: usize,
@@ -17,8 +16,6 @@ pub struct Buffer {
     allocator: Arc<dyn Allocator>,
     sequence: u64,
     allocated_at: SystemTime,
-    /// Lazily allocated — None until first `set_metadata` call.
-    metadata: Option<Box<HashMap<String, String>>>,
 }
 
 impl Buffer {
@@ -41,32 +38,7 @@ impl Buffer {
             allocator,
             sequence: 0,
             allocated_at: SystemTime::now(),
-            metadata: None,
         })
-    }
-
-    /// Create a buffer from existing data pointer (unsafe)
-    ///
-    /// # Safety
-    /// The caller must ensure that:
-    /// - `data` points to valid memory of at least `capacity` bytes
-    /// - The memory is properly aligned
-    /// - The allocator can safely deallocate this memory
-    pub unsafe fn from_raw(
-        data: NonNull<u8>,
-        size: usize,
-        capacity: usize,
-        allocator: Arc<dyn Allocator>,
-    ) -> Self {
-        Self {
-            data,
-            size,
-            capacity,
-            allocator,
-            sequence: 0,
-            allocated_at: SystemTime::now(),
-            metadata: None,
-        }
     }
 
     /// Get a raw pointer to the buffer data
@@ -140,30 +112,12 @@ impl Buffer {
         self.allocator.alignment()
     }
 
-    /// Add metadata to the buffer
-    pub fn set_metadata(&mut self, key: String, value: String) {
-        self.metadata
-            .get_or_insert_with(|| Box::new(HashMap::new()))
-            .insert(key, value);
-    }
-
-    pub fn get_metadata(&self, key: &str) -> Option<&String> {
-        self.metadata.as_ref().and_then(|m| m.get(key))
-    }
-
-    pub fn metadata(&self) -> &HashMap<String, String> {
-        static EMPTY: std::sync::LazyLock<HashMap<String, String>> =
-            std::sync::LazyLock::new(HashMap::new);
-        self.metadata.as_deref().unwrap_or(&EMPTY)
-    }
-
-    pub fn metadata_opt(&self) -> Option<&HashMap<String, String>> {
-        self.metadata.as_deref()
-    }
-
     /// Write data to the buffer
     pub fn write(&mut self, offset: usize, data: &[u8]) -> Result<()> {
-        if offset + data.len() > self.capacity {
+        let Some(end) = offset.checked_add(data.len()) else {
+            return Err(RenoirError::insufficient_space(data.len(), 0));
+        };
+        if end > self.capacity {
             let available = self.capacity.saturating_sub(offset);
             return Err(RenoirError::insufficient_space(data.len(), available));
         }
@@ -177,8 +131,8 @@ impl Buffer {
             );
         }
 
-        if offset + data.len() > self.size {
-            self.size = offset + data.len();
+        if end > self.size {
+            self.size = end;
         }
 
         Ok(())
@@ -186,7 +140,10 @@ impl Buffer {
 
     /// Read data from the buffer
     pub fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>> {
-        if offset + len > self.size {
+        let Some(end) = offset.checked_add(len) else {
+            return Err(RenoirError::insufficient_space(len, 0));
+        };
+        if end > self.size {
             let available = self.size.saturating_sub(offset);
             return Err(RenoirError::insufficient_space(len, available));
         }
@@ -198,14 +155,6 @@ impl Buffer {
         }
 
         Ok(data)
-    }
-
-    /// Zero the buffer contents
-    pub fn zero(&mut self) {
-        // SAFETY: `data` is valid for `capacity` bytes and we have exclusive access via `&mut self`.
-        unsafe {
-            std::ptr::write_bytes(self.data.as_ptr(), 0, self.capacity);
-        }
     }
 
     /// Get a reference to the allocator

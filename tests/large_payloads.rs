@@ -221,4 +221,147 @@ mod ros2_types_tests {
     fn test_ros2_message_manager_basic() {
         let _strategy = ChunkingStrategy::default();
     }
+
+    #[test]
+    fn test_process_chunk_rejects_corrupted_chunk_size() {
+        use renoir::large_payloads::chunking::{ChunkDescriptor, ChunkManager, ChunkingStrategy};
+        use renoir::shared_pools::SharedBufferPoolManager;
+
+        let pool_manager = Arc::new(SharedBufferPoolManager::new());
+        let chunk_manager = ChunkManager::new(pool_manager, ChunkingStrategy::FixedSize(64));
+
+        // Build a buffer holding a descriptor whose chunk_size is way larger
+        // than the remaining data — previously indexed out of bounds (panic)
+        let mut descriptor = ChunkDescriptor::new(1, 0, 1, 8, 0);
+        descriptor.chunk_size = u32::MAX;
+
+        let mut chunk_buffer = vec![0u8; ChunkDescriptor::SIZE + 8];
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &descriptor as *const ChunkDescriptor as *const u8,
+                chunk_buffer.as_mut_ptr(),
+                ChunkDescriptor::SIZE,
+            );
+        }
+
+        let result = chunk_manager.process_chunk(&chunk_buffer);
+        assert!(
+            result.is_err(),
+            "corrupted chunk_size must be rejected, not panic or slice out of bounds"
+        );
+
+        let truncated = vec![0u8; ChunkDescriptor::SIZE + 3];
+        let result = chunk_manager.process_chunk(&truncated);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_chunked_blob_round_trip_and_no_leak() {
+        use renoir::large_payloads::chunking::ChunkingStrategy;
+        use renoir::large_payloads::ros2_types::ROS2MessageManager;
+        use std::path::PathBuf;
+
+        // 1KB buffers, 256-byte chunks: forces chunking for large payloads
+        let test_name = format!("test_chunked_roundtrip_{}", std::process::id());
+        let temp_file = format!("/tmp/{}", test_name);
+        let region = Arc::new(
+            SharedMemoryRegion::new(RegionConfig {
+                name: test_name,
+                size: 1024 * 1024,
+                backing_type: BackingType::FileBacked,
+                file_path: Some(PathBuf::from(&temp_file)),
+                create: true,
+                permissions: 0o644,
+            })
+            .unwrap(),
+        );
+
+        let pool_manager = Arc::new(SharedBufferPoolManager::new());
+        let pool_id = pool_manager
+            .create_pool("chunk_test_pool".to_string(), 1024, 32, region)
+            .unwrap();
+
+        let manager =
+            ROS2MessageManager::new(pool_manager.clone(), ChunkingStrategy::FixedSize(256));
+
+        let (_, _, baseline_active, _) = pool_manager.pool_stats(pool_id).unwrap();
+
+        // Payload large enough to span multiple chunks (> 1KB - BlobHeader)
+        let payload = vec![0xABu8; 5000];
+
+        let image = manager
+            .create_image_message(50, 100, "mono8", &payload, pool_id)
+            .unwrap();
+        assert!(
+            image.blob.header.is_chunked(),
+            "5000-byte payload must be chunked"
+        );
+        assert!(!image.blob.chunk_descriptors.is_empty());
+        let chunk_count = image.blob.header.chunk_count;
+        assert_eq!(image.blob.chunk_descriptors.len() as u32, chunk_count);
+
+        let (_, _, active_before, _) = pool_manager.pool_stats(pool_id).unwrap();
+        assert!(active_before > baseline_active);
+
+        let reassembled = manager.read_blob_payload(&image.blob).unwrap();
+        assert_eq!(
+            reassembled.len(),
+            payload.len() + renoir::large_payloads::ros2_types::ImageHeader::SIZE,
+            "reassembled payload must include image header"
+        );
+        assert_eq!(
+            &reassembled[renoir::large_payloads::ros2_types::ImageHeader::SIZE..],
+            &payload[..],
+            "reassembled image data must equal the original payload"
+        );
+
+        manager.release_blob(&image.blob).unwrap();
+
+        let (_, _, active_after, _) = pool_manager.pool_stats(pool_id).unwrap();
+        assert_eq!(
+            active_after, baseline_active,
+            "all chunk buffers must be returned to the pool after release"
+        );
+    }
+
+    #[test]
+    fn test_chunk_write_rejects_undersized_pool() {
+        use renoir::large_payloads::blob::{content_types, BlobManager};
+        use renoir::large_payloads::chunking::{ChunkManager, ChunkingStrategy};
+        use std::path::PathBuf;
+
+        // Buffer pool with buffers smaller than a chunk's footprint
+        // (ChunkDescriptor::SIZE + chunk data)
+        let test_name = format!("test_undersized_pool_{}", std::process::id());
+        let temp_file = format!("/tmp/{}", test_name);
+        let region = Arc::new(
+            SharedMemoryRegion::new(RegionConfig {
+                name: test_name,
+                size: 1024 * 1024,
+                backing_type: BackingType::FileBacked,
+                file_path: Some(PathBuf::from(&temp_file)),
+                create: true,
+                permissions: 0o644,
+            })
+            .unwrap(),
+        );
+
+        let pool_manager = Arc::new(SharedBufferPoolManager::new());
+        let pool_id = pool_manager
+            .create_pool("tiny_pool".to_string(), 64, 16, region)
+            .unwrap();
+
+        let chunk_manager =
+            ChunkManager::new(pool_manager.clone(), ChunkingStrategy::FixedSize(256));
+        let blob_manager = BlobManager::new();
+        let payload = vec![0xCDu8; 1024];
+        let header = blob_manager.create_header(content_types::CUSTOM_BINARY, &payload);
+
+        let result = chunk_manager.chunk_payload(&payload, &header, pool_id);
+        assert!(
+            result.is_err(),
+            "chunk write into a 64-byte buffer with 256-byte chunks must be rejected, \
+             not write out of bounds"
+        );
+    }
 }

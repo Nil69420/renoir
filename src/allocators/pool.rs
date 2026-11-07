@@ -115,26 +115,6 @@ impl PoolAllocator {
         Ok(allocator)
     }
 
-    pub fn block_size(&self) -> usize {
-        self.block_size
-    }
-
-    pub fn total_blocks(&self) -> usize {
-        self.total_blocks
-    }
-
-    pub fn free_blocks(&self) -> usize {
-        self.total_blocks - self.allocated_count.load(Ordering::Acquire)
-    }
-
-    pub fn is_full(&self) -> bool {
-        self.allocated_count.load(Ordering::Acquire) >= self.total_blocks
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.allocated_count.load(Ordering::Acquire) == 0
-    }
-
     fn align_up(value: usize, align: usize) -> usize {
         (value + align - 1) & !(align - 1)
     }

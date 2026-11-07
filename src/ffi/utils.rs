@@ -26,6 +26,9 @@ pub struct HandleRegistry {
     pub managers: HashMap<usize, Arc<SharedMemoryManager>>,
     pub regions: HashMap<usize, Arc<crate::memory::SharedMemoryRegion>>,
     pub buffer_pools: HashMap<usize, Arc<BufferPool>>,
+    /// Owned pool names, kept alive so `renoir_buffer_pool_config` can hand
+    /// out stable `name` pointers without dangling after the call returns
+    pub buffer_pool_names: HashMap<usize, CString>,
     pub buffers: HashMap<usize, Box<Buffer>>,
     pub allocators: HashMap<usize, Arc<dyn Allocator>>,
     pub ring_buffers: HashMap<usize, Box<dyn std::any::Any + Send + Sync>>,
@@ -55,6 +58,7 @@ impl HandleRegistry {
             managers: HashMap::new(),
             regions: HashMap::new(),
             buffer_pools: HashMap::new(),
+            buffer_pool_names: HashMap::new(),
             buffers: HashMap::new(),
             allocators: HashMap::new(),
             ring_buffers: HashMap::new(),
@@ -110,6 +114,15 @@ impl HandleRegistry {
         self.buffer_pools.get(&id).cloned()
     }
 
+    pub fn set_buffer_pool_name(&mut self, id: usize, name: CString) {
+        self.buffer_pool_names.insert(id, name);
+    }
+
+    pub fn remove_buffer_pool(&mut self, id: usize) -> Option<Arc<BufferPool>> {
+        self.buffer_pool_names.remove(&id);
+        self.buffer_pools.remove(&id)
+    }
+
     // Topic Manager methods
     pub fn store_topic_manager(
         &mut self,
@@ -131,9 +144,9 @@ impl HandleRegistry {
         self.buffer_registries.get(&manager_id).cloned()
     }
 
-    pub fn remove_topic_manager(&mut self, id: usize) -> bool {
+    pub fn remove_topic_manager(&mut self, id: usize) -> Option<Arc<TopicManager>> {
         self.buffer_registries.remove(&id);
-        self.topic_managers.remove(&id).is_some()
+        self.topic_managers.remove(&id)
     }
 
     // Publisher methods

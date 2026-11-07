@@ -3,6 +3,7 @@
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
+    use std::sync::Arc;
 
     use renoir::{
         topic::{
@@ -11,6 +12,14 @@ mod tests {
         },
         topic_manager_modules::{TopicManager, TopicManagerStats},
     };
+
+    /// Unique-per-run topic name. Topic regions are file-backed and survive
+    /// clean exits (session marker CLEAN preserves content), so a fixed
+    /// name would accumulate ring positions across suite runs against the
+    /// same /tmp state; a per-run name keeps every test deterministic.
+    fn unique_name(base: &str) -> String {
+        format!("{}_{}", base, std::process::id())
+    }
 
     #[test]
     fn test_topic_manager_creation() {
@@ -23,9 +32,10 @@ mod tests {
     #[test]
     fn test_topic_creation_and_messaging() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("test_topic");
 
         let config = TopicConfig {
-            name: "test_topic".to_string(),
+            name: topic_name.clone(),
             pattern: TopicPattern::SPSC,
             ring_capacity: 1024,
             max_payload_size: 1024,
@@ -44,16 +54,16 @@ mod tests {
         let topic_id = manager.create_topic(config).unwrap();
         assert!(topic_id > 0);
         assert_eq!(manager.topic_count(), 1);
-        assert!(manager.has_topic("test_topic"));
+        assert!(manager.has_topic(&topic_name));
 
         // Create publisher and subscriber
-        let publisher = manager.create_publisher("test_topic").unwrap();
-        let subscriber = manager.create_subscriber("test_topic").unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
+        let subscriber = manager.create_subscriber(&topic_name).unwrap();
 
         assert_eq!(publisher.topic_id, topic_id);
         assert_eq!(subscriber.topic_id, topic_id);
-        assert_eq!(publisher.topic_name(), "test_topic");
-        assert_eq!(subscriber.topic_name(), "test_topic");
+        assert_eq!(publisher.topic_name(), &topic_name);
+        assert_eq!(subscriber.topic_name(), &topic_name);
 
         // Publish a message
         let payload = b"Hello, Renoir Topics!".to_vec();
@@ -83,9 +93,10 @@ mod tests {
     #[test]
     fn test_spsc_pattern_enforcement() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("spsc_topic");
 
         let config = TopicConfig {
-            name: "spsc_topic".to_string(),
+            name: topic_name.clone(),
             pattern: TopicPattern::SPSC,
             ..Default::default()
         };
@@ -93,26 +104,73 @@ mod tests {
         manager.create_topic(config).unwrap();
 
         // First publisher should succeed
-        let _pub1 = manager.create_publisher("spsc_topic").unwrap();
+        let _pub1 = manager.create_publisher(&topic_name).unwrap();
 
         // Second publisher should fail
-        let pub2_result = manager.create_publisher("spsc_topic");
+        let pub2_result = manager.create_publisher(&topic_name);
         assert!(pub2_result.is_err());
 
         // First subscriber should succeed
-        let _sub1 = manager.create_subscriber("spsc_topic").unwrap();
+        let _sub1 = manager.create_subscriber(&topic_name).unwrap();
 
         // Second subscriber should fail
-        let sub2_result = manager.create_subscriber("spsc_topic");
+        let sub2_result = manager.create_subscriber(&topic_name);
         assert!(sub2_result.is_err());
+    }
+
+    #[test]
+    fn test_short_inline_payload_content_round_trip() {
+        let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("short_inline_topic");
+
+        let config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            ..Default::default()
+        };
+
+        manager.create_topic(config).unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
+        let subscriber = manager.create_subscriber(&topic_name).unwrap();
+
+        for (seq, payload) in [
+            b"Hello, Topic!".to_vec(),
+            b"short".to_vec(),
+            b"x".to_vec(),
+            Vec::new(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            publisher.publish(payload.clone()).unwrap();
+
+            let received = subscriber.subscribe().unwrap().expect("message available");
+            let received_seq = received.header.sequence;
+            assert_eq!(received_seq, seq as u64 + 1);
+            match received.payload {
+                renoir::topic::MessagePayload::Inline(data) => {
+                    assert_eq!(
+                        data, payload,
+                        "payload content preserved at sequence {}",
+                        seq
+                    );
+                }
+                other => panic!(
+                    "expected inline payload for {} byte(s), got {:?}",
+                    payload.len(),
+                    other
+                ),
+            }
+        }
     }
 
     #[test]
     fn test_mpmc_pattern_multiple_handles() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("mpmc_topic");
 
         let config = TopicConfig {
-            name: "mpmc_topic".to_string(),
+            name: topic_name.clone(),
             pattern: TopicPattern::MPMC,
             ..Default::default()
         };
@@ -120,20 +178,21 @@ mod tests {
         manager.create_topic(config).unwrap();
 
         // Multiple publishers should succeed
-        let _pub1 = manager.create_publisher("mpmc_topic").unwrap();
-        let _pub2 = manager.create_publisher("mpmc_topic").unwrap();
+        let _pub1 = manager.create_publisher(&topic_name).unwrap();
+        let _pub2 = manager.create_publisher(&topic_name).unwrap();
 
         // Multiple subscribers should succeed
-        let _sub1 = manager.create_subscriber("mpmc_topic").unwrap();
-        let _sub2 = manager.create_subscriber("mpmc_topic").unwrap();
+        let _sub1 = manager.create_subscriber(&topic_name).unwrap();
+        let _sub2 = manager.create_subscriber(&topic_name).unwrap();
     }
 
     #[test]
     fn test_large_message_with_shared_pools() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("large_msg_topic");
 
         let config = TopicConfig {
-            name: "large_msg_topic".to_string(),
+            name: topic_name.clone(),
             pattern: TopicPattern::SPSC,
             use_shared_pool: true,
             shared_pool_threshold: 1024,
@@ -143,8 +202,8 @@ mod tests {
 
         manager.create_topic(config).unwrap();
 
-        let publisher = manager.create_publisher("large_msg_topic").unwrap();
-        let subscriber = manager.create_subscriber("large_msg_topic").unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
+        let subscriber = manager.create_subscriber(&topic_name).unwrap();
 
         // Publish a large message (will use shared pool)
         let large_payload = vec![0x42u8; 2048];
@@ -206,9 +265,10 @@ mod tests {
     #[test]
     fn test_publisher_subscriber_features() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("feature_test_topic");
 
         let config = TopicConfig {
-            name: "feature_test_topic".to_string(),
+            name: topic_name.clone(),
             pattern: TopicPattern::SPSC,
             ring_capacity: 16, // Must be power of 2
             ..Default::default()
@@ -216,8 +276,8 @@ mod tests {
 
         manager.create_topic(config).unwrap();
 
-        let publisher = manager.create_publisher("feature_test_topic").unwrap();
-        let subscriber = manager.create_subscriber("feature_test_topic").unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
+        let subscriber = manager.create_subscriber(&topic_name).unwrap();
 
         // Test publisher features
         assert!(!publisher.is_full());
@@ -271,9 +331,10 @@ mod tests {
     #[test]
     fn test_payload_size_validation() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("size_test_topic");
 
         let config = TopicConfig {
-            name: "size_test_topic".to_string(),
+            name: topic_name.clone(),
             max_payload_size: 100,
             use_shared_pool: true,
             shared_pool_threshold: 0,
@@ -281,7 +342,7 @@ mod tests {
         };
 
         manager.create_topic(config).unwrap();
-        let publisher = manager.create_publisher("size_test_topic").unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
 
         // Normal size should work
         let normal_payload = vec![0u8; 50];
@@ -296,15 +357,16 @@ mod tests {
     #[test]
     fn test_try_publish() {
         let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("try_publish_topic");
 
         let config = TopicConfig {
-            name: "try_publish_topic".to_string(),
+            name: topic_name.clone(),
             ring_capacity: 4, // Small capacity, power of 2
             ..Default::default()
         };
 
         manager.create_topic(config).unwrap();
-        let publisher = manager.create_publisher("try_publish_topic").unwrap();
+        let publisher = manager.create_publisher(&topic_name).unwrap();
 
         // Test basic try_publish functionality
         assert!(publisher.try_publish(b"msg1".to_vec()).unwrap());
@@ -334,6 +396,174 @@ mod tests {
             messages_published >= 2,
             "Should publish at least 2 messages"
         );
+    }
+
+    #[test]
+    fn test_duplicate_topic_registration_mismatch_rejected() {
+        let manager = TopicManager::new().unwrap();
+        let topic_name = unique_name("dup_config_topic");
+
+        let first_config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            max_payload_size: 4096,
+            ..Default::default()
+        };
+        manager.create_topic(first_config).unwrap();
+
+        // Same config (identical fields) re-registration is allowed and
+        // returns the same topic id
+        let same_config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            max_payload_size: 4096,
+            ..Default::default()
+        };
+        assert!(manager.create_topic(same_config).is_ok());
+
+        // Differing max_payload_size must be surfaced as an error, not
+        // silently ignored
+        let mismatch_config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            max_payload_size: 8192,
+            ..Default::default()
+        };
+        let result = manager.create_topic(mismatch_config);
+        assert!(result.is_err(), "config mismatch must be rejected");
+
+        // Differing pattern must be rejected too
+        let pattern_mismatch = TopicConfig {
+            name: topic_name,
+            pattern: TopicPattern::MPMC,
+            max_payload_size: 4096,
+            ..Default::default()
+        };
+        assert!(manager.create_topic(pattern_mismatch).is_err());
+    }
+
+    #[test]
+    fn test_spsc_publisher_attach_race_exactly_one_wins() {
+        let manager = Arc::new(TopicManager::new().unwrap());
+        let topic_name = unique_name("race_topic");
+
+        let config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            ..Default::default()
+        };
+        manager.create_topic(config).unwrap();
+
+        // Each thread tries to create a publisher; winners keep their handle
+        // alive in the results vec so the slot is not released mid-race.
+        let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let manager = manager.clone();
+            let results = results.clone();
+            let topic_name = topic_name.clone();
+            handles.push(std::thread::spawn(move || {
+                let outcome = manager.create_publisher(&topic_name);
+                let mut results = results.lock().unwrap();
+                results.push(outcome);
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let successes = results
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|outcome| outcome.is_ok())
+            .count();
+        assert_eq!(
+            successes, 1,
+            "exactly one of the racing create_publisher calls must win (got {})",
+            successes
+        );
+    }
+
+    #[test]
+    fn test_spsc_subscriber_attach_race_exactly_one_wins() {
+        let manager = Arc::new(TopicManager::new().unwrap());
+        let topic_name = unique_name("race_sub_topic");
+
+        let config = TopicConfig {
+            name: topic_name.clone(),
+            pattern: TopicPattern::SPSC,
+            ..Default::default()
+        };
+        manager.create_topic(config).unwrap();
+
+        let results = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let manager = manager.clone();
+            let results = results.clone();
+            let topic_name = topic_name.clone();
+            handles.push(std::thread::spawn(move || {
+                let outcome = manager.create_subscriber(&topic_name);
+                let mut results = results.lock().unwrap();
+                results.push(outcome);
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let successes = results
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|outcome| outcome.is_ok())
+            .count();
+        assert_eq!(
+            successes, 1,
+            "exactly one of the racing create_subscriber calls must win (got {})",
+            successes
+        );
+    }
+
+    #[test]
+    fn test_topic_ring_region_never_undersized() {
+        // A ring placed in a region sized exactly to its requirement must fit:
+        // control block + message buffer must never exceed region.size().
+        let region_name = "ring_placement_topic".to_string();
+        let config = renoir::memory::RegionConfig {
+            name: region_name,
+            size: renoir::topic_rings::SPSCTopicRing::required_memory_size(4096),
+            backing_type: renoir::memory::BackingType::MemFd,
+            file_path: None,
+            create: true,
+            permissions: 0o600,
+        };
+        let memory_manager = renoir::memory::SharedMemoryManager::new();
+        let region = memory_manager.create_region(config).unwrap();
+
+        let stats = Arc::new(TopicStats::default());
+        let ring = unsafe {
+            renoir::topic_rings::SPSCTopicRing::from_memory(
+                std::ptr::NonNull::new(region.as_ptr::<u8>() as *mut u8).unwrap(),
+                region.size(),
+                4096,
+                stats,
+            )
+        }
+        .unwrap();
+        assert_eq!(ring.capacity(), 4096);
+
+        let payload = b"region-placed message".to_vec();
+        let msg = renoir::topic::Message::new_inline(1, 1, payload.clone());
+        ring.try_publish(&msg).unwrap();
+        let consumed = ring.try_consume().unwrap().unwrap();
+        match consumed.payload {
+            renoir::topic::MessagePayload::Inline(data) => {
+                assert_eq!(data, payload);
+            }
+            other => panic!("expected inline payload, got {:?}", other),
+        }
     }
 
     #[test]
@@ -382,12 +612,14 @@ mod tests {
         assert!(topics.is_empty());
 
         // Create a few topics
+        let name1 = unique_name("topic1");
+        let name2 = unique_name("topic2");
         let config1 = TopicConfig {
-            name: "topic1".to_string(),
+            name: name1.clone(),
             ..Default::default()
         };
         let config2 = TopicConfig {
-            name: "topic2".to_string(),
+            name: name2.clone(),
             pattern: TopicPattern::MPMC,
             ..Default::default()
         };
@@ -399,12 +631,12 @@ mod tests {
         assert_eq!(topics.len(), 2);
 
         // Find topic1 in the list
-        let topic1_entry = topics.iter().find(|(name, _, _)| name == "topic1").unwrap();
+        let topic1_entry = topics.iter().find(|(name, _, _)| name == &name1).unwrap();
         assert_eq!(topic1_entry.1, id1);
         assert_eq!(topic1_entry.2.pattern, TopicPattern::SPSC);
 
         // Find topic2 in the list
-        let topic2_entry = topics.iter().find(|(name, _, _)| name == "topic2").unwrap();
+        let topic2_entry = topics.iter().find(|(name, _, _)| name == &name2).unwrap();
         assert_eq!(topic2_entry.1, id2);
         assert_eq!(topic2_entry.2.pattern, TopicPattern::MPMC);
     }
@@ -461,7 +693,60 @@ mod tests {
         assert_eq!(stats.messages_published.load(Ordering::Relaxed), 2);
         assert_eq!(stats.avg_message_size.load(Ordering::Relaxed), 1536);
 
-        stats.record_consumed();
-        assert_eq!(stats.messages_consumed.load(Ordering::Relaxed), 1);
+        stats.record_consumed(100);
+        stats.record_consumed(300);
+        assert_eq!(stats.messages_consumed.load(Ordering::Relaxed), 2);
+        assert_eq!(stats.average_latency_ns(), 200);
+        assert_eq!(stats.peak_latency_ns(), 300);
+    }
+
+    #[test]
+    fn test_topic_stats_latency_throughput_real_values() {
+        use std::time::Duration;
+
+        let stats = TopicStats::default();
+
+        // Publish 10 messages with a real artificial delay between publish
+        // and consume; the reported average latency must be in the expected
+        // ballpark (generous tolerance for clock jitter), and throughput
+        // must be a nonzero, honest number based on real elapsed time.
+        for i in 0..10u32 {
+            stats.record_published_stats(1024);
+            std::thread::sleep(Duration::from_millis(5));
+            stats.record_consumed(5_000_000 + i as u64);
+        }
+
+        let avg = stats.average_latency_ns();
+        let peak = stats.peak_latency_ns();
+        assert!(
+            avg >= 5_000_000,
+            "average latency must reflect the injected 5ms delay (got {}ns)",
+            avg
+        );
+        assert!(
+            avg < 100_000_000,
+            "average latency should be within a generous bound (got {}ns)",
+            avg
+        );
+        assert!(peak >= avg);
+
+        // Throughput: 10 * 1024 bytes = 81920 bits over ~50ms+ -> ~1.6 Mbps
+        // ballpark; assert a positive, plausible value rather than exactly.
+        let mbps = stats.throughput_mbps();
+        assert!(
+            mbps > 0.0,
+            "throughput must be a real positive number (got {})",
+            mbps
+        );
+        assert!(
+            mbps < 100.0,
+            "throughput for 10 small messages must be in the Mbps ballpark (got {})",
+            mbps
+        );
+
+        // Nothing published yet -> throughput 0, not a fake number
+        let empty = TopicStats::default();
+        assert_eq!(empty.throughput_mbps(), 0.0);
+        assert_eq!(empty.average_latency_ns(), 0);
     }
 }

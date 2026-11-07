@@ -5,6 +5,7 @@
 
 use crate::error::{RenoirError, Result};
 use crate::shared_pools::{BufferHandle, PoolId};
+use crate::topic::MessageDescriptor;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -138,6 +139,8 @@ pub struct BlobDescriptor {
     pub total_size: u64,
     /// Blob header (cached for quick access)
     pub header: BlobHeader,
+    /// Chunk descriptors for chunked blobs (empty for single-buffer blobs)
+    pub chunk_descriptors: Vec<MessageDescriptor>,
     /// Reference count for memory management
     pub ref_count: AtomicU64,
 }
@@ -149,6 +152,7 @@ impl Clone for BlobDescriptor {
             buffer_handle: self.buffer_handle,
             total_size: self.total_size,
             header: self.header,
+            chunk_descriptors: self.chunk_descriptors.clone(),
             ref_count: AtomicU64::new(self.ref_count.load(std::sync::atomic::Ordering::Relaxed)),
         }
     }
@@ -164,6 +168,7 @@ impl BlobDescriptor {
             buffer_handle,
             total_size,
             header,
+            chunk_descriptors: Vec::new(),
             ref_count: AtomicU64::new(1),
         }
     }

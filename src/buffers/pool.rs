@@ -29,6 +29,10 @@ pub struct BufferPool {
     buffer_returned: Condvar,
     allocated: RwLock<HashMap<usize, SystemTime>>,
     stats: RwLock<BufferPoolStats>,
+    /// Keeps the shared memory region mapped for the lifetime of the pool and
+    /// everything that drops after it; the allocator holds a raw pointer into
+    /// it. Declared last so it is dropped last.
+    _memory_region: Arc<SharedMemoryRegion>,
 }
 
 impl BufferPool {
@@ -86,6 +90,7 @@ impl BufferPool {
         Ok(Self {
             config,
             allocator,
+            _memory_region: memory_region,
             available: Mutex::new(available),
             buffer_returned: Condvar::new(),
             allocated: RwLock::new(HashMap::new()),
@@ -176,6 +181,9 @@ impl BufferPool {
             stats.total_deallocations += 1;
         }
 
+        self._memory_region
+            .adjust_allocated(-(buffer.capacity() as i64));
+
         {
             let mut available = self.available.lock();
             available.push_back(buffer);
@@ -256,6 +264,8 @@ impl BufferPool {
     }
 
     fn track_allocation(&self, buffer: &Buffer) {
+        self._memory_region
+            .adjust_allocated(buffer.capacity() as i64);
         let mut allocated = self.allocated.write();
         allocated.insert(buffer.sequence() as usize, SystemTime::now());
     }

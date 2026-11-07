@@ -31,27 +31,6 @@ impl SharedPoolStats {
         created.saturating_sub(destroyed)
     }
 
-    /// Update memory statistics
-    pub fn update_memory_usage(&self, bytes_allocated: usize) {
-        self.total_bytes_allocated
-            .fetch_add(bytes_allocated, Ordering::Relaxed);
-
-        // Update peak if necessary
-        let current = self.total_bytes_allocated.load(Ordering::Relaxed);
-        let mut peak = self.peak_memory_usage.load(Ordering::Relaxed);
-        while current > peak {
-            match self.peak_memory_usage.compare_exchange_weak(
-                peak,
-                current,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(x) => peak = x,
-            }
-        }
-    }
-
     /// Get total memory allocated
     pub fn total_memory_allocated(&self) -> usize {
         self.total_bytes_allocated.load(Ordering::Relaxed)
@@ -89,42 +68,8 @@ impl SharedPoolBufferStats {
         }
     }
 
-    /// Get allocation efficiency (returned / allocated)
-    pub fn allocation_efficiency(&self) -> f64 {
-        let allocated = self.buffers_allocated.load(Ordering::Relaxed);
-        if allocated == 0 {
-            return 1.0;
-        }
-
-        let returned = self.buffers_returned.load(Ordering::Relaxed);
-        returned as f64 / allocated as f64
-    }
-
     /// Get current active buffer count
     pub fn active_count(&self) -> usize {
         self.current_active.load(Ordering::Relaxed)
-    }
-
-    /// Update peak active count if necessary
-    pub fn update_peak_active(&self) {
-        let current = self.current_active.load(Ordering::Relaxed);
-        let mut peak = self.peak_active.load(Ordering::Relaxed);
-
-        while current > peak {
-            match self.peak_active.compare_exchange_weak(
-                peak,
-                current,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(x) => peak = x,
-            }
-        }
-    }
-
-    /// Get pool age in seconds
-    pub fn age_seconds(&self) -> Option<u64> {
-        self.created_at?.elapsed().ok().map(|d| d.as_secs())
     }
 }

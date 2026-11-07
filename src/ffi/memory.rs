@@ -266,7 +266,8 @@ pub extern "C" fn renoir_region_close(handle: RenoirRegionHandle) -> RenoirError
     let id = handle as usize;
     let mut registry = HANDLE_REGISTRY.lock();
 
-    if registry.regions.remove(&id).is_some() {
+    if let Some(region) = registry.regions.remove(&id) {
+        region.mark_session_clean();
         RenoirErrorCode::Success
     } else {
         RenoirErrorCode::InvalidParameter
@@ -296,6 +297,10 @@ pub extern "C" fn renoir_region_destroy(
         None => return RenoirErrorCode::InvalidParameter,
     };
 
+    if let Ok(region) = mgr.get_region(&name_str) {
+        region.mark_session_clean();
+    }
+
     match mgr.remove_region(&name_str) {
         Ok(_) => RenoirErrorCode::Success,
         Err(e) => e.into(),
@@ -322,17 +327,18 @@ pub extern "C" fn renoir_region_stats(
 
     let _region_stats = region.memory_stats();
 
+    let used_size = region.allocated_bytes();
     unsafe {
         (*stats).total_size = region.size();
-        // Note: Fine-grained memory usage tracking would require:
-        // 1. Instrumenting the allocator to track allocations/deallocations
-        // 2. Maintaining allocation metadata in the region
-        // 3. Periodic scanning for fragmentation analysis
-        // These are complex features that would impact performance.
-        // For now, we return basic size information.
-        (*stats).used_size = 0;
-        (*stats).free_size = region.size();
-        (*stats).fragmentation_ratio = 0.0;
+        // used_size is the sum of bytes currently allocated from this region
+        // by its buffer pools (real accounting, not a placeholder)
+        (*stats).used_size = used_size;
+        (*stats).free_size = region.size().saturating_sub(used_size);
+        // Fragmentation ratio: not available for the allocator types used
+        // with regions today (fixed-block pool / bump) — neither maintains
+        // free-run contiguity bookkeeping, so there is no honest number to
+        // report. -1.0 is the documented "not available" sentinel.
+        (*stats).fragmentation_ratio = -1.0;
         (*stats).topic_count = 0;
         (*stats).allocation_count = 0;
     }
@@ -416,32 +422,6 @@ pub extern "C" fn renoir_free_region_names(region_names: *mut *mut c_char, count
     unsafe {
         libc::free(region_names as *mut std::ffi::c_void);
     }
-}
-
-/// Check if a region exists
-#[no_mangle]
-pub extern "C" fn renoir_manager_has_region(
-    manager: RenoirManagerHandle,
-    name: *const c_char,
-) -> bool {
-    if manager.is_null() || name.is_null() {
-        return false;
-    }
-
-    let name_str = match c_str_to_string(name) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let manager_id = manager as usize;
-    let registry = HANDLE_REGISTRY.lock();
-
-    let mgr = match registry.get_manager(manager_id) {
-        Some(m) => m,
-        None => return false,
-    };
-
-    mgr.has_region(&name_str)
 }
 
 /// Get total memory usage across all regions
@@ -532,95 +512,6 @@ pub extern "C" fn renoir_manager_clear_all(manager: RenoirManagerHandle) -> Reno
 
     match mgr.clear() {
         Ok(_) => RenoirErrorCode::Success,
-        Err(e) => e.into(),
-    }
-}
-
-/// Get region metadata
-#[no_mangle]
-pub extern "C" fn renoir_region_metadata(
-    handle: RenoirRegionHandle,
-    name: *mut *mut c_char,
-    size: *mut usize,
-    backing_type: *mut u32,
-) -> RenoirErrorCode {
-    if handle.is_null() {
-        return RenoirErrorCode::InvalidParameter;
-    }
-
-    let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock();
-
-    let region = match registry.get_region(id) {
-        Some(r) => r,
-        None => return RenoirErrorCode::InvalidParameter,
-    };
-
-    let metadata = region.metadata();
-
-    if !name.is_null() {
-        unsafe {
-            *name = string_to_c_str(metadata.name.clone());
-        }
-    }
-
-    if !size.is_null() {
-        unsafe {
-            *size = metadata.size;
-        }
-    }
-
-    if !backing_type.is_null() {
-        unsafe {
-            *backing_type = match metadata.backing_type {
-                crate::memory::BackingType::FileBacked => 0,
-                #[cfg(target_os = "linux")]
-                crate::memory::BackingType::MemFd => 1,
-            };
-        }
-    }
-
-    RenoirErrorCode::Success
-}
-
-/// Create allocator for a region
-#[no_mangle]
-pub extern "C" fn renoir_region_create_bump_allocator(
-    handle: RenoirRegionHandle,
-    allocator_handle: *mut super::types::RenoirAllocatorHandle,
-) -> RenoirErrorCode {
-    if handle.is_null() || allocator_handle.is_null() {
-        return RenoirErrorCode::InvalidParameter;
-    }
-
-    let id = handle as usize;
-    let registry = HANDLE_REGISTRY.lock();
-
-    let region = match registry.get_region(id) {
-        Some(r) => r,
-        None => return RenoirErrorCode::InvalidParameter,
-    };
-
-    // Get region memory as slice for allocator
-    // SAFETY: We're creating an allocator that will manage exclusive access
-    let memory_slice =
-        unsafe { std::slice::from_raw_parts_mut(region.as_mut_ptr_unsafe::<u8>(), region.size()) };
-
-    match crate::allocators::BumpAllocator::new(memory_slice) {
-        Ok(allocator) => {
-            drop(registry);
-            let mut registry = HANDLE_REGISTRY.lock();
-            let alloc_id = registry.next_id;
-            registry.next_id += 1;
-            registry
-                .allocators
-                .insert(alloc_id, std::sync::Arc::new(allocator));
-
-            unsafe {
-                *allocator_handle = alloc_id as super::types::RenoirAllocatorHandle;
-            }
-            RenoirErrorCode::Success
-        }
         Err(e) => e.into(),
     }
 }

@@ -2,10 +2,11 @@
 name = "renoir"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Nilanjan Chowdhury <78751630+Nil69420@users.noreply.github.com>"]
 description = "High-performance shared memory manager for inter-process communication"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/your-username/renoir"
+repository = "https://github.com/Nil69420/renoir"
+readme = "README.md"
 keywords = ["shared-memory", "ipc", "ros2", "zero-copy", "memory-management"]
 categories = ["memory-management", "concurrency", "api-bindings"]
 
@@ -47,9 +48,6 @@ clap = { version = "4.0", optional = true }
 
 # FFI dependencies (lazy_static already added above)
 
-# Optional: for advanced memory management
-mimalloc = { version = "0.1", optional = true }
-
 [build-dependencies]
 # C++ header generation for ROS2 interop
 cbindgen = "0.24"
@@ -64,7 +62,6 @@ file-backed = []
 memfd = []
 c-api = ["lazy_static"]
 cli = ["clap"]
-custom-allocator = ["mimalloc"]
 
 [profile.release]
 opt-level = 3
@@ -83,5 +80,23 @@ harness = false
 name = "ringbuf_bench" 
 harness = false
 
+[[bench]]
+name = "topic_rings_bench"
+harness = false
+
 [package.metadata.docs.rs]
 features = ["file-backed", "memfd", "c-api"]
+
+[package.metadata.deb]
+maintainer = "Nilanjan Chowdhury <78751630+Nil69420@users.noreply.github.com>"
+copyright = "2026 Nilanjan Chowdhury"
+license-file = ["LICENSE-MIT", "0"]
+section = "libs"
+extended-description = """High-performance shared memory manager for inter-process communication.
+Provides a stable C ABI (librenoir.so) and a CLI for shared-memory region and
+topic management."""
+assets = [
+    ["target/release/librenoir.so", "usr/lib/", "644"],
+    ["include/renoir.h", "usr/include/", "644"],
+    ["target/release/renoir-cli", "usr/bin/", "755"],
+]

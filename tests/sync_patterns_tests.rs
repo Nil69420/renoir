@@ -335,7 +335,9 @@ mod sync_patterns_tests {
     /// Test: Integration of SWMR with notifications
     #[test]
     fn test_swmr_with_notifications() {
-        let ring = Arc::new(SWMRRing::<String>::new(8).unwrap());
+        // SWMRRing is bounded to T: Copy (seqlock soundness); use a Copy
+        // payload instead of String
+        let ring = Arc::new(SWMRRing::<u64>::new(8).unwrap());
         let notifier = Arc::new(EventNotifier::new().unwrap());
         let barrier = Arc::new(Barrier::new(2));
 
@@ -350,8 +352,7 @@ mod sync_patterns_tests {
             writer_barrier.wait();
 
             for i in 0..10 {
-                let message = format!("Message {}", i);
-                writer.try_write(message).unwrap();
+                writer.try_write(i as u64).unwrap();
                 writer_notifier.notify().unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
@@ -385,13 +386,9 @@ mod sync_patterns_tests {
         println!("Received {} messages", received.len());
         assert!(!received.is_empty());
 
-        // Verify message content
-        for (i, msg) in received.iter().enumerate().take(5) {
-            assert!(
-                msg.starts_with("Message"),
-                "Message {} should start with 'Message'",
-                i
-            );
+        // Verify message content: all values are < 10 (the written range)
+        for &msg in received.iter() {
+            assert!(msg < 10, "Received value {} should be < 10", msg);
         }
     }
 
@@ -550,7 +547,8 @@ mod sync_patterns_tests {
     /// Test: Cross-pattern integration (SWMR + Epoch + Notify)
     #[test]
     fn test_integrated_patterns() {
-        let ring = Arc::new(SWMRRing::<Vec<u8>>::new(8).unwrap());
+        // SWMRRing is bounded to T: Copy; use a fixed-size Copy payload
+        let ring = Arc::new(SWMRRing::<[u8; 64]>::new(8).unwrap());
         let epoch_manager = Arc::new(EpochManager::new());
         let notifier = Arc::new(EventNotifier::new().unwrap());
         let barrier = Arc::new(Barrier::new(3));
@@ -566,7 +564,7 @@ mod sync_patterns_tests {
             producer_barrier.wait();
 
             for i in 0..20 {
-                let data = vec![i as u8; 64]; // Simulate sensor data
+                let data = [i as u8; 64]; // Simulate sensor data
                 writer.try_write(data).unwrap();
                 producer_notifier.notify().unwrap();
                 thread::sleep(Duration::from_millis(1));
@@ -624,12 +622,13 @@ mod sync_patterns_tests {
 
     #[test]
     fn test_swmr_slot_access() {
-        let ring = SWMRRing::<String>::new(4).unwrap();
+        // SWMRRing is bounded to T: Copy
+        let ring = SWMRRing::<&'static str>::new(4).unwrap();
         let mut writer = ring.writer();
         let reader = ring.reader();
 
-        writer.force_write("slot0".to_string(), 0).unwrap();
-        writer.force_write("slot2".to_string(), 2).unwrap();
+        writer.force_write("slot0", 0).unwrap();
+        writer.force_write("slot2", 2).unwrap();
 
         let (data0, _) = reader.read_slot(0).unwrap().unwrap();
         assert_eq!(data0, "slot0");
@@ -867,5 +866,76 @@ mod sync_patterns_tests {
 
         notification.set_enabled(true);
         assert!(notification.is_enabled());
+    }
+
+    /// Test: high-iteration concurrent writer/readers with Copy payload
+    ///
+    /// Under direction (a) (SWMRRing<T: Copy>) a Drop-instrumented leak test
+    /// is structurally impossible — Copy types cannot implement Drop, so no
+    /// destructor can leak on wraparound. This test instead stresses the
+    /// wraparound path under contention and asserts every observed value is
+    /// one the writer actually produced (a torn/partial value would fail).
+    #[test]
+    fn test_swmr_wraparound_concurrent_stress() {
+        let ring = Arc::new(SWMRRing::<u64>::new(4).unwrap()); // Small ring: constant wraparound
+        let barrier = Arc::new(Barrier::new(3)); // writer + 2 readers
+        let iterations = 20_000usize;
+
+        let writer_ring = ring.clone();
+        let writer_barrier = barrier.clone();
+        let writer_handle = thread::spawn(move || {
+            let mut writer = writer_ring.writer();
+            writer_barrier.wait();
+            for i in 0..iterations {
+                // Give readers time to interleave (exercises the race window)
+                while writer.try_write(i as u64).is_err() {
+                    thread::yield_now();
+                }
+            }
+        });
+
+        let run_reader = |ring: Arc<SWMRRing<u64>>, barrier: Arc<Barrier>| {
+            thread::spawn(move || {
+                let mut reader = ring.reader();
+                barrier.wait();
+                let mut count = 0usize;
+                let mut max_seq = 0u64;
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(5) {
+                    if let Ok(Some((data, seq))) = reader.try_read() {
+                        assert!(
+                            data < iterations as u64,
+                            "torn or out-of-range value read: {}",
+                            data
+                        );
+                        assert!(seq > max_seq, "sequence must be monotonic");
+                        max_seq = seq;
+                        count += 1;
+                    } else {
+                        thread::yield_now();
+                    }
+                }
+                count
+            })
+        };
+
+        let reader_ring = ring.clone();
+        let reader_barrier = barrier.clone();
+        let reader1_handle = run_reader(reader_ring, reader_barrier);
+
+        let reader_ring = ring.clone();
+        let reader_barrier = barrier.clone();
+        let reader2_handle = run_reader(reader_ring, reader_barrier);
+
+        writer_handle.join().unwrap();
+        let reader1_count = reader1_handle.join().unwrap();
+        let reader2_count = reader2_handle.join().unwrap();
+
+        assert!(reader1_count > 0);
+        assert!(reader2_count > 0);
+        println!(
+            "SWMR wraparound stress: reader1 {} items, reader2 {} items",
+            reader1_count, reader2_count
+        );
     }
 }

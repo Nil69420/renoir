@@ -57,8 +57,13 @@ unsafe impl<T: Send> Send for SWMRSlot<T> {}
 unsafe impl<T: Send + Sync> Sync for SWMRSlot<T> {}
 
 /// SWMR ring buffer for efficient single-writer, multiple-reader scenarios
+///
+/// Readers clone slot data while a writer may overwrite it, so `T` must be
+/// trivially copyable (`Copy`); heap-owning types like `String`/`Vec` are not
+/// supported — a seqlock cannot make a writer's `ptr::write` race-safe against
+/// a reader's destructor-bearing clone.
 #[derive(Debug)]
-pub struct SWMRRing<T> {
+pub struct SWMRRing<T: Copy> {
     /// Ring buffer slots
     slots: NonNull<SWMRSlot<T>>,
     /// Ring buffer capacity (power of 2)
@@ -73,7 +78,7 @@ pub struct SWMRRing<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T> SWMRRing<T> {
+impl<T: Copy> SWMRRing<T> {
     /// Create a new SWMR ring buffer
     pub fn new(capacity: usize) -> SyncResult<Self> {
         if capacity == 0 || !capacity.is_power_of_two() {
@@ -139,7 +144,7 @@ impl<T> SWMRRing<T> {
     }
 }
 
-impl<T> Drop for SWMRRing<T> {
+impl<T: Copy> Drop for SWMRRing<T> {
     fn drop(&mut self) {
         // SAFETY: Slots were allocated in `new`; only initialized (ready) slots are dropped.
         // Dealloc uses the same layout as the original allocation.
@@ -158,18 +163,18 @@ impl<T> Drop for SWMRRing<T> {
     }
 }
 
-unsafe impl<T: Send> Send for SWMRRing<T> {}
-unsafe impl<T: Send + Sync> Sync for SWMRRing<T> {}
+unsafe impl<T: Send + Copy> Send for SWMRRing<T> {}
+unsafe impl<T: Send + Sync + Copy> Sync for SWMRRing<T> {}
 
 /// Writer handle for SWMR ring buffer
 ///
 /// Only one writer should exist per ring. The writer is responsible for
 /// updating slots with new data and managing the write sequence.
-pub struct WriterHandle<'a, T> {
+pub struct WriterHandle<'a, T: Copy> {
     ring: &'a SWMRRing<T>,
 }
 
-impl<'a, T> WriterHandle<'a, T> {
+impl<'a, T: Copy> WriterHandle<'a, T> {
     /// Try to write data to the next available slot
     ///
     /// This is the hot path - optimized to be lock-free and fast
@@ -182,6 +187,14 @@ impl<'a, T> WriterHandle<'a, T> {
         let current_seq = slot.sequence().load_acquire();
         if !slot.sequence().try_claim_for_write(current_seq) {
             return Err(SyncError::NoSlotsAvailable);
+        }
+
+        // Drop the previous value on wraparound (matches force_write; a no-op
+        // for Copy types but keeps slot lifecycle consistent)
+        unsafe {
+            if AtomicSequence::is_ready(current_seq) {
+                std::ptr::drop_in_place(slot.data_ptr());
+            }
         }
 
         // Write data to slot (slot is now in WRITING state)
@@ -250,13 +263,13 @@ impl<'a, T> WriterHandle<'a, T> {
 ///
 /// Each reader maintains its own position and can read at its own pace.
 /// Multiple readers can exist simultaneously without coordination.
-pub struct ReaderHandle<'a, T> {
+pub struct ReaderHandle<'a, T: Copy> {
     ring: &'a SWMRRing<T>,
     read_pos: usize,
     last_sequence: SequenceNumber,
 }
 
-impl<'a, T: Clone> ReaderHandle<'a, T> {
+impl<'a, T: Copy> ReaderHandle<'a, T> {
     /// Try to read the next available data
     ///
     /// Returns None if no new data is available
@@ -266,7 +279,7 @@ impl<'a, T: Clone> ReaderHandle<'a, T> {
 
         // Use sequence checker to ensure consistent read
         // SAFETY: Reads are guarded by SequenceChecker which retries on torn reads.
-        match checker.consistent_read(|| unsafe { (*slot.data_ptr()).clone() }, 3) {
+        match checker.consistent_read(|| unsafe { *slot.data_ptr() }, 3) {
             Ok(data) => {
                 let sequence = slot.sequence().load_acquire();
 
@@ -294,7 +307,7 @@ impl<'a, T: Clone> ReaderHandle<'a, T> {
         let checker = SequenceChecker::new(Arc::new(slot.sequence().clone()));
 
         // SAFETY: Reads are guarded by SequenceChecker which retries on torn reads.
-        match checker.consistent_read(|| unsafe { (*slot.data_ptr()).clone() }, 3) {
+        match checker.consistent_read(|| unsafe { *slot.data_ptr() }, 3) {
             Ok(data) => {
                 let sequence = slot.sequence().load_acquire();
                 if AtomicSequence::is_ready(sequence) {
@@ -351,11 +364,11 @@ impl<'a, T: Clone> ReaderHandle<'a, T> {
 }
 
 /// Shared SWMR ring that can be used across threads/processes
-pub struct SharedSWMRRing<T> {
+pub struct SharedSWMRRing<T: Copy> {
     ring: Arc<SWMRRing<T>>,
 }
 
-impl<T> SharedSWMRRing<T> {
+impl<T: Copy> SharedSWMRRing<T> {
     /// Create a new shared SWMR ring
     pub fn new(capacity: usize) -> SyncResult<Self> {
         Ok(Self {
@@ -374,7 +387,7 @@ impl<T> SharedSWMRRing<T> {
     }
 }
 
-impl<T> Clone for SharedSWMRRing<T> {
+impl<T: Copy> Clone for SharedSWMRRing<T> {
     fn clone(&self) -> Self {
         Self {
             ring: Arc::clone(&self.ring),

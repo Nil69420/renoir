@@ -32,11 +32,6 @@ impl RegionMetadata {
         }
     }
 
-    /// Update the version number
-    pub fn increment_version(&mut self) {
-        self.version += 1;
-    }
-
     /// Check if this metadata is compatible with another version
     pub fn is_compatible_with(&self, other_version: u64) -> bool {
         // For now, simple exact version matching

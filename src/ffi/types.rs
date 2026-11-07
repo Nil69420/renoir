@@ -225,8 +225,15 @@ pub struct RenoirTopicStats {
 #[repr(C)]
 pub struct RenoirRegionStats {
     pub total_size: usize,
+    /// Bytes currently allocated from the region by its buffer pools.
+    /// 0 means no pool has allocated from this region (or pools released
+    /// everything) — it is a real accounting value, not a placeholder.
     pub used_size: usize,
     pub free_size: usize,
+    /// Fragmentation ratio, or -1.0 if not available. -1.0 means the
+    /// region's allocator type (fixed-block pool / bump) does not maintain
+    /// free-run contiguity bookkeeping, so no honest ratio can be computed
+    /// for it.
     pub fragmentation_ratio: f64,
     pub topic_count: usize,
     pub allocation_count: u64,

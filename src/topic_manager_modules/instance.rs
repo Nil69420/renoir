@@ -17,7 +17,7 @@ use crate::{
     memory::SharedMemoryRegion,
     shared_pools::BufferPoolRegistry,
     topic::{Message, MessagePayload, TopicConfig, TopicPattern, TopicStats},
-    topic_rings::{MPMCTopicRing, SPSCTopicRing},
+    topic_rings::{BroadcastCursor, BroadcastTopicRing, MPMCTopicRing, SPSCTopicRing},
 };
 
 use super::manager::TopicId;
@@ -57,14 +57,51 @@ impl TopicInstance {
     ) -> Result<Self> {
         let stats = Arc::new(TopicStats::default());
 
+        let ring_capacity = config.ring_capacity * 1024;
+
+        // Place the ring inside the shared memory region so that all
+        // processes attaching to the region share the same ring state
+        let region_memory = memory_region.as_ptr::<u8>();
+        let region_size = memory_region.size();
+        let memory = std::ptr::NonNull::new(region_memory as *mut u8)
+            .ok_or_else(|| RenoirError::memory("Shared memory region returned a null pointer"))?;
+
         // Create appropriate ring buffer based on pattern
         let ring = match config.pattern {
-            TopicPattern::SPSC | TopicPattern::SPMC => TopicRingType::SPSC(Arc::new(
-                SPSCTopicRing::new(config.ring_capacity * 1024, stats.clone())?,
-            )),
-            TopicPattern::MPSC | TopicPattern::MPMC => TopicRingType::MPMC(Arc::new(
-                MPMCTopicRing::new(config.ring_capacity * 1024, stats.clone())?,
-            )),
+            TopicPattern::SPSC => {
+                // SAFETY: region memory is valid, aligned, and outlives the ring
+                // (TopicInstance holds the Arc to the region)
+                let ring = unsafe {
+                    SPSCTopicRing::from_memory(memory, region_size, ring_capacity, stats.clone())?
+                };
+                TopicRingType::SPSC(Arc::new(ring))
+            }
+            TopicPattern::SPMC => {
+                if config.use_shared_pool {
+                    return Err(RenoirError::invalid_parameter(
+                        "use_shared_pool",
+                        "Broadcast (SPMC) topics carry inline payloads only",
+                    ));
+                }
+                let ring = unsafe {
+                    BroadcastTopicRing::from_memory(
+                        memory,
+                        region_size,
+                        ring_capacity,
+                        config.max_payload_size,
+                        stats.clone(),
+                    )?
+                };
+                TopicRingType::Broadcast(Arc::new(ring))
+            }
+            TopicPattern::MPSC | TopicPattern::MPMC => {
+                // SAFETY: region memory is valid, aligned, and outlives the ring
+                // (TopicInstance holds the Arc to the region)
+                let ring = unsafe {
+                    MPMCTopicRing::from_memory(memory, region_size, ring_capacity, stats.clone())?
+                };
+                TopicRingType::MPMC(Arc::new(ring))
+            }
         };
 
         Ok(Self {
@@ -84,24 +121,32 @@ impl TopicInstance {
 
     /// Add a publisher to this topic
     pub fn add_publisher(&self) -> Result<PublisherHandle> {
-        match self.config.pattern {
-            TopicPattern::SPSC | TopicPattern::SPMC => {
-                // Single producer patterns - only allow one publisher
-                if self.stats.active_publishers.load(Ordering::Relaxed) > 0 {
+        let single_producer =
+            matches!(self.config.pattern, TopicPattern::SPSC | TopicPattern::SPMC);
+        if single_producer {
+            // The 0 -> 1 CAS makes the check-and-attach atomic so two racing
+            // threads cannot both attach, which would violate the SPSC ring's
+            // single-writer invariant.
+            match self.stats.active_publishers.compare_exchange(
+                0,
+                1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {}
+                Err(_) => {
                     return Err(RenoirError::invalid_parameter(
                         "pattern",
                         "Topic only allows single publisher",
-                    ));
+                    ))
                 }
             }
-            TopicPattern::MPSC | TopicPattern::MPMC => {
-                // Multiple producer patterns - allow multiple publishers
-            }
+        } else {
+            self.stats.add_publisher();
         }
 
         let handle = self.next_pub_handle.fetch_add(1, Ordering::SeqCst);
         self.publisher_handles.lock().insert(handle);
-        self.stats.add_publisher();
         Ok(handle)
     }
 
@@ -118,24 +163,30 @@ impl TopicInstance {
 
     /// Add a subscriber to this topic
     pub fn add_subscriber(&self) -> Result<SubscriberHandle> {
-        match self.config.pattern {
-            TopicPattern::SPSC | TopicPattern::MPSC => {
-                // Single consumer patterns - only allow one subscriber
-                if self.stats.active_subscribers.load(Ordering::Relaxed) > 0 {
+        let single_consumer =
+            matches!(self.config.pattern, TopicPattern::SPSC | TopicPattern::MPSC);
+        if single_consumer {
+            // CAS makes the check-and-attach atomic (see add_publisher)
+            match self.stats.active_subscribers.compare_exchange(
+                0,
+                1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {}
+                Err(_) => {
                     return Err(RenoirError::invalid_parameter(
                         "pattern",
                         "Topic only allows single subscriber",
-                    ));
+                    ))
                 }
             }
-            TopicPattern::SPMC | TopicPattern::MPMC => {
-                // Multiple consumer patterns - allow multiple subscribers
-            }
+        } else {
+            self.stats.add_subscriber();
         }
 
         let handle = self.next_sub_handle.fetch_add(1, Ordering::SeqCst);
         self.subscriber_handles.lock().insert(handle);
-        self.stats.add_subscriber();
         Ok(handle)
     }
 
@@ -152,7 +203,7 @@ impl TopicInstance {
 
     /// Publish a message to this topic
     pub fn publish(&self, payload: Vec<u8>) -> Result<()> {
-        let sequence = self.stats.current_sequence.load(Ordering::SeqCst);
+        let sequence = self.stats.current_sequence.fetch_add(1, Ordering::SeqCst) + 1;
 
         let message =
             if payload.len() > self.config.shared_pool_threshold && self.config.use_shared_pool {
@@ -180,6 +231,7 @@ impl TopicInstance {
         let result = match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_publish(&message),
             TopicRingType::MPMC(ring) => ring.try_publish(&message),
+            TopicRingType::Broadcast(ring) => ring.try_publish(&message),
         };
 
         // Return pool buffer on ring-full to prevent leak
@@ -210,7 +262,7 @@ impl TopicInstance {
         blob_data.extend_from_slice(header_bytes);
         blob_data.extend_from_slice(&payload);
 
-        let sequence = self.stats.current_sequence.load(Ordering::SeqCst);
+        let sequence = self.stats.current_sequence.fetch_add(1, Ordering::SeqCst) + 1;
 
         let message = if self.config.use_shared_pool {
             let descriptor = self
@@ -235,6 +287,7 @@ impl TopicInstance {
         let result = match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_publish(&message),
             TopicRingType::MPMC(ring) => ring.try_publish(&message),
+            TopicRingType::Broadcast(ring) => ring.try_publish(&message),
         };
 
         // Return pool buffer on ring-full to prevent leak
@@ -252,6 +305,56 @@ impl TopicInstance {
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_consume(),
             TopicRingType::MPMC(ring) => ring.try_consume(),
+            TopicRingType::Broadcast(_) => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "Broadcast topics require a per-subscriber cursor",
+            )),
+        }
+    }
+
+    pub fn new_cursor(&self) -> Option<BroadcastCursor> {
+        match &self.ring {
+            TopicRingType::Broadcast(ring) => Some(ring.cursor_latest()),
+            _ => None,
+        }
+    }
+
+    pub fn subscribe_with(
+        &self,
+        cursor: &Mutex<Option<BroadcastCursor>>,
+    ) -> Result<Option<Message>> {
+        match (&self.ring, &mut *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.try_consume(c),
+            _ => self.subscribe(),
+        }
+    }
+
+    pub fn peek_with(&self, cursor: &Mutex<Option<BroadcastCursor>>) -> Result<Option<Message>> {
+        match (&self.ring, &*cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.try_peek(c),
+            _ => self.peek(),
+        }
+    }
+
+    pub fn wait_with(
+        &self,
+        cursor: &Mutex<Option<BroadcastCursor>>,
+        timeout: Option<Duration>,
+    ) -> Result<Option<Message>> {
+        if cursor.lock().is_none() {
+            return self.wait_for_message(timeout);
+        }
+        let start = Instant::now();
+        loop {
+            if let Some(message) = self.subscribe_with(cursor)? {
+                return Ok(Some(message));
+            }
+            if let Some(timeout) = timeout {
+                if start.elapsed() >= timeout {
+                    return Ok(None);
+                }
+            }
+            thread::sleep(Duration::from_micros(50));
         }
     }
 
@@ -261,6 +364,7 @@ impl TopicInstance {
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.try_peek(),
             TopicRingType::MPMC(ring) => ring.try_peek(),
+            TopicRingType::Broadcast(_) => Ok(None),
         }
     }
 
@@ -271,7 +375,7 @@ impl TopicInstance {
 
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.wait_for_message(timeout_ms),
-            TopicRingType::MPMC(_ring) => {
+            TopicRingType::MPMC(_) | TopicRingType::Broadcast(_) => {
                 // MPMC doesn't support blocking wait, poll instead
                 let start = Instant::now();
                 loop {
@@ -298,29 +402,8 @@ impl TopicInstance {
         match &self.ring {
             TopicRingType::SPSC(ring) => ring.notification_fd(),
             TopicRingType::MPMC(ring) => ring.notification_fd(),
+            TopicRingType::Broadcast(_) => None,
         }
-    }
-
-    /// Check if the topic is active (has publishers and subscribers)
-    pub fn is_active(&self) -> bool {
-        self.stats.active_publishers.load(Ordering::Relaxed) > 0
-            && self.stats.active_subscribers.load(Ordering::Relaxed) > 0
-    }
-
-    pub fn publisher_count(&self) -> usize {
-        self.publisher_handles.lock().len()
-    }
-
-    pub fn subscriber_count(&self) -> usize {
-        self.subscriber_handles.lock().len()
-    }
-
-    pub fn publisher_handles(&self) -> Vec<PublisherHandle> {
-        self.publisher_handles.lock().iter().copied().collect()
-    }
-
-    pub fn subscriber_handles(&self) -> Vec<SubscriberHandle> {
-        self.subscriber_handles.lock().iter().copied().collect()
     }
 
     /// Get the number of messages in the ring buffer
@@ -350,4 +433,5 @@ impl TopicInstance {
 pub enum TopicRingType {
     SPSC(Arc<SPSCTopicRing>),
     MPMC(Arc<MPMCTopicRing>),
+    Broadcast(Arc<BroadcastTopicRing>),
 }

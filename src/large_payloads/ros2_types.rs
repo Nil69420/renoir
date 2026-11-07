@@ -426,10 +426,13 @@ impl ROS2MessageManager {
     ) -> Result<BlobDescriptor> {
         // Get buffer to check size limits
         let test_buffer = self.pool_manager.get_buffer(pool_id)?;
-        let buffer_data = self.pool_manager.get_buffer_data(&test_buffer)?;
-        let max_buffer_size = buffer_data.as_slice().len() - BlobHeader::SIZE;
+        let max_buffer_size = {
+            let buffer_data = self.pool_manager.get_buffer_data(&test_buffer)?;
+            buffer_data.as_slice().len() - BlobHeader::SIZE
+        };
 
-        // Return test buffer
+        // Return test buffer; the Arc clone above must be dropped first so the
+        // pool can actually reclaim it
         self.pool_manager.return_buffer(&test_buffer)?;
 
         if payload.len() <= max_buffer_size {
@@ -450,6 +453,16 @@ impl ROS2MessageManager {
     ) -> Result<BlobDescriptor> {
         let buffer_desc = self.pool_manager.get_buffer(pool_id)?;
         let buffer_data = self.pool_manager.get_buffer_data(&buffer_desc)?;
+
+        let required = BlobHeader::SIZE.checked_add(payload.len()).ok_or_else(|| {
+            RenoirError::invalid_parameter("payload_size", "Blob payload size overflow")
+        })?;
+        if required > buffer_data.capacity() {
+            return Err(RenoirError::insufficient_space(
+                required,
+                buffer_data.capacity(),
+            ));
+        }
 
         // Write blob header + payload to buffer
         unsafe {
@@ -489,12 +502,67 @@ impl ROS2MessageManager {
         blob_header.sequence_id = sequence_id;
 
         // Create chunks
-        let _chunk_descriptors =
-            self.chunk_manager
-                .chunk_payload(payload, &blob_header, pool_id)?;
+        let chunk_descriptors = self
+            .chunk_manager
+            .chunk_payload(payload, &blob_header, pool_id)?;
+        blob_header.set_chunking(chunk_descriptors.len() as u32, sequence_id);
 
-        // For chunked messages, we store the blob header separately
-        // and use the sequence_id to reassemble
-        self.store_single_blob(blob_header, &[], pool_id)
+        // Store the blob header separately; the chunk descriptors reference
+        // the actual chunk buffers so reassembly is possible
+        let mut blob = self.store_single_blob(blob_header, &[], pool_id)?;
+        blob.chunk_descriptors = chunk_descriptors;
+
+        Ok(blob)
+    }
+
+    /// Reassemble a stored blob's payload.
+    ///
+    /// For single-buffer blobs this reads the main buffer and strips the
+    /// blob header. For chunked blobs it feeds every chunk buffer through the
+    /// chunk manager's reassembly in order and returns the full payload.
+    pub fn read_blob_payload(&self, blob: &BlobDescriptor) -> Result<Vec<u8>> {
+        if blob.header.chunk_count <= 1 || blob.chunk_descriptors.is_empty() {
+            let main_desc = crate::topic::MessageDescriptor::new(
+                blob.pool_id,
+                blob.buffer_handle,
+                blob.header.payload_size as u32,
+            );
+            let buffer = self.pool_manager.get_buffer_data(&main_desc)?;
+            let bytes = buffer.as_slice();
+            if bytes.len() < BlobHeader::SIZE {
+                return Err(RenoirError::serialization(
+                    "Blob buffer smaller than blob header",
+                ));
+            }
+            let header: BlobHeader =
+                unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const BlobHeader) };
+            header.validate()?;
+            return Ok(bytes[BlobHeader::SIZE..].to_vec());
+        }
+
+        let mut reassembled = None;
+        for chunk_desc in &blob.chunk_descriptors {
+            let chunk_buffer = self.pool_manager.get_buffer_data(chunk_desc)?;
+            if let Some(payload) = self.chunk_manager.process_chunk(chunk_buffer.as_slice())? {
+                reassembled = Some(payload);
+            }
+        }
+
+        reassembled.ok_or_else(|| {
+            RenoirError::serialization("Chunked blob incomplete; chunks not all received")
+        })
+    }
+
+    /// Release all buffers held by a blob back to its pool.
+    pub fn release_blob(&self, blob: &BlobDescriptor) -> Result<()> {
+        for chunk_desc in &blob.chunk_descriptors {
+            self.pool_manager.return_buffer(chunk_desc)?;
+        }
+        let main_desc = crate::topic::MessageDescriptor::new(
+            blob.pool_id,
+            blob.buffer_handle,
+            blob.header.payload_size as u32,
+        );
+        self.pool_manager.return_buffer(&main_desc)
     }
 }

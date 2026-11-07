@@ -132,12 +132,6 @@ impl SharedMemoryManager {
         regions.contains_key(name)
     }
 
-    /// Get region by name (returns None if not found)
-    pub fn try_get_region(&self, name: &str) -> Option<Arc<SharedMemoryRegion>> {
-        let regions = self.regions.read();
-        regions.get(name).cloned()
-    }
-
     /// Remove all regions
     pub fn clear(&self) -> Result<()> {
         let region_names: Vec<String> = {
@@ -161,19 +155,6 @@ impl SharedMemoryManager {
         }
 
         Ok(())
-    }
-
-    /// Get regions filtered by backing type
-    pub fn regions_by_backing_type(
-        &self,
-        backing_type: super::config::BackingType,
-    ) -> Vec<Arc<SharedMemoryRegion>> {
-        let regions = self.regions.read();
-        regions
-            .values()
-            .filter(|region| region.metadata().backing_type == backing_type)
-            .cloned()
-            .collect()
     }
 }
 

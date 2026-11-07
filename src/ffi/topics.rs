@@ -13,7 +13,7 @@
 //! # Thread Safety
 //! All handles are thread-safe and can be shared across threads.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CString};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -100,7 +100,8 @@ pub extern "C" fn renoir_topic_manager_destroy(
     let manager_id = manager as usize;
     let mut registry = HANDLE_REGISTRY.lock();
 
-    if registry.remove_topic_manager(manager_id) {
+    if let Some(manager) = registry.remove_topic_manager(manager_id) {
+        manager.mark_all_regions_clean();
         RenoirErrorCode::Success
     } else {
         RenoirErrorCode::InvalidParameter
@@ -298,7 +299,10 @@ pub extern "C" fn renoir_topic_list(
     }
 
     // Allocate array for topic info
-    let layout = std::alloc::Layout::array::<RenoirTopicInfo>(topic_count).unwrap();
+    let layout = match std::alloc::Layout::array::<RenoirTopicInfo>(topic_count) {
+        Ok(l) => l,
+        Err(_) => return RenoirErrorCode::OutOfMemory,
+    };
     let ptr = unsafe { std::alloc::alloc(layout) as *mut RenoirTopicInfo };
 
     if ptr.is_null() {
@@ -348,10 +352,22 @@ pub extern "C" fn renoir_topic_list(
 /// Free topic list returned by renoir_topic_list
 #[no_mangle]
 pub extern "C" fn renoir_topic_list_free(topics: *mut RenoirTopicInfo, count: usize) {
-    if !topics.is_null() && count > 0 {
-        unsafe {
-            let _ = Vec::from_raw_parts(topics, count, count);
+    if topics.is_null() || count == 0 {
+        return;
+    }
+
+    unsafe {
+        // Free each per-topic name CString allocated by renoir_topic_list
+        for i in 0..count {
+            let name = (*topics.add(i)).name;
+            if !name.is_null() {
+                drop(CString::from_raw(name as *mut c_char));
+            }
         }
+
+        let layout = std::alloc::Layout::array::<RenoirTopicInfo>(count)
+            .unwrap_or(std::alloc::Layout::new::<RenoirTopicInfo>());
+        std::alloc::dealloc(topics as *mut u8, layout);
     }
 }
 
@@ -994,6 +1010,27 @@ pub extern "C" fn renoir_wait_event(fd: std::os::fd::RawFd, timeout_ms: u64) -> 
 // Statistics API
 // ============================================================================
 
+/// Fill a `RenoirTopicStats` struct from a topic's live stats
+unsafe fn fill_topic_stats(
+    out: *mut RenoirTopicStats,
+    topic_stats: &crate::topic::TopicStats,
+    topic_id: RenoirTopicId,
+) {
+    use std::sync::atomic::Ordering;
+
+    (*out).topic_id = topic_id;
+    (*out).publisher_count = topic_stats.active_publishers.load(Ordering::Relaxed) as usize;
+    (*out).subscriber_count = topic_stats.active_subscribers.load(Ordering::Relaxed) as usize;
+    (*out).messages_published = topic_stats.messages_published.load(Ordering::Relaxed);
+    (*out).messages_consumed = topic_stats.messages_consumed.load(Ordering::Relaxed);
+    (*out).messages_dropped = topic_stats.messages_dropped.load(Ordering::Relaxed);
+    (*out).bytes_transferred = topic_stats.avg_message_size.load(Ordering::Relaxed)
+        * topic_stats.messages_published.load(Ordering::Relaxed);
+    (*out).average_latency_ns = topic_stats.average_latency_ns();
+    (*out).peak_latency_ns = topic_stats.peak_latency_ns();
+    (*out).throughput_mbps = topic_stats.throughput_mbps();
+}
+
 /// Get topic statistics
 #[no_mangle]
 pub extern "C" fn renoir_topic_stats(
@@ -1026,34 +1063,7 @@ pub extern "C" fn renoir_topic_stats(
     match manager.topic_stats(&name) {
         Ok(topic_stats) => {
             unsafe {
-                (*stats).topic_id = topic_id as RenoirTopicId;
-                (*stats).publisher_count = topic_stats
-                    .active_publishers
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as usize;
-                (*stats).subscriber_count = topic_stats
-                    .active_subscribers
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as usize;
-                (*stats).messages_published = topic_stats
-                    .messages_published
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_consumed = topic_stats
-                    .messages_consumed
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_dropped = topic_stats
-                    .messages_dropped
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).bytes_transferred = topic_stats
-                    .avg_message_size
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    * topic_stats
-                        .messages_published
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                // Latency tracking would require timestamp collection - not implemented yet
-                (*stats).average_latency_ns = 0;
-                (*stats).peak_latency_ns = 0;
-                (*stats).throughput_mbps = 0.0;
+                fill_topic_stats(stats, &topic_stats, topic_id as RenoirTopicId);
             }
             RenoirErrorCode::Success
         }
@@ -1082,32 +1092,7 @@ pub extern "C" fn renoir_publisher_stats(
     let topic_stats = pub_handle.stats();
 
     unsafe {
-        (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats
-            .active_publishers
-            .load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats
-            .active_subscribers
-            .load(std::sync::atomic::Ordering::Relaxed)
-            as usize;
-        (*stats).messages_published = topic_stats
-            .messages_published
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats
-            .messages_consumed
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats
-            .messages_dropped
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats
-            .avg_message_size
-            .load(std::sync::atomic::Ordering::Relaxed)
-            * topic_stats
-                .messages_published
-                .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).average_latency_ns = 0;
-        (*stats).peak_latency_ns = 0;
-        (*stats).throughput_mbps = 0.0;
+        fill_topic_stats(stats, &topic_stats, 0);
     }
 
     RenoirErrorCode::Success
@@ -1134,32 +1119,7 @@ pub extern "C" fn renoir_subscriber_stats(
     let topic_stats = sub_handle.stats();
 
     unsafe {
-        (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats
-            .active_publishers
-            .load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats
-            .active_subscribers
-            .load(std::sync::atomic::Ordering::Relaxed)
-            as usize;
-        (*stats).messages_published = topic_stats
-            .messages_published
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats
-            .messages_consumed
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats
-            .messages_dropped
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats
-            .avg_message_size
-            .load(std::sync::atomic::Ordering::Relaxed)
-            * topic_stats
-                .messages_published
-                .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).average_latency_ns = 0;
-        (*stats).peak_latency_ns = 0;
-        (*stats).throughput_mbps = 0.0;
+        fill_topic_stats(stats, &topic_stats, 0);
     }
 
     RenoirErrorCode::Success
@@ -1371,5 +1331,21 @@ mod tests {
             assert_eq!(ptr, buf.as_ptr());
             assert_eq!(len, buf.len());
         }
+    }
+
+    #[test]
+    fn test_topic_list_layout_overflow_guard() {
+        // renoir_topic_list uses Layout::array::<RenoirTopicInfo>(topic_count)
+        // and must return OutOfMemory instead of panicking on overflow
+        let pathological_count = usize::MAX / std::mem::size_of::<RenoirTopicInfo>() + 1;
+        assert!(
+            std::alloc::Layout::array::<RenoirTopicInfo>(pathological_count).is_err(),
+            "pathological topic count must fail layout construction"
+        );
+        let ok_count = 64usize;
+        assert!(
+            std::alloc::Layout::array::<RenoirTopicInfo>(ok_count).is_ok(),
+            "normal topic count must construct a layout"
+        );
     }
 }

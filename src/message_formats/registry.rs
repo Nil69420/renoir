@@ -8,9 +8,7 @@ use super::zero_copy::{CapnProtoFormat, FlatBufferFormat};
 use super::FormatType;
 use crate::error::{RenoirError, Result};
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
-
-use parking_lot::RwLock;
+use std::sync::Arc;
 
 /// Registry for managing zero-copy message formats and schemas
 pub struct ZeroCopyFormatRegistry {
@@ -20,8 +18,6 @@ pub struct ZeroCopyFormatRegistry {
     schemas: HashMap<String, Vec<SchemaInfo>>,
     /// Topic format assignments
     topic_formats: HashMap<String, FormatType>,
-    /// Topic schema assignments
-    topic_schemas: HashMap<String, SchemaInfo>,
     /// Schema evolution management
     evolution_manager: SchemaEvolutionManager,
     /// Enhanced compatibility tracking
@@ -41,7 +37,6 @@ impl ZeroCopyFormatRegistry {
             formats: HashMap::new(),
             schemas: HashMap::new(),
             topic_formats: HashMap::new(),
-            topic_schemas: HashMap::new(),
             evolution_manager: SchemaEvolutionManager::new(),
             compatibility_cache: HashMap::new(),
         };
@@ -136,47 +131,6 @@ impl ZeroCopyFormatRegistry {
         Ok(())
     }
 
-    /// Assign a schema to a topic
-    pub fn assign_topic_schema(&mut self, topic_pattern: String, schema: SchemaInfo) -> Result<()> {
-        self.register_schema(schema.clone())?;
-        self.topic_schemas.insert(topic_pattern, schema);
-        Ok(())
-    }
-
-    /// Get the assigned format for a topic
-    pub fn get_topic_format(&self, topic_name: &str) -> Option<FormatType> {
-        // First try exact match
-        if let Some(format) = self.topic_formats.get(topic_name) {
-            return Some(*format);
-        }
-
-        // Then try pattern matching
-        for (pattern, format) in &self.topic_formats {
-            if topic_matches_pattern(topic_name, pattern) {
-                return Some(*format);
-            }
-        }
-
-        None
-    }
-
-    /// Get the assigned schema for a topic
-    pub fn get_topic_schema(&self, topic_name: &str) -> Option<&SchemaInfo> {
-        // First try exact match
-        if let Some(schema) = self.topic_schemas.get(topic_name) {
-            return Some(schema);
-        }
-
-        // Then try pattern matching
-        for (pattern, schema) in &self.topic_schemas {
-            if topic_matches_pattern(topic_name, pattern) {
-                return Some(schema);
-            }
-        }
-
-        None
-    }
-
     /// Get format recommendations based on use case
     pub fn recommend_format(&self, use_case: UseCase) -> FormatType {
         match use_case {
@@ -258,41 +212,9 @@ impl ZeroCopyFormatRegistry {
             .generate_migration_plan(from_schema, to_schema)
     }
 
-    /// Validate backward compatibility for a schema update
-    pub fn validate_backward_compatibility(
-        &mut self,
-        old_name: &str,
-        new_schema: &EvolutionAwareSchema,
-    ) -> Result<bool> {
-        let old_schema = self.evolution_manager.get_latest_schema(old_name);
-
-        if let Some(old) = old_schema {
-            let compatibility = self
-                .evolution_manager
-                .check_compatibility(old, new_schema)?;
-            Ok(matches!(
-                compatibility,
-                CompatibilityLevel::FullCompatible | CompatibilityLevel::BackwardCompatible
-            ))
-        } else {
-            // No previous version - always compatible
-            Ok(true)
-        }
-    }
-
-    /// Clear compatibility cache (useful after schema updates)
-    pub fn clear_compatibility_cache(&mut self) {
-        self.compatibility_cache.clear();
-    }
-
     /// Generate a unique schema ID
     pub fn generate_schema_id(&mut self) -> u64 {
         self.evolution_manager.generate_schema_id()
-    }
-
-    /// List all registered formats
-    pub fn list_formats(&self) -> Vec<FormatType> {
-        self.formats.keys().cloned().collect()
     }
 
     /// List all registered schemas
@@ -350,58 +272,4 @@ impl SchemaInfo {
             && self.schema_name == other.schema_name
             && self.schema_hash == other.schema_hash
     }
-}
-
-/// Global registry instance
-static GLOBAL_REGISTRY: OnceLock<RwLock<ZeroCopyFormatRegistry>> = OnceLock::new();
-
-/// Initialize the global registry
-pub fn init_global_registry() {
-    let _ = GLOBAL_REGISTRY.set(RwLock::new(ZeroCopyFormatRegistry::new()));
-}
-
-/// Get the global registry (read-only)
-pub fn global_registry() -> &'static RwLock<ZeroCopyFormatRegistry> {
-    GLOBAL_REGISTRY.get_or_init(|| RwLock::new(ZeroCopyFormatRegistry::new()))
-}
-
-/// Register a schema globally
-pub fn register_global_schema(schema: SchemaInfo) -> Result<()> {
-    let registry = global_registry();
-    let mut registry = registry.write();
-    registry.register_schema(schema)
-}
-
-/// Get a format from the global registry
-pub fn get_global_format(
-    format_type: &FormatType,
-) -> Option<Arc<dyn ZeroCopyFormat + Send + Sync>> {
-    let registry = global_registry();
-    let registry = registry.read();
-    registry.get_format(format_type)
-}
-
-/// Get format recommendation from global registry
-pub fn get_global_recommendation(use_case: &UseCase) -> FormatType {
-    let registry = global_registry();
-    let registry = registry.read();
-    registry.recommend_format(*use_case)
-}
-
-/// Topic pattern matching helper
-fn topic_matches_pattern(topic_name: &str, pattern: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-
-    if let Some(prefix) = pattern.strip_suffix("/*") {
-        return topic_name.starts_with(prefix);
-    }
-
-    if let Some(suffix) = pattern.strip_prefix("*/") {
-        return topic_name.ends_with(suffix);
-    }
-
-    // Exact match
-    topic_name == pattern
 }

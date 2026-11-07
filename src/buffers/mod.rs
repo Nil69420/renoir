@@ -10,6 +10,6 @@ pub mod stats;
 
 // Re-export main types
 pub use buffer::Buffer;
-pub use config::{BufferPoolConfig, BufferPoolConfigBuilder};
+pub use config::BufferPoolConfig;
 pub use pool::BufferPool;
-pub use stats::{next_buffer_sequence, AtomicBufferPoolStats, BufferPoolStats};
+pub use stats::{next_buffer_sequence, BufferPoolStats};

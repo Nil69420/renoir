@@ -69,43 +69,6 @@ impl BumpAllocator {
     fn align_up(value: usize, align: usize) -> usize {
         (value + align - 1) & !(align - 1)
     }
-
-    /// Get current position in the allocation region
-    pub fn current_position(&self) -> usize {
-        self.current_offset.load(Ordering::Acquire)
-    }
-
-    /// Save the current position as a watermark for later reset.
-    /// Returns the current offset which can be passed to `reset_to_watermark`.
-    pub fn watermark(&self) -> usize {
-        self.current_offset.load(Ordering::Acquire)
-    }
-
-    /// Reset the allocator to a previously saved watermark, freeing
-    /// all allocations made after the watermark was taken.
-    ///
-    /// The caller must ensure no references to memory above `mark` are still live.
-    pub fn reset_to_watermark(&self, mark: usize) -> Result<()> {
-        if mark > self.total_size {
-            return Err(RenoirError::InvalidParameter {
-                parameter: "mark".to_string(),
-                message: "Watermark exceeds allocator size".to_string(),
-            });
-        }
-        self.current_offset.store(mark, Ordering::Release);
-        Ok(())
-    }
-
-    /// Check if a specific size can be allocated
-    pub fn can_allocate_size(&self, size: usize, align: usize) -> bool {
-        let current = self.current_offset.load(Ordering::Acquire);
-        let base_addr = self.base_ptr.as_ptr() as usize;
-        let current_addr = base_addr + current;
-        let aligned_addr = Self::align_up(current_addr, align);
-        let required_offset = aligned_addr - base_addr + size;
-
-        required_offset <= self.total_size
-    }
 }
 
 impl Allocator for BumpAllocator {

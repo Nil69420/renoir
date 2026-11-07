@@ -8,9 +8,12 @@ use std::{
     time::Duration,
 };
 
+use parking_lot::Mutex;
+
 use crate::{
     error::Result,
-    topic::{Message, TopicConfig, TopicStats},
+    topic::{Message, TopicStats},
+    topic_rings::BroadcastCursor,
 };
 
 use super::{
@@ -64,11 +67,6 @@ impl Publisher {
         self.topic.stats.clone()
     }
 
-    /// Get the topic configuration
-    pub fn config(&self) -> &TopicConfig {
-        &self.topic.config
-    }
-
     /// Get the topic name
     pub fn topic_name(&self) -> &str {
         &self.topic.config.name
@@ -108,6 +106,7 @@ pub struct Subscriber {
     pub topic_id: TopicId,
     topic: Arc<TopicInstance>,
     last_sequence: AtomicUsize,
+    cursor: Mutex<Option<BroadcastCursor>>,
 }
 
 impl Subscriber {
@@ -120,6 +119,7 @@ impl Subscriber {
         Self {
             handle,
             topic_id,
+            cursor: Mutex::new(topic.new_cursor()),
             topic,
             last_sequence: AtomicUsize::new(0),
         }
@@ -127,7 +127,7 @@ impl Subscriber {
 
     /// Subscribe to the next available message
     pub fn subscribe(&self) -> Result<Option<Message>> {
-        let message = self.topic.subscribe()?;
+        let message = self.topic.subscribe_with(&self.cursor)?;
 
         if let Some(ref msg) = message {
             self.last_sequence
@@ -147,13 +147,17 @@ impl Subscriber {
     /// Note: In MPMC mode, the message may be consumed by another subscriber
     /// between peek and the next subscribe call
     pub fn peek(&self) -> Result<Option<Message>> {
-        self.topic.peek()
+        self.topic.peek_with(&self.cursor)
+    }
+
+    pub fn overruns(&self) -> u64 {
+        self.cursor.lock().map_or(0, |c| c.overruns())
     }
 
     /// Wait for a message with optional timeout
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
-        let message = self.topic.wait_for_message(timeout)?;
+        let message = self.topic.wait_with(&self.cursor, timeout)?;
 
         if let Some(ref msg) = message {
             self.last_sequence
@@ -172,11 +176,6 @@ impl Subscriber {
     /// Get topic statistics
     pub fn stats(&self) -> Arc<TopicStats> {
         self.topic.stats.clone()
-    }
-
-    /// Get the topic configuration
-    pub fn config(&self) -> &TopicConfig {
-        &self.topic.config
     }
 
     /// Get the topic name
