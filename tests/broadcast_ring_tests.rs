@@ -3,6 +3,7 @@ use std::sync::{
     Arc,
 };
 use std::thread;
+use std::time::{Duration, Instant};
 
 use renoir::topic::MessagePayload;
 use renoir::topic::TopicStats;
@@ -246,6 +247,106 @@ fn test_read_into_copies_to_caller_buffer_and_reports_too_small_without_consumin
         ring.read_into(&mut cursor, &mut buf).unwrap(),
         ReadInto::Empty
     );
+}
+
+#[test]
+fn test_wait_readable_times_out_when_nothing_is_published() {
+    let (ring, _mem) = make_ring(8, 64);
+    let cursor = ring.cursor_latest();
+    let start = Instant::now();
+    assert!(!ring.wait_readable(&cursor, Some(Duration::from_millis(60))));
+    let waited = start.elapsed();
+    assert!(
+        waited >= Duration::from_millis(55),
+        "returned early: {:?}",
+        waited
+    );
+    assert!(
+        waited < Duration::from_millis(500),
+        "overslept: {:?}",
+        waited
+    );
+}
+
+#[test]
+fn test_wait_readable_returns_immediately_when_message_pending() {
+    let (ring, _mem) = make_ring(8, 64);
+    let cursor = ring.cursor_latest();
+    ring.try_publish(&msg(1, 8)).unwrap();
+    let start = Instant::now();
+    assert!(ring.wait_readable(&cursor, Some(Duration::from_secs(5))));
+    assert!(start.elapsed() < Duration::from_millis(50));
+}
+
+#[test]
+fn test_wait_readable_wakes_all_blocked_subscribers_on_publish() {
+    let (ring, _mem) = make_ring(8, 64);
+    let waiters: Vec<_> = (0..4)
+        .map(|_| {
+            let ring = ring.clone();
+            let cursor = ring.cursor_latest();
+            thread::spawn(move || {
+                let start = Instant::now();
+                let ok = ring.wait_readable(&cursor, Some(Duration::from_secs(10)));
+                (ok, start.elapsed())
+            })
+        })
+        .collect();
+    thread::sleep(Duration::from_millis(150));
+    ring.try_publish(&msg(1, 8)).unwrap();
+    for w in waiters {
+        let (ok, elapsed) = w.join().unwrap();
+        assert!(ok);
+        assert!(elapsed < Duration::from_secs(2), "woke late: {:?}", elapsed);
+    }
+}
+
+#[test]
+fn test_wake_latency_is_far_below_polling_interval() {
+    let (ring, _mem) = make_ring(8, 64);
+    let iterations = if cfg!(miri) { 20 } else { 2000 };
+    let mut cursor = ring.cursor_latest();
+    let published_at = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let epoch = Instant::now();
+
+    let publisher = {
+        let ring = ring.clone();
+        let published_at = published_at.clone();
+        thread::spawn(move || {
+            for i in 1..=iterations as u64 {
+                thread::sleep(Duration::from_micros(300));
+                published_at.store(epoch.elapsed().as_nanos() as u64, Ordering::Release);
+                ring.try_publish(&msg(i, 8)).unwrap();
+            }
+        })
+    };
+
+    let mut latencies = Vec::new();
+    while latencies.len() < iterations {
+        if ring.wait_readable(&cursor, Some(Duration::from_secs(5))) {
+            let now = epoch.elapsed().as_nanos() as u64;
+            let t = published_at.load(Ordering::Acquire);
+            if let Some(m) = ring.try_consume(&mut cursor).unwrap() {
+                let _ = m;
+                latencies.push(now.saturating_sub(t));
+            }
+        } else {
+            panic!("timed out waiting for publish");
+        }
+    }
+    publisher.join().unwrap();
+    latencies.sort_unstable();
+    let p50 = latencies[latencies.len() / 2];
+    let p99 = latencies[latencies.len() * 99 / 100];
+    eprintln!(
+        "wake latency ns: p50={} p99={} max={}",
+        p50,
+        p99,
+        latencies[latencies.len() - 1]
+    );
+    if !cfg!(miri) {
+        assert!(p99 < 5_000_000, "p99 wake latency {} ns", p99);
+    }
 }
 
 #[test]

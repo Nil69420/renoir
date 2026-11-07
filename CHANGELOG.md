@@ -21,6 +21,11 @@ and this project adheres to the versioning policy in `SEMVER.md`.
   caller-owned buffer without allocating; `renoir_subscriber_overruns` reports
   messages a slow subscriber lost.
 
+- Blocking wait for SPMC subscribers using a cross-process futex:
+  `renoir_subscribe_wait` and C++ `Subscriber::wait`; timed
+  `renoir_subscribe_read_next` no longer polls on SPMC topics. Publishers skip
+  the wake syscall when no subscriber is waiting.
+
 ### Changed
 - Breaking: SPMC topics use a new ring layout (`BROADCAST_RING_MAGIC`).
   Previously SPMC aliased the SPSC ring, whose single read cursor was

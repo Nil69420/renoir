@@ -371,6 +371,7 @@ public:
     ReceivedMessage readNext(uint64_t timeout_ms = 1000);
     ReadResult readInto(uint8_t* buffer, size_t capacity, size_t* length,
                         RenoirMessageMetadata* metadata = nullptr);
+    bool wait(uint64_t timeout_ms);
     uint64_t overruns() const;
     bool peek(ReceivedMessage* message);
     size_t drain();

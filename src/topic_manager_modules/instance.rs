@@ -395,6 +395,17 @@ impl TopicInstance {
         }
     }
 
+    pub fn wait_readable_with(
+        &self,
+        cursor: &Mutex<Option<BroadcastCursor>>,
+        timeout: Option<Duration>,
+    ) -> bool {
+        match (&self.ring, *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.wait_readable(&c, timeout),
+            _ => false,
+        }
+    }
+
     pub fn wait_with(
         &self,
         cursor: &Mutex<Option<BroadcastCursor>>,
@@ -403,17 +414,24 @@ impl TopicInstance {
         if cursor.lock().is_none() {
             return self.wait_for_message(timeout);
         }
-        let start = Instant::now();
+        let deadline = timeout.map(|t| Instant::now() + t);
         loop {
             if let Some(message) = self.subscribe_with(cursor)? {
                 return Ok(Some(message));
             }
-            if let Some(timeout) = timeout {
-                if start.elapsed() >= timeout {
-                    return Ok(None);
+            let remaining = match deadline {
+                Some(d) => {
+                    let now = Instant::now();
+                    if now >= d {
+                        return Ok(None);
+                    }
+                    Some(d - now)
                 }
+                None => None,
+            };
+            if !self.wait_readable_with(cursor, remaining) {
+                return Ok(None);
             }
-            thread::sleep(Duration::from_micros(50));
         }
     }
 

@@ -268,6 +268,15 @@ ReadResult Subscriber::readInto(uint8_t* buffer, size_t capacity, size_t* length
     return ReadResult::Message;
 }
 
+bool Subscriber::wait(uint64_t timeout_ms) {
+    RenoirErrorCode result = renoir_subscribe_wait(handle_, timeout_ms);
+    if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
+        return false;
+    }
+    checkResult(result, "wait for message");
+    return true;
+}
+
 uint64_t Subscriber::overruns() const {
     uint64_t value = 0;
     checkResult(renoir_subscriber_overruns(handle_, &value), "read subscriber overruns");

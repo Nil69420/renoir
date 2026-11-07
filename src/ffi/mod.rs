@@ -45,11 +45,12 @@ pub use topics::{
     renoir_publish_reserve, renoir_publish_try, renoir_publisher_create, renoir_publisher_destroy,
     renoir_publisher_has_subscribers, renoir_publisher_stats, renoir_publisher_topic_name,
     renoir_subscribe_drain, renoir_subscribe_peek, renoir_subscribe_read_into,
-    renoir_subscribe_read_next, renoir_subscriber_create, renoir_subscriber_destroy,
-    renoir_subscriber_has_messages, renoir_subscriber_overruns, renoir_subscriber_pending_count,
-    renoir_subscriber_stats, renoir_subscriber_topic_name, renoir_topic_count, renoir_topic_list,
-    renoir_topic_list_free, renoir_topic_lookup, renoir_topic_manager_create,
-    renoir_topic_manager_destroy, renoir_topic_register, renoir_topic_remove, renoir_topic_stats,
+    renoir_subscribe_read_next, renoir_subscribe_wait, renoir_subscriber_create,
+    renoir_subscriber_destroy, renoir_subscriber_has_messages, renoir_subscriber_overruns,
+    renoir_subscriber_pending_count, renoir_subscriber_stats, renoir_subscriber_topic_name,
+    renoir_topic_count, renoir_topic_list, renoir_topic_list_free, renoir_topic_lookup,
+    renoir_topic_manager_create, renoir_topic_manager_destroy, renoir_topic_register,
+    renoir_topic_remove, renoir_topic_stats,
 };
 
 #[cfg(target_os = "linux")]

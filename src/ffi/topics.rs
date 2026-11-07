@@ -1378,6 +1378,32 @@ pub extern "C" fn renoir_subscriber_overruns(
     }
 }
 
+/// Block until a message is readable or the timeout elapses (SPMC topics)
+///
+/// Returns `Success` when a message can be read, `BufferEmpty` on timeout. A
+/// `timeout_ms` of 0 only polls.
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_wait(
+    subscriber: RenoirSubscriberHandle,
+    timeout_ms: u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    if sub.wait_readable(Some(Duration::from_millis(timeout_ms))) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

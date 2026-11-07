@@ -1005,6 +1005,14 @@ enum RenoirErrorCode renoir_subscriber_overruns(RenoirSubscriberHandle subscribe
                                                 uint64_t *out_overruns);
 
 /**
+ * Block until a message is readable or the timeout elapses (SPMC topics)
+ *
+ * Returns `Success` when a message can be read, `BufferEmpty` on timeout. A
+ * `timeout_ms` of 0 only polls.
+ */
+enum RenoirErrorCode renoir_subscribe_wait(RenoirSubscriberHandle subscriber, uint64_t timeout_ms);
+
+/**
  * Free a C string allocated by this library
  */
 void renoir_free_string(char *ptr);

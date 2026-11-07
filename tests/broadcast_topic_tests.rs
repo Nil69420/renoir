@@ -192,14 +192,16 @@ fn run_child() {
             "timed out after {} messages",
             received
         );
-        match subscriber.subscribe().unwrap() {
-            Some(m) => {
+        if let Some(m) = subscriber
+            .wait_for_message(Some(Duration::from_millis(500)))
+            .unwrap()
+        {
+            {
                 received += 1;
                 let seq = m.header.sequence;
                 assert_eq!(seq, received);
                 assert_eq!(payload_of(&m), &vec![(seq % 251) as u8; 100]);
             }
-            None => std::thread::sleep(Duration::from_micros(100)),
         }
     }
     assert_eq!(subscriber.overruns(), 0);

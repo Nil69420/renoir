@@ -175,6 +175,10 @@ impl Subscriber {
         Ok(result)
     }
 
+    pub fn wait_readable(&self, timeout: Option<Duration>) -> bool {
+        self.topic.wait_readable_with(&self.cursor, timeout)
+    }
+
     pub fn overruns(&self) -> u64 {
         self.cursor.lock().map_or(0, |c| c.overruns())
     }

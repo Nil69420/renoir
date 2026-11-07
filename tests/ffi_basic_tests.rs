@@ -9,13 +9,13 @@ use renoir::ffi::{
     renoir_manager_create, renoir_manager_destroy, renoir_message_release, renoir_publish,
     renoir_publish_commit, renoir_publish_discard, renoir_publish_reserve, renoir_publisher_create,
     renoir_publisher_destroy, renoir_subscribe_read_into, renoir_subscribe_read_next,
-    renoir_subscriber_create, renoir_subscriber_destroy, renoir_subscriber_overruns,
-    renoir_topic_list, renoir_topic_list_free, renoir_topic_manager_create,
-    renoir_topic_manager_destroy, renoir_topic_register, renoir_version_major,
-    renoir_version_minor, renoir_version_patch, renoir_version_string, RenoirBufferPoolConfig,
-    RenoirBufferPoolHandle, RenoirErrorCode, RenoirMessageMetadata, RenoirPublisherHandle,
-    RenoirReceivedMessage, RenoirRegionConfig, RenoirSequenceNumber, RenoirSubscriberHandle,
-    RenoirTopicId, RenoirTopicInfo, RenoirTopicOptions,
+    renoir_subscribe_wait, renoir_subscriber_create, renoir_subscriber_destroy,
+    renoir_subscriber_overruns, renoir_topic_list, renoir_topic_list_free,
+    renoir_topic_manager_create, renoir_topic_manager_destroy, renoir_topic_register,
+    renoir_version_major, renoir_version_minor, renoir_version_patch, renoir_version_string,
+    RenoirBufferPoolConfig, RenoirBufferPoolHandle, RenoirErrorCode, RenoirMessageMetadata,
+    RenoirPublisherHandle, RenoirReceivedMessage, RenoirRegionConfig, RenoirSequenceNumber,
+    RenoirSubscriberHandle, RenoirTopicId, RenoirTopicInfo, RenoirTopicOptions,
 };
 use std::ffi::CStr;
 #[cfg(feature = "c-api")]
@@ -601,6 +601,96 @@ mod ffi_tests {
 
             renoir_subscriber_destroy(sub_a);
             renoir_subscriber_destroy(sub_b);
+            renoir_publisher_destroy(publisher);
+            renoir_topic_manager_destroy(manager);
+        }
+    }
+
+    #[test]
+    fn test_ffi_subscribe_wait_blocks_until_publish() {
+        {
+            let manager = renoir_topic_manager_create();
+            let topic_name = CString::new(format!("/ffi/wait_{}", std::process::id())).unwrap();
+            let options = RenoirTopicOptions {
+                pattern: 1,
+                ring_capacity: 256,
+                max_payload_size: 256,
+                use_shared_pool: false,
+                shared_pool_threshold: 0,
+                enable_notifications: false,
+            };
+            let mut topic_id: RenoirTopicId = 0;
+            assert_eq!(
+                renoir_topic_register(manager, topic_name.as_ptr(), &options, &mut topic_id),
+                RenoirErrorCode::Success
+            );
+            let pub_opts = renoir::ffi::RenoirPublisherOptions {
+                batch_size: 1,
+                timeout_ms: 0,
+                priority: 0,
+                enable_batching: false,
+            };
+            let sub_opts = renoir::ffi::RenoirSubscriberOptions {
+                mode: 1,
+                batch_size: 1,
+                timeout_ms: 0,
+                queue_depth: 16,
+                enable_filtering: false,
+            };
+            let mut publisher: RenoirPublisherHandle = ptr::null_mut();
+            let mut subscriber: RenoirSubscriberHandle = ptr::null_mut();
+            assert_eq!(
+                renoir_publisher_create(manager, topic_name.as_ptr(), &pub_opts, &mut publisher),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(
+                renoir_subscriber_create(manager, topic_name.as_ptr(), &sub_opts, &mut subscriber),
+                RenoirErrorCode::Success
+            );
+
+            let start = std::time::Instant::now();
+            assert_eq!(
+                renoir_subscribe_wait(subscriber, 60),
+                RenoirErrorCode::BufferEmpty
+            );
+            assert!(start.elapsed() >= std::time::Duration::from_millis(55));
+
+            let pub_addr = publisher as usize;
+            let helper = std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let payload = [7u8; 16];
+                let mut seq: RenoirSequenceNumber = 0;
+                renoir_publish(
+                    pub_addr as RenoirPublisherHandle,
+                    payload.as_ptr(),
+                    payload.len(),
+                    ptr::null(),
+                    &mut seq,
+                )
+            });
+            let start = std::time::Instant::now();
+            assert_eq!(
+                renoir_subscribe_wait(subscriber, 5000),
+                RenoirErrorCode::Success
+            );
+            assert!(start.elapsed() < std::time::Duration::from_secs(2));
+            assert_eq!(helper.join().unwrap(), RenoirErrorCode::Success);
+
+            let mut buf = [0u8; 64];
+            let mut out_len = 0usize;
+            assert_eq!(
+                renoir_subscribe_read_into(
+                    subscriber,
+                    buf.as_mut_ptr(),
+                    buf.len(),
+                    &mut out_len,
+                    ptr::null_mut()
+                ),
+                RenoirErrorCode::Success
+            );
+            assert_eq!(out_len, 16);
+
+            renoir_subscriber_destroy(subscriber);
             renoir_publisher_destroy(publisher);
             renoir_topic_manager_destroy(manager);
         }

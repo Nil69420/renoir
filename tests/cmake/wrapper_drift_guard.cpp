@@ -217,6 +217,7 @@ static void test_broadcast_zero_copy() {
     std::vector<uint8_t> buf(4096);
     size_t len = 0;
     assert(sub_a.readInto(buf.data(), buf.size(), &len) == ReadResult::Empty);
+    assert(!sub_a.wait(5));
 
     {
         Reservation r = publisher.reserve(100);
@@ -226,6 +227,7 @@ static void test_broadcast_zero_copy() {
         assert(seq == 1);
         (void)seq;
     }
+    assert(sub_a.wait(100));
     for (Subscriber* sub : {&sub_a, &sub_b}) {
         RenoirMessageMetadata meta = {};
         assert(sub->readInto(buf.data(), buf.size(), &len, &meta) == ReadResult::Message);
