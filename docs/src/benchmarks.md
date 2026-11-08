@@ -1,6 +1,6 @@
 # Benchmarks
 
-All numbers are one-way latency (half the round trip) at the median, measured between two threads pinned to different physical cores of an Intel i7-11800H (performance governor, constant TSC, Linux 6.8, release build) with a spinning consumer. Compare rows within the same table only; absolute values drift by about 10 ns between sessions. Reproduce with `cargo bench --bench latency_pingpong -- 2 4` and `cargo bench --bench vs_iceoryx2 -- 2 4`.
+All numbers are one-way latency (half the round trip) at the median, measured between two threads pinned to different physical cores of an Intel i7-11800H (performance governor, constant TSC, Linux 6.8, release build) with a spinning consumer. Compare rows within the same table only; absolute values drift by about 10 ns between sessions. Reproduce with `cargo bench --bench latency_pingpong -- 2 4` and `cargo bench --manifest-path benches/comparison/Cargo.toml --bench vs_iceoryx2 -- 2 4`.
 
 | payload | Renoir lean ring | Renoir broadcast, copy out | Renoir broadcast, in-place view | iceoryx2 0.10 |
 |---|---|---|---|---|
@@ -32,7 +32,7 @@ The Orin's generic timer ticks at about 31 MHz, roughly 32 ns per tick, so a sin
 ```
 sudo nvpmodel -m 0 && sudo jetson_clocks
 BENCH_BURST=512 cargo bench --bench latency_pingpong -- 2 4
-BENCH_BURST=512 cargo bench --bench vs_iceoryx2 -- 2 4
+BENCH_BURST=512 cargo bench --manifest-path benches/comparison/Cargo.toml --bench vs_iceoryx2 -- 2 4
 ```
 
 Pick two different physical cores that your real-time threads do not use, and record the CPU model, kernel, `nvpmodel` mode and governor next to the numbers. Latency below the burst resolution cannot be claimed from this mode, and a hardware cycle counter (PMU) based timer has not been implemented.

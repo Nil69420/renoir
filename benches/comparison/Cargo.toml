@@ -5,4 +5,15 @@ edition = "2021"
 
 [dependencies]
 renoir = { path = "../.." }
-iceoryx2 = "0.9.3"
+iceoryx2 = "0.10"
+libc = "0.2"
+
+[[bench]]
+name = "vs_iceoryx2"
+path = "../vs_iceoryx2.rs"
+harness = false
+
+[[bench]]
+name = "fanout"
+path = "../fanout.rs"
+harness = false

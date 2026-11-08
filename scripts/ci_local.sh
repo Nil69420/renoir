@@ -7,7 +7,7 @@ SAN_SUITES=$(grep -A6 'cargo test -Zbuild-std' .github/workflows/verify.yml | gr
 step() { printf '\n== %s\n' "$1"; }
 step fmt; cargo fmt --check
 step clippy; cargo clippy --all-targets --all-features -- -D warnings
-step tests; cargo test --release
+step tests; cargo test --profile testing
 step c-abi; sh tests/c/run.sh >/dev/null; sh tests/abi/check.sh
 if [ "${1:-}" = "--fast" ]; then echo "fast mode: skipped Miri and sanitizers"; exit 0; fi
 step miri; MIRIFLAGS="-Zmiri-disable-isolation" cargo +nightly miri test $MIRI_SUITES
