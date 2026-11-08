@@ -5,7 +5,7 @@
 A lean ring occupies one region, file-backed under `RENOIR_SHM_DIR` (default `/dev/shm`):
 
 ```
-bytes = 704 + slots x slot_bytes
+bytes = 1728 + slots x slot_bytes
 slot_bytes = 64 x ceil((msg_size + 8) / 64)        (msg_size 1..=504)
 ```
 
@@ -13,10 +13,10 @@ slot_bytes = 64 x ceil((msg_size + 8) / 64)        (msg_size 1..=504)
 
 | msg_size | slot_bytes | 1024 slots |
 |---|---|---|
-| 1..=56 | 64 | 64 KiB + 704 B |
-| 57..=120 | 128 | 128 KiB + 704 B |
-| 121..=184 | 192 | 192 KiB + 704 B |
-| 441..=504 | 512 | 512 KiB + 704 B |
+| 1..=56 | 64 | 64 KiB + 1728 B |
+| 57..=120 | 128 | 128 KiB + 1728 B |
+| 121..=184 | 192 | 192 KiB + 1728 B |
+| 441..=504 | 512 | 512 KiB + 1728 B |
 
 `renoir_lean_memory_required(msg_size, slot_count, &bytes)` (Python `lean_memory_required`) computes this exactly, including the round-down of the slot count to a power of two.
 
@@ -33,4 +33,4 @@ Use `BroadcastTopicRing::slot_stride(payload)` and `required_memory_size(ring_by
 
 ## Request-response
 
-Request ring: lean multi-producer ring with `16 + max_payload` byte messages and `request_slots` slots. Each client adds a response ring of 16 slots of the same message size. With `max_payload` 64 (80-byte messages, 128-byte slots) and 64 request slots, the request ring is 704 + 64 x 128 = 8896 bytes and each client costs 704 + 16 x 128 = 2752 bytes.
+Request ring: lean multi-producer ring with `16 + max_payload` byte messages and `request_slots` slots. Each client adds a response ring of 16 slots of the same message size. With `max_payload` 64 (80-byte messages, 128-byte slots) and 64 request slots, the request ring is 1728 + 64 x 128 = 9920 bytes and each client costs 1728 + 16 x 128 = 3776 bytes.

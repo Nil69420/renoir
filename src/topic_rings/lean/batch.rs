@@ -76,8 +76,12 @@ impl LeanPublisher {
         let msg = self.ring.msg_size;
         let first = self.claim_range(count as u64);
         for (i, chunk) in data.chunks_exact(msg).take(count).enumerate() {
-            fill_slot_multi(&self.ring, first + i as u64, chunk)?;
+            if let Err(e) = fill_slot_multi(&self.ring, first + i as u64, chunk) {
+                self.end_claim();
+                return Err(e);
+            }
         }
+        self.end_claim();
         self.ring
             .write_idx()
             .fetch_max(first + count as u64 - 1, Ordering::Release);

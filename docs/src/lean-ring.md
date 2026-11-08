@@ -82,8 +82,8 @@ Each publish claims a sequence number with an atomic add, takes a per-slot ticke
 
 Failure behaviour, which differs from the single-producer ring:
 
-- A producer killed between claiming and publishing leaves a hole. A reader that polls an unpublished slot while a later slot has been claimed waits 5 ms and then skips the hole, counting it in `lost`.
-- A producer that stalls inside a publish for more than 50 ms can have its slot taken over by a producer that has wrapped the ring. The stalled producer's late completion fails with an error instead of publishing. Because the stalled producer's payload bytes may still land in the slot, this is a known limit: do not suspend producers (SIGSTOP, debugger) while they publish on a multi-producer ring.
+- Multi-producer publishers register in a 16-entry producer table in the ring header (process id and process start time, plus the index range they currently have claimed). A producer killed between claiming and publishing leaves a hole. A reader that polls an unpublished slot while a later slot has been claimed waits 5 ms, then asks whether the claimant is alive. A dead claimant (process gone, or pid reused by another process) is skipped at once and counted in `lost`. A claimant that is alive, for example suspended by SIGSTOP or a debugger, is waited for, so no message is lost and no payload is torn; after 10 s of stall it is treated as dead.
+- A producer that cannot register (more than 16 live publishers on one ring, or no pid namespace shared with the other processes) falls back to the older timer rule: skipped after 5 ms on a plain ring, after the gate timeout on a gated ring, and its slot can be taken over after 50 ms. Keep producers in one pid namespace; containers that share the shared-memory directory must share the pid namespace too.
 
 ## Gated lossless mode
 

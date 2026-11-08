@@ -15,6 +15,9 @@ mod batch;
 mod channel;
 mod gate;
 mod init;
+mod liveness;
+#[cfg(test)]
+mod liveness_tests;
 mod multi;
 mod qos;
 mod types;
@@ -22,12 +25,14 @@ mod wait;
 
 pub use channel::LeanChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
+pub use liveness::LEAN_MAX_PRODUCERS;
 pub use qos::{DeadlineWait, LeanQos, LeanReliability};
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;
 const LEAN_FIXED_HEADER_BYTES: usize = 192;
-pub const LEAN_HEADER_BYTES: usize = LEAN_FIXED_HEADER_BYTES + gate::GATE_TABLE_BYTES;
+pub const LEAN_HEADER_BYTES: usize =
+    LEAN_FIXED_HEADER_BYTES + gate::GATE_TABLE_BYTES + liveness::PRODUCER_TABLE_BYTES;
 pub const LEAN_MAX_SLOT_LINES: usize = 8;
 const LINE: usize = 64;
 const SEQ_BYTES: usize = 8;
@@ -81,6 +86,7 @@ pub struct LeanPublisher {
     next: u64,
     gate_cache: u64,
     blocked: Option<(u64, std::time::Instant)>,
+    producer: Option<liveness::ProducerHandle>,
 }
 
 pub const fn lean_slot_bytes(msg_size: usize) -> Option<usize> {
@@ -204,6 +210,11 @@ impl LeanRing {
             next: self.published() + 1,
             gate_cache: 0,
             blocked: None,
+            producer: if self.multi {
+                self.register_producer()
+            } else {
+                None
+            },
         }
     }
 
