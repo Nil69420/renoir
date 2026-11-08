@@ -13,7 +13,7 @@ A registered consumer has not read for the ring's whole depth. Either the consum
 A gated ring supports 32 registered consumers. Unregister or close consumers that are gone; a crashed consumer's entry is reclaimed after eviction.
 
 ## RPC `call` returns `BufferEmpty`
-The timeout elapsed with no response: the server is not running, is busy, or uses a different `max_payload` or `request_slots` (those mismatches fail at open). Check that exactly one server runs per service.
+The timeout elapsed with no response: the server is not running, is busy, or uses a different `max_payload` or `request_slots` (those mismatches fail at open). Check that a server is running for the service: `renoir-monitor list` shows the `<service>_req` rings and how many live consumers each has.
 
 ## Latency is worse than the published numbers
 - Pin both threads to different physical cores (not hyperthread siblings) and keep the CPU governor on `performance`.

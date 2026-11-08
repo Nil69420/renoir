@@ -79,7 +79,7 @@ jobs:
     - name: Run targets
       working-directory: fuzz
       run: |
-        for t in lean_corrupt_ring broadcast_corrupt_ring control_info sensor_validators; do
+        for t in lean_corrupt_ring broadcast_corrupt_ring frame_corrupt_ring control_info sensor_validators; do
           cargo fuzz run "$t" -- -max_total_time=60 -timeout=5
         done
 
