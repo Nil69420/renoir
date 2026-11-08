@@ -4,6 +4,7 @@ use std::sync::{
 };
 use std::thread;
 
+use renoir::ffi::{renoir_lean_close, renoir_lean_open, renoir_lean_publish, renoir_lean_try_read};
 use renoir::topic::{MessageHeader, TopicStats, FORMAT_TYPE_INLINE};
 use renoir::topic_rings::{lean_slot_bytes, BroadcastTopicRing, LeanRead, LeanRing, ReadInto};
 
@@ -312,6 +313,52 @@ fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     report(&format!("LeanRing product ({msg} B message)"), out, tpn);
 }
 
+fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
+    let dir = std::env::temp_dir().join(format!("renoir_bench_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::env::set_var("RENOIR_SHM_DIR", &dir);
+    let open = |n: &str, from_oldest: u32| {
+        let name = std::ffi::CString::new(n).unwrap();
+        let mut h = std::ptr::null_mut();
+        let rc = renoir_lean_open(name.as_ptr(), msg as u32, 64, from_oldest, &mut h);
+        assert_eq!(rc as i32, 0);
+        h as usize
+    };
+    let (ab_p, ab_s, ba_p, ba_s) = (open("ab", 0), open("ab", 0), open("ba", 0), open("ba", 0));
+    let total = WARMUP + SAMPLES;
+    let echo = thread::spawn(move || {
+        pin(b);
+        let mut buf = vec![0u8; msg];
+        for _ in 0..total {
+            while renoir_lean_try_read(ab_s as _, buf.as_mut_ptr(), msg) as i32 != 0 {
+                std::hint::spin_loop();
+            }
+            renoir_lean_publish(ba_p as _, buf.as_ptr(), msg);
+        }
+    });
+    pin(a);
+    let mut buf = vec![0u8; msg];
+    let payload = vec![7u8; msg];
+    let mut out = Vec::with_capacity(SAMPLES);
+    for i in 0..total {
+        let t0 = ticks();
+        renoir_lean_publish(ab_p as _, payload.as_ptr(), msg);
+        while renoir_lean_try_read(ba_s as _, buf.as_mut_ptr(), msg) as i32 != 0 {
+            std::hint::spin_loop();
+        }
+        let t1 = ticks();
+        if i >= WARMUP {
+            out.push(t1 - t0);
+        }
+    }
+    echo.join().unwrap();
+    for h in [ab_p, ab_s, ba_p, ba_s] {
+        renoir_lean_close(h as _);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    report(&format!("C ABI lean ({msg} B message)"), out, tpn);
+}
+
 fn main() {
     let args: Vec<usize> = std::env::args()
         .skip(1)
@@ -329,6 +376,8 @@ fn main() {
     real_lean_pingpong(a, b, 48, tpn);
     real_lean_pingpong(a, b, 16, tpn);
     real_lean_pingpong(a, b, 120, tpn);
+    ffi_pingpong(a, b, 56, tpn);
+    ffi_pingpong(a, b, 16, tpn);
     ring_pingpong(a, b, 56, tpn);
     ring_pingpong(a, b, 8, tpn);
 }
