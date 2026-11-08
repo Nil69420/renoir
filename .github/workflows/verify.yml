@@ -119,6 +119,34 @@ jobs:
         CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       run: cargo build --release --target aarch64-unknown-linux-gnu --lib
 
+  aarch64-native:
+    name: Native aarch64 ordering stress
+    runs-on: ubuntu-24.04-arm
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Lean ring, wait, chaos and cross-process tests, repeated
+      run: |
+        cargo test --release --test lean_ring_tests --test lean_wait_tests --test lean_chaos_tests --test lean_cross_process_tests --test ring_init_race_tests --no-run
+        for i in $(seq 1 50); do
+          cargo test --release --test lean_ring_tests --test lean_wait_tests --test lean_chaos_tests --test lean_cross_process_tests --test ring_init_race_tests
+        done
+    - name: Latency
+      run: cargo bench --bench latency_pingpong -- 0 1
+
+  litmus:
+    name: Memory-model litmus tests (herd7)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - run: sudo apt-get update && sudo apt-get install -y opam
+    - run: |
+        opam init -y --bare --disable-sandboxing
+        opam switch create herd ocaml-base-compiler.5.2.0 -y
+        eval $(opam env --switch=herd)
+        opam install -y herdtools7
+        tests/litmus/run.sh
+
   latency:
     name: Latency smoke (non-gating numbers)
     runs-on: ubuntu-latest
