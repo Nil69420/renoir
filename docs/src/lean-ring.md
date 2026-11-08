@@ -25,17 +25,20 @@ C++ callers use `renoir::LeanChannel` from `renoir_lean.hpp`.
 
 ## Contract
 
-- One publisher per ring. The publisher never blocks, never allocates, makes no
-  syscall and takes no lock. A second concurrent writer corrupts ordering.
+- One publisher per ring unless it is opened in multi-producer mode (see below).
+  `publish` never blocks, never allocates, makes no syscall and takes no lock; on a
+  gated ring it returns `BufferFull` instead of overwriting unread messages. A second
+  concurrent writer on a single-producer ring corrupts ordering.
 - A handle is used by one thread at a time. Open one handle per thread.
-- Readers are lossy. A reader that falls more than the slot count behind skips to
-  a recent message and counts the loss (`renoir_lean_lost`). Use
-  `renoir_lean_skip_to_latest` to always process the freshest sample.
+- By default readers are lossy. A reader that falls more than the slot count behind
+  skips to a recent message and counts the loss (`renoir_lean_lost`). Use
+  `renoir_lean_skip_to_latest` to always process the freshest sample, or open the
+  ring gated for lossless delivery (see below).
 - Reads are seqlock-validated: a torn slot is never returned.
 - Message size and slot count must match across all openers of a name. A mismatch
   returns `InvalidParameter`.
-- There is no wake-up primitive. Consumers poll. Blocking wake-up costs about 10 us
-  and belongs on the broadcast topic API, not here.
+- Consumers poll by default. A blocking wait with a futex wake-up (about 10 us)
+  is available through `publish_notify` and `wait`; the 100 ns path is the polling one.
 - Frames larger than 504 bytes (camera images) use the broadcast topic path.
 
 ## Measured latency (x86, i7-11800H, pinned physical cores, one-way)

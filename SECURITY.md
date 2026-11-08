@@ -12,8 +12,16 @@ and tighten permissions where needed.
 - Message payloads are untrusted bytes. Validate them before use.
 - A malicious process that can write the region file can disrupt delivery. Renoir does not
   defend against a process with write access to the region.
-- The lean ring allows a single publisher per ring. A second writer is a protocol violation
-  and can only corrupt message ordering and contents, not memory safety of readers.
+- A lean ring allows a single publisher unless it was opened in multi-producer mode, which
+  is recorded in the ring header and checked on open. A second writer on a single-producer
+  ring is a protocol violation and can only corrupt message ordering and contents, not memory
+  safety of readers. Gated-consumer positions and request-response headers come from shared
+  memory and are bounds-checked before use; a hostile process can stall or evict consumers
+  and spoof request client ids (the server caps cached response rings at 64) but cannot make
+  readers read out of bounds.
+- The in-place frame view (`renoir_subscribe_view`) hands out a pointer into memory the
+  producer may rewrite. Treat the bytes as untrusted until `renoir_subscribe_view_release`
+  reports they were not overwritten, and never use them as lengths or offsets before then.
 - Dependencies are checked with `cargo audit` and `cargo deny` in CI. One advisory
   (bincode, unmaintained, no known vulnerability) is explicitly allowed in `deny.toml`; the
   decoder is size-bounded.
