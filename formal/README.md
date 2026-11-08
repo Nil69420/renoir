@@ -15,3 +15,7 @@ What the model does not cover:
 - The code itself: the model is hand-written from the Rust, not extracted from it. Keep them in step when the protocol changes.
 
 `FrameGate.tla` models the frame ring ownership protocol: the producer admission rule, consumers viewing and releasing, consumer death, and eviction. The property is `NoOverwriteWhileHeld`: no slot is overwritten while a consumer that is not dead still holds it. `FrameGate_Timer.cfg` lets the gate evict a live holder, as the lean ring's timer rule does, and TLC finds the violation; `FrameGate_Death.cfg` evicts only dead holders and TLC finds none (up to 3 slots, 3 consumers, 7 frames, 85,256 distinct states). It does not model the pid-reuse or pid-namespace limits, weak memory, or the multi-producer claim path (see `LeanMP.tla`).
+
+## Kani
+
+`src/topic_rings/lean/proofs.rs` holds Kani harnesses (run with `cargo kani --lib`, compiled only under `cfg(kani)`). They check the sizing and offset arithmetic that feeds the unsafe pointer math: slot sizes are line aligned and bounded for every possible size, slot counts are powers of two that fit the ring, a slot offset never leaves the slot area, and header inspection rejects short buffers. They check these formulas, not the whole unsafe code; Miri, the sanitizers and the fuzzers cover that. The first run found a real overflow in `lean_slot_bytes`, now fixed.

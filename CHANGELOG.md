@@ -10,6 +10,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 ## [0.9.0] - 2026-11-08
 
 ### Fixed
+- `lean_slot_bytes` no longer wraps on message sizes close to `usize::MAX` (found by Kani): in release builds such a size was accepted as a one-line slot; it is now rejected.
 - Multi-producer rings no longer skip or take over the slot of a producer that is merely slow or suspended: producers register their process id and start time in a 16-entry table (lean header grows from 704 to 1728 bytes), and a claimed slot is skipped only when its owner process is dead or after 10 s.
 - Gated multi-producer rings no longer lose a message when a producer is descheduled for more than 5 ms after claiming a slot: the reader now waits up to the gate timeout before skipping a claimed but unpublished slot.
 

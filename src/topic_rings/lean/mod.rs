@@ -25,6 +25,8 @@ mod liveness;
 #[cfg(test)]
 mod liveness_tests;
 mod multi;
+#[cfg(kani)]
+mod proofs;
 mod qos;
 mod types;
 mod wait;
@@ -104,7 +106,10 @@ pub const fn lean_slot_bytes(msg_size: usize) -> Option<usize> {
     if msg_size == 0 {
         return None;
     }
-    let lines = (msg_size + SEQ_BYTES).div_ceil(LINE);
+    let Some(total) = msg_size.checked_add(SEQ_BYTES) else {
+        return None;
+    };
+    let lines = total.div_ceil(LINE);
     if lines > LEAN_MAX_SLOT_LINES {
         None
     } else {

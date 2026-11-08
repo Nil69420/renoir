@@ -195,3 +195,13 @@ jobs:
         distribution: temurin
         java-version: '17'
     - run: formal/run.sh
+
+  kani:
+    name: Kani bounded proofs
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+    - uses: model-checking/kani-github-action@v1
+      with:
+        args: --lib

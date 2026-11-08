@@ -317,3 +317,13 @@ fn live_publishers_counts_registered_publishers_and_drops_on_release() {
         assert_eq!(ring.live_publishers(), 0);
     }
 }
+
+#[test]
+fn slot_sizing_rejects_sizes_that_would_overflow() {
+    for huge in [usize::MAX, usize::MAX - 7, usize::MAX - 8, usize::MAX / 2] {
+        assert!(lean_slot_bytes(huge).is_none(), "{huge}");
+    }
+    assert_eq!(lean_slot_bytes(504), Some(512));
+    assert_eq!(lean_slot_bytes(505), None);
+    assert_eq!(lean_slot_bytes(0), None);
+}
