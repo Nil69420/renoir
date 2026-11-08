@@ -6,7 +6,9 @@ use std::thread;
 
 use renoir::ffi::{renoir_lean_close, renoir_lean_open, renoir_lean_publish, renoir_lean_try_read};
 use renoir::topic::{MessageHeader, TopicStats, FORMAT_TYPE_INLINE};
-use renoir::topic_rings::{lean_slot_bytes, BroadcastTopicRing, LeanRead, LeanRing, ReadInto};
+use renoir::topic_rings::{
+    lean_slot_bytes, BroadcastTopicRing, LeanRead, LeanRing, ReadInto, ViewRead,
+};
 
 use super::timing::*;
 
@@ -28,6 +30,65 @@ pub fn make_ring(payload: usize) -> (Arc<BroadcastTopicRing>, &'static mut [u64]
         .unwrap()
     };
     (Arc::new(ring), mem)
+}
+
+pub fn ring_view_pingpong(a: usize, b: usize, payload: usize, copy_payload: bool, tpn: f64) {
+    let (ab, _m1) = make_ring(payload);
+    let (ba, _m2) = make_ring(payload);
+    let (warmup, samples) = samples_for(payload);
+    let total = warmup + samples;
+    let mut hdr = MessageHeader::new(1, 0, payload as u32);
+    hdr.set_format_type(FORMAT_TYPE_INLINE);
+    hdr.set_no_checksum();
+    let (ab2, ba2) = (ab.clone(), ba.clone());
+    let mut cur_ab = ab.cursor_latest();
+    let mut cur_ba = ba.cursor_latest();
+    let echo = thread::spawn(move || {
+        pin(b);
+        for _ in 0..total {
+            let view = loop {
+                if let Ok(ViewRead::View(v)) = ab2.view(&mut cur_ab) {
+                    break v;
+                }
+                std::hint::spin_loop();
+            };
+            let r = ba2.reserve(payload).unwrap();
+            if copy_payload {
+                unsafe { std::ptr::copy_nonoverlapping(view.data_ptr(), r.payload_ptr(), payload) };
+            }
+            ab2.release_view(&mut cur_ab, &view).unwrap();
+            ba2.commit(r, &hdr, payload).unwrap();
+        }
+    });
+    pin(a);
+    let source = aligned_buf(payload, 7);
+    let mut out = Vec::with_capacity(samples);
+    for i in 0..total {
+        let t0 = ticks();
+        let r = ab.reserve(payload).unwrap();
+        if copy_payload {
+            unsafe { std::ptr::copy_nonoverlapping(source.as_ptr(), r.payload_ptr(), payload) };
+        }
+        ab.commit(r, &hdr, payload).unwrap();
+        let view = loop {
+            if let Ok(ViewRead::View(v)) = ba.view(&mut cur_ba) {
+                break v;
+            }
+            std::hint::spin_loop();
+        };
+        ba.release_view(&mut cur_ba, &view).unwrap();
+        let t1 = ticks();
+        if i >= warmup {
+            out.push(t1 - t0);
+        }
+    }
+    echo.join().unwrap();
+    let mode = if copy_payload {
+        "copy in, view out"
+    } else {
+        "view only"
+    };
+    report(&format!("broadcast view {payload} B ({mode})"), out, tpn);
 }
 
 pub fn raw_floor(a: usize, b: usize, tpn: f64) {

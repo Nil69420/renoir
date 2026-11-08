@@ -269,6 +269,24 @@ ReadResult Subscriber::readInto(uint8_t* buffer, size_t capacity, size_t* length
     return ReadResult::Message;
 }
 
+bool Subscriber::view(RenoirFrameView* frame) {
+    RenoirErrorCode result = renoir_subscribe_view(handle_, frame);
+    if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
+        return false;
+    }
+    checkResult(result, "subscribe view");
+    return true;
+}
+
+bool Subscriber::releaseView(const RenoirFrameView& frame) {
+    RenoirErrorCode result = renoir_subscribe_view_release(handle_, &frame);
+    if (result == RenoirErrorCode::RenoirErrorCode_ConcurrencyError) {
+        return false;
+    }
+    checkResult(result, "release view");
+    return true;
+}
+
 uint64_t Subscriber::skipToLatest(uint64_t keep) {
     uint64_t skipped = 0;
     checkResult(renoir_subscriber_skip_to_latest(handle_, keep, &skipped), "skip to latest");

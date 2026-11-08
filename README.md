@@ -51,7 +51,13 @@ renoir_topic_manager_destroy(mgr);
 
 For fixed messages up to 504 bytes, `renoir_lean_open` / `renoir_lean_publish` /
 `renoir_lean_try_read` give about 70 ns one-way between pinned cores with no allocation,
-lock or syscall on the hot path. See `docs/src/lean-ring.md`.
+lock or syscall on the hot path (about 6.7x faster than iceoryx2 at 56 bytes on the same
+machine; method and caveats in `docs/src/benchmarks.md`). The same ring offers
+blocking waits (`renoir_lean_wait`), multiple producers, gated lossless delivery with consumer
+eviction, batching, QoS profiles with deadlines, and request-response (`renoir_rpc_*`, about
+250 ns round trip). Large frames use the broadcast topics with an in-place, validated view
+(`renoir_subscribe_view`). See `docs/src/lean-ring.md`, `docs/src/rpc-qos.md`,
+`docs/src/sizing.md` and `docs/src/troubleshooting.md`.
 
 ### Shared Memory Regions
 

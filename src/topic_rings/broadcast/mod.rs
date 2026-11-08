@@ -60,10 +60,11 @@ const _: () = assert!(std::mem::size_of::<SlotHeader>() == SLOT_HEADER_BYTES);
 
 mod init;
 mod types;
+mod view;
 mod wait;
 mod zero_copy;
 
-pub use types::{BroadcastCursor, BroadcastReservation, ReadInto};
+pub use types::{BroadcastCursor, BroadcastReservation, BroadcastView, ReadInto, ViewRead};
 
 #[derive(Debug)]
 pub struct BroadcastTopicRing {

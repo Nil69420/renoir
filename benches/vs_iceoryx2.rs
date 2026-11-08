@@ -124,6 +124,8 @@ fn main() {
     ffi_pingpong(a, b, 56, tpn);
     for payload in [56usize, 1024, 65_536, 921_600] {
         ring_pingpong(a, b, payload, tpn);
+        ring_view_pingpong(a, b, payload, true, tpn);
+        ring_view_pingpong(a, b, payload, false, tpn);
         iox_pingpong(a, b, payload, true, tpn);
         iox_pingpong(a, b, payload, false, tpn);
     }

@@ -87,6 +87,29 @@ int main() {
         CHECK(!server.poll(buffer, sizeof buffer, info));
     }
 
+    {
+        renoir::TopicManager manager;
+        const std::string topic = "/cpp/view_" + std::to_string(getpid());
+        renoir::TopicOptions options = {};
+        options.pattern = 1;
+        options.ring_capacity = 2;
+        options.max_payload_size = 256;
+        manager.registerTopic(topic, options);
+        renoir::Publisher publisher = manager.createPublisher(topic);
+        renoir::Subscriber subscriber = manager.createSubscriber(topic);
+        RenoirFrameView frame = {};
+        CHECK(!subscriber.view(&frame));
+        {
+            renoir::Reservation r = publisher.reserve(100);
+            for (size_t i = 0; i < 100; ++i) r.data()[i] = 0x33;
+            r.commit(100);
+        }
+        CHECK(subscriber.view(&frame));
+        CHECK(frame.len == 100 && frame.data[0] == 0x33 && frame.data[99] == 0x33);
+        CHECK(subscriber.releaseView(frame));
+        CHECK(!subscriber.view(&frame));
+    }
+
     renoir::LeanChannel moved(std::move(sub));
     CHECK(!moved.tryRead(out));
     CHECK(pub.publish(&out, 1) != RenoirErrorCode::RenoirErrorCode_Success);

@@ -498,6 +498,21 @@ typedef struct RenoirTopicStats {
 } RenoirTopicStats;
 
 /**
+ * In-place view of the next message of an SPMC topic (no copy)
+ *
+ * `data` points into the shared ring slot. The producer may overwrite the
+ * slot while the caller reads it, so the bytes are only trustworthy once
+ * `renoir_subscribe_view_release` reports `Success`.
+ */
+typedef struct RenoirFrameView {
+  const uint8_t *data;
+  uintptr_t len;
+  uint64_t sequence;
+  uint64_t timestamp_ns;
+  uint64_t token;
+} RenoirFrameView;
+
+/**
  * Epoch number type for strong typing
  */
 typedef uint64_t EpochNumber;
@@ -1225,6 +1240,20 @@ enum RenoirErrorCode renoir_subscribe_read_into(RenoirSubscriberHandle subscribe
                                                 uintptr_t buffer_len,
                                                 uintptr_t *out_len,
                                                 struct RenoirMessageMetadata *metadata);
+
+/**
+ * Borrow the next SPMC message in place; `BufferEmpty` if nothing is pending
+ */
+enum RenoirErrorCode renoir_subscribe_view(RenoirSubscriberHandle subscriber,
+                                           struct RenoirFrameView *view);
+
+/**
+ * Finish with a view: `Success` if the bytes stayed intact while it was held,
+ * `ConcurrencyError` if the producer overwrote the slot (discard what was read).
+ * The subscriber advances past the message in both cases.
+ */
+enum RenoirErrorCode renoir_subscribe_view_release(RenoirSubscriberHandle subscriber,
+                                                   const struct RenoirFrameView *view);
 
 /**
  * Number of messages this subscriber lost because it fell behind (SPMC topics)

@@ -1376,6 +1376,88 @@ pub extern "C" fn renoir_subscribe_read_into(
     }
 }
 
+/// In-place view of the next message of an SPMC topic (no copy)
+///
+/// `data` points into the shared ring slot. The producer may overwrite the
+/// slot while the caller reads it, so the bytes are only trustworthy once
+/// `renoir_subscribe_view_release` reports `Success`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RenoirFrameView {
+    pub data: *const u8,
+    pub len: usize,
+    pub sequence: u64,
+    pub timestamp_ns: u64,
+    pub token: u64,
+}
+
+/// Borrow the next SPMC message in place; `BufferEmpty` if nothing is pending
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_view(
+    subscriber: RenoirSubscriberHandle,
+    view: *mut RenoirFrameView,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || view.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    match sub.view() {
+        Ok(crate::topic_rings::ViewRead::View(v)) => {
+            unsafe {
+                *view = RenoirFrameView {
+                    data: v.data_ptr(),
+                    len: v.len(),
+                    sequence: v.sequence(),
+                    timestamp_ns: v.timestamp_ns(),
+                    token: v.index(),
+                };
+            }
+            RenoirErrorCode::Success
+        }
+        Ok(crate::topic_rings::ViewRead::Empty) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+/// Finish with a view: `Success` if the bytes stayed intact while it was held,
+/// `ConcurrencyError` if the producer overwrote the slot (discard what was read).
+/// The subscriber advances past the message in both cases.
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_view_release(
+    subscriber: RenoirSubscriberHandle,
+    view: *const RenoirFrameView,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || view.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let v = unsafe { *view };
+    let view = crate::topic_rings::BroadcastView::from_parts(
+        v.data,
+        v.len,
+        v.sequence,
+        v.timestamp_ns,
+        v.token,
+    );
+    match sub.release_view(&view) {
+        Ok(true) => RenoirErrorCode::Success,
+        Ok(false) => RenoirErrorCode::ConcurrencyError,
+        Err(e) => e.into(),
+    }
+}
+
 /// Number of messages this subscriber lost because it fell behind (SPMC topics)
 #[no_mangle]
 pub extern "C" fn renoir_subscriber_overruns(

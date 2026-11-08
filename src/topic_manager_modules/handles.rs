@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use crate::{
     error::Result,
     topic::{Message, TopicStats},
-    topic_rings::{BroadcastCursor, BroadcastReservation, ReadInto},
+    topic_rings::{BroadcastCursor, BroadcastReservation, BroadcastView, ReadInto, ViewRead},
 };
 
 use super::{
@@ -173,6 +173,19 @@ impl Subscriber {
                 .store(sequence as usize, Ordering::Relaxed);
         }
         Ok(result)
+    }
+
+    pub fn view(&self) -> Result<ViewRead> {
+        self.topic.view_with(&self.cursor)
+    }
+
+    pub fn release_view(&self, view: &BroadcastView) -> Result<bool> {
+        let intact = self.topic.release_view_with(&self.cursor, view)?;
+        if intact {
+            self.last_sequence
+                .store(view.sequence() as usize, Ordering::Relaxed);
+        }
+        Ok(intact)
     }
 
     pub fn skip_to_latest(&self, keep: u64) -> u64 {

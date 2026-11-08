@@ -18,8 +18,8 @@ use crate::{
     shared_pools::BufferPoolRegistry,
     topic::{Message, MessagePayload, TopicConfig, TopicPattern, TopicStats},
     topic_rings::{
-        BroadcastCursor, BroadcastReservation, BroadcastTopicRing, MPMCTopicRing, ReadInto,
-        SPSCTopicRing,
+        BroadcastCursor, BroadcastReservation, BroadcastTopicRing, BroadcastView, MPMCTopicRing,
+        ReadInto, SPSCTopicRing, ViewRead,
     },
 };
 
@@ -367,6 +367,30 @@ impl TopicInstance {
             _ => Err(RenoirError::invalid_parameter(
                 "pattern",
                 "read_into requires an SPMC (broadcast) topic",
+            )),
+        }
+    }
+
+    pub fn view_with(&self, cursor: &Mutex<Option<BroadcastCursor>>) -> Result<ViewRead> {
+        match (&self.ring, &mut *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.view(c),
+            _ => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "view requires an SPMC (broadcast) topic",
+            )),
+        }
+    }
+
+    pub fn release_view_with(
+        &self,
+        cursor: &Mutex<Option<BroadcastCursor>>,
+        view: &BroadcastView,
+    ) -> Result<bool> {
+        match (&self.ring, &mut *cursor.lock()) {
+            (TopicRingType::Broadcast(ring), Some(c)) => ring.release_view(c, view),
+            _ => Err(RenoirError::invalid_parameter(
+                "pattern",
+                "view requires an SPMC (broadcast) topic",
             )),
         }
     }

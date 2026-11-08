@@ -14,8 +14,8 @@ pub mod spsc;
 
 // Re-export main types
 pub use broadcast::{
-    BroadcastControlInfo, BroadcastCursor, BroadcastReservation, BroadcastTopicRing, ReadInto,
-    BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
+    BroadcastControlInfo, BroadcastCursor, BroadcastReservation, BroadcastTopicRing, BroadcastView,
+    ReadInto, ViewRead, BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
 };
 pub use lean::{
     lean_slot_bytes, DeadlineWait, LeanChannel, LeanCursor, LeanGatedCursor, LeanMode,

@@ -12,4 +12,7 @@
   - [From Zenoh](migration/zenoh.md)
 - [Lean ring](lean-ring.md)
 - [Request-response and QoS](rpc-qos.md)
+- [Benchmarks](benchmarks.md)
+- [Sizing and memory](sizing.md)
+- [Troubleshooting](troubleshooting.md)
 - [Performance](performance.md)
