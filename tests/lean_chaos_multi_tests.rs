@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use renoir::ffi::{
     renoir_lean_close, renoir_lean_lost, renoir_lean_open, renoir_lean_publish,
@@ -100,6 +100,9 @@ fn killed_producers_never_corrupt_or_wedge_the_ring() {
     let reader = open(&name, RENOIR_LEAN_FROM_OLDEST) as usize;
     let stop = Arc::new(AtomicBool::new(false));
     let stop_reader = stop.clone();
+    let progress: Arc<Vec<AtomicU64>> =
+        Arc::new((0..=PRODUCERS).map(|_| AtomicU64::new(0)).collect());
+    let progress_reader = progress.clone();
     let thread = std::thread::spawn(move || {
         let h = reader as *mut std::ffi::c_void;
         let mut buf = [0u8; MSG];
@@ -123,6 +126,7 @@ fn killed_producers_never_corrupt_or_wedge_the_ring() {
             let tail = first & ((1u64 << 56) - 1);
             assert!(tail > last[id], "producer {id} went backwards");
             last[id] = tail;
+            progress_reader[id].store(first, Ordering::Release);
             total += 1;
         }
         (last, total, renoir_lean_lost(h))
@@ -147,21 +151,24 @@ fn killed_producers_never_corrupt_or_wedge_the_ring() {
         child.wait().unwrap();
     }
 
-    let mut survivors: Vec<_> = (0..PRODUCERS)
-        .map(|id| spawn(&name, id, KILLS + 1, FINAL_COUNT))
-        .collect();
-    for s in &mut survivors {
-        assert!(s.wait().unwrap().success(), "post-chaos publisher failed");
-    }
-    std::thread::sleep(Duration::from_millis(300));
-    stop.store(true, Ordering::Relaxed);
-    let (last, total, lost) = thread.join().unwrap();
-    for (id, &seen) in last.iter().enumerate().take(PRODUCERS as usize) {
-        assert_eq!(
-            seen,
-            ((KILLS + 1) << 40) | FINAL_COUNT,
-            "ring wedged: producer {id} final message never arrived (lost {lost}, read {total})"
+    for id in 0..PRODUCERS {
+        let mut survivor = spawn(&name, id, KILLS + 1, FINAL_COUNT);
+        assert!(
+            survivor.wait().unwrap().success(),
+            "post-chaos publisher failed"
         );
+        let expected = (id << 56) | ((KILLS + 1) << 40) | FINAL_COUNT;
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while progress[id as usize].load(Ordering::Acquire) != expected {
+            assert!(
+                Instant::now() < deadline,
+                "ring wedged: producer {id} final message never arrived"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
+    stop.store(true, Ordering::Relaxed);
+    let (_last, total, lost) = thread.join().unwrap();
+    assert!(total > 0, "reader read nothing (lost {lost})");
     renoir_lean_close(reader as *mut std::ffi::c_void);
 }

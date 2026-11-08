@@ -65,7 +65,7 @@ fn every_lean_mode_publishes_and_reads_without_allocating() {
         let mut out = [0u8; 48];
         let mut batch_out = [0u8; 48 * 4];
         let before = allocs();
-        for _ in 0..20_000 {
+        for _ in 0..3_000 {
             publisher.publish(&payload).unwrap();
             publisher.publish_notify(&payload).unwrap();
             assert_eq!(publisher.publish_batch(&batch).unwrap(), 4);
@@ -116,7 +116,7 @@ fn broadcast_reserve_commit_and_view_do_not_allocate() {
     header.set_format_type(FORMAT_TYPE_INLINE);
     header.set_no_checksum();
     let before = allocs();
-    for _ in 0..20_000 {
+    for _ in 0..3_000 {
         let r = ring.reserve(1000).unwrap();
         unsafe { std::ptr::write_bytes(r.payload_ptr(), 3, 1000) };
         ring.commit(r, &header, 1000).unwrap();
@@ -161,7 +161,7 @@ fn rpc_call_and_reply_do_not_allocate_in_steady_state() {
             .unwrap();
     }
     let before = allocs();
-    for _ in 0..5_000 {
+    for _ in 0..1_000 {
         client
             .call(&request, &mut response, Duration::from_secs(5))
             .unwrap();

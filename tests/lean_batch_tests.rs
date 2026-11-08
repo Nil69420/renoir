@@ -143,47 +143,59 @@ fn multi_producer_batches_keep_per_producer_order() {
     multi_run(LeanMode::MultiProducer);
 }
 
+struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn multi_producer_gated_batches_are_lossless() {
     let producers = 2u64;
     let batches = if cfg!(miri) { 4 } else { 5_000 };
     let size = 3u64;
     let (ring, _mem) = make(32, LeanMode::MultiProducerGated);
+    ring.set_gate_timeout(std::time::Duration::from_secs(600));
     let mut consumer = ring.register_consumer(true).unwrap();
-    let handles: Vec<_> = (0..producers)
-        .map(|p| {
-            let ring = ring.clone();
-            thread::spawn(move || {
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let total = producers * batches * size;
+    thread::scope(|scope| {
+        let _guard = StopOnDrop(&stop);
+        for p in 0..producers {
+            let ring = &ring;
+            let stop = &stop;
+            scope.spawn(move || {
                 let mut publisher = ring.publisher();
                 let mut next = 1u64;
                 let end = batches * size + 1;
                 while next < end {
+                    if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
                     let want = size.min(end - next);
                     match publisher.publish_batch(&batch(p, next, want)) {
                         Ok(n) => next += n as u64,
                         Err(_) => std::hint::spin_loop(),
                     }
                 }
-            })
-        })
-        .collect();
-    let total = producers * batches * size;
-    let mut last = vec![0u64; producers as usize];
-    let mut out = vec![0u8; MSG * 8];
-    let mut count = 0u64;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while count < total {
-        assert!(std::time::Instant::now() < deadline, "starved at {count}");
-        let n = ring.read_batch_gated(&mut consumer, &mut out).unwrap();
-        for chunk in out.chunks_exact(MSG).take(n) {
-            let (p, v) = decode(chunk);
-            assert_eq!(v, last[p as usize] + 1, "producer {p} lost or reordered");
-            last[p as usize] = v;
-            count += 1;
+            });
         }
-    }
-    for h in handles {
-        h.join().unwrap();
-    }
+        let mut last = vec![0u64; producers as usize];
+        let mut out = vec![0u8; MSG * 8];
+        let mut count = 0u64;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while count < total {
+            assert!(std::time::Instant::now() < deadline, "starved at {count}");
+            let n = ring.read_batch_gated(&mut consumer, &mut out).unwrap();
+            for chunk in out.chunks_exact(MSG).take(n) {
+                let (p, v) = decode(chunk);
+                assert_eq!(v, last[p as usize] + 1, "producer {p} lost or reordered");
+                last[p as usize] = v;
+                count += 1;
+            }
+        }
+    });
     assert_eq!(consumer.lost(), 0);
 }

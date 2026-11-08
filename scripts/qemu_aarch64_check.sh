@@ -10,4 +10,8 @@ cargo build --release --target "$TARGET" --features c-api
 cargo test --release --target "$TARGET" --features c-api \
     --test broadcast_ring_tests --test broadcast_topic_tests \
     --test cross_process_tests --test ffi_basic_tests \
-    --test lean_ring_tests --test lean_zero_alloc
+    --test lean_ring_tests --test lean_zero_alloc --test zero_alloc_paths \
+    --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests \
+    --test lean_batch_tests --test lean_qos_tests --test rpc_tests \
+    --test broadcast_view_tests --test ring_init_race_tests --test lean_shuttle \
+    --test ffi_view_tests

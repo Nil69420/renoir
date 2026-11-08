@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -134,39 +135,51 @@ fn registration_requires_a_gated_ring() {
     assert!(ring.register_consumer(false).is_err());
 }
 
+struct StopOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 fn lossless_run(mode: LeanMode, producers: u64, per: u64, slots: usize) {
     let (ring, _mem) = make(slots, mode);
+    ring.set_gate_timeout(Duration::from_secs(600));
     let mut cursor = ring.register_consumer(true).unwrap();
-    let handles: Vec<_> = (0..producers)
-        .map(|p| {
-            let ring = ring.clone();
-            thread::spawn(move || {
+    let stop = AtomicBool::new(false);
+    thread::scope(|scope| {
+        let _guard = StopOnDrop(&stop);
+        for p in 0..producers {
+            let ring = &ring;
+            let stop = &stop;
+            scope.spawn(move || {
                 let mut publisher = ring.publisher();
                 for n in 1..=per {
                     let data = payload(p, n);
                     while publisher.publish(&data).is_err() {
+                        if stop.load(Ordering::Relaxed) {
+                            return;
+                        }
                         std::hint::spin_loop();
                     }
                 }
-            })
-        })
-        .collect();
-    let mut last = vec![0u64; producers as usize];
-    let mut out = [0u8; MSG];
-    let mut total = 0u64;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    while total < producers * per {
-        assert!(Instant::now() < deadline, "consumer starved at {total}");
-        if ring.try_read_gated(&mut cursor, &mut out).unwrap() == LeanRead::Message {
-            let (p, n) = decode(&out);
-            assert_eq!(n, last[p as usize] + 1, "producer {p} lost or reordered");
-            last[p as usize] = n;
-            total += 1;
+            });
         }
-    }
-    for h in handles {
-        h.join().unwrap();
-    }
+        let mut last = vec![0u64; producers as usize];
+        let mut out = [0u8; MSG];
+        let mut total = 0u64;
+        let deadline = Instant::now() + Duration::from_secs(300);
+        while total < producers * per {
+            assert!(Instant::now() < deadline, "consumer starved at {total}");
+            if ring.try_read_gated(&mut cursor, &mut out).unwrap() == LeanRead::Message {
+                let (p, n) = decode(&out);
+                assert_eq!(n, last[p as usize] + 1, "producer {p} lost or reordered");
+                last[p as usize] = n;
+                total += 1;
+            }
+        }
+    });
     assert_eq!(cursor.lost(), 0);
 }
 

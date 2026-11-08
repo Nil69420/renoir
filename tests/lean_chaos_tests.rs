@@ -91,6 +91,8 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
     let stop_reader = stop.clone();
     let seen_generation = Arc::new(AtomicU64::new(u64::MAX));
     let seen_reader = seen_generation.clone();
+    let seen_value = Arc::new(AtomicU64::new(0));
+    let seen_value_reader = seen_value.clone();
     let reader_addr = reader as usize;
     let thread = std::thread::spawn(move || {
         let h = reader_addr as *mut std::ffi::c_void;
@@ -113,6 +115,7 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
             assert!(first > last, "out of order: {first} after {last}");
             last = first;
             generations.insert(first >> 40);
+            seen_value_reader.store(first, Ordering::Release);
             seen_reader.store(first >> 40, Ordering::Release);
         }
         (last, generations)
@@ -139,7 +142,10 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
         "post-chaos publisher failed"
     );
     let expected = (ROUNDS << 40) | FINAL_COUNT;
-    std::thread::sleep(Duration::from_millis(200));
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while seen_value.load(Ordering::Acquire) != expected && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     stop.store(true, Ordering::Relaxed);
     let (final_last, generations) = thread.join().unwrap();
     assert!(
