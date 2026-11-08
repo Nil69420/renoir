@@ -22,9 +22,14 @@ impl LeanRing {
             cursor.stalled = None;
             return false;
         }
+        let limit = if self.gated {
+            Duration::from_nanos(self.gate_timeout_ns.load(Ordering::Relaxed)).max(HOLE_TIMEOUT)
+        } else {
+            HOLE_TIMEOUT
+        };
         match cursor.stalled {
             Some((idx, since)) if idx == cursor.next => {
-                if since.elapsed() < HOLE_TIMEOUT {
+                if since.elapsed() < limit {
                     return false;
                 }
                 cursor.next += 1;

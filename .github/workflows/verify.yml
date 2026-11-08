@@ -88,7 +88,7 @@ jobs:
     - name: C ABI test with UBSan and valgrind
       run: tests/c/run.sh
     - name: cppcheck
-      run: cppcheck --enable=all --inconclusive --error-exitcode=1 --suppress=missingIncludeSystem -Iinclude tests/c/lean_abi_test.c
+      run: cppcheck --enable=all --inconclusive --check-level=exhaustive --error-exitcode=1 --suppress=missingIncludeSystem --suppress=checkersReport -Iinclude tests/c/lean_abi_test.c tests/c/rpc_abi_test.c
     - name: Exported symbol baseline
       run: tests/abi/check.sh
     - name: ABI compatibility (libabigail)

@@ -174,7 +174,12 @@ fn lossless_run(mode: LeanMode, producers: u64, per: u64, slots: usize) {
             assert!(Instant::now() < deadline, "consumer starved at {total}");
             if ring.try_read_gated(&mut cursor, &mut out).unwrap() == LeanRead::Message {
                 let (p, n) = decode(&out);
-                assert_eq!(n, last[p as usize] + 1, "producer {p} lost or reordered");
+                assert_eq!(
+                    n,
+                    last[p as usize] + 1,
+                    "producer {p} lost or reordered (cursor lost {})",
+                    cursor.lost()
+                );
                 last[p as usize] = n;
                 total += 1;
             }

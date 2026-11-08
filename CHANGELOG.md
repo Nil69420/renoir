@@ -10,6 +10,9 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 ## [0.9.0] - 2026-11-08
 
 ### Fixed
+- Gated multi-producer rings no longer lose a message when a producer is descheduled for more than 5 ms after claiming a slot: the reader now waits up to the gate timeout before skipping a claimed but unpublished slot.
+
+### Fixed
 - A ring left half-initialised by a killed process no longer blocks later openers forever: after 2 seconds the next opener takes over the initialisation.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
