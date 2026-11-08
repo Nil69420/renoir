@@ -75,6 +75,12 @@
 
 #define BROADCAST_HEADER_PROBE_BYTES HEADER_BYTES
 
+#define LEAN_RING_MAGIC 5495870724919348807
+
+#define LEAN_HEADER_BYTES 192
+
+#define LEAN_MAX_SLOT_LINES 8
+
 /**
  * Magic number identifying an MPMC ring control block in shared memory
  */

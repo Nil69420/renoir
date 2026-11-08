@@ -5,7 +5,7 @@ use std::sync::{
 use std::thread;
 
 use renoir::topic::{MessageHeader, TopicStats, FORMAT_TYPE_INLINE};
-use renoir::topic_rings::{BroadcastTopicRing, ReadInto};
+use renoir::topic_rings::{lean_slot_bytes, BroadcastTopicRing, LeanRead, LeanRing, ReadInto};
 
 const WARMUP: usize = 20_000;
 const SAMPLES: usize = 300_000;
@@ -172,20 +172,20 @@ fn ring_pingpong(a: usize, b: usize, payload: usize, tpn: f64) {
 }
 
 #[repr(C, align(64))]
-struct LeanSlot {
+struct ProtoSlot {
     seq: AtomicU64,
     data: [AtomicU64; 7],
 }
 
-struct LeanRing {
-    slots: Box<[LeanSlot]>,
+struct ProtoRing {
+    slots: Box<[ProtoSlot]>,
     mask: u64,
 }
 
-impl LeanRing {
+impl ProtoRing {
     fn new(n: usize) -> Arc<Self> {
-        let slots: Vec<LeanSlot> = (0..n)
-            .map(|_| LeanSlot {
+        let slots: Vec<ProtoSlot> = (0..n)
+            .map(|_| ProtoSlot {
                 seq: AtomicU64::new(0),
                 data: Default::default(),
             })
@@ -223,8 +223,8 @@ impl LeanRing {
 }
 
 fn lean_pingpong(a: usize, b: usize, tpn: f64) {
-    let ab = LeanRing::new(64);
-    let ba = LeanRing::new(64);
+    let ab = ProtoRing::new(64);
+    let ba = ProtoRing::new(64);
     let total = WARMUP + SAMPLES;
     let (ab2, ba2) = (ab.clone(), ba.clone());
     let echo = thread::spawn(move || {
@@ -259,6 +259,59 @@ fn lean_pingpong(a: usize, b: usize, tpn: f64) {
     report("lean 64 B slot prototype", out, tpn);
 }
 
+fn make_lean(msg: usize) -> (Arc<LeanRing>, &'static mut [u64]) {
+    let ring_bytes = lean_slot_bytes(msg).unwrap() * 64;
+    let total = LeanRing::required_memory_size(ring_bytes, msg);
+    let mem: &'static mut [u64] = Box::leak(vec![0u64; total / 8 + 1].into_boxed_slice());
+    let ptr = std::ptr::NonNull::new(mem.as_mut_ptr() as *mut u8).unwrap();
+    let ring = unsafe { LeanRing::from_memory(ptr, mem.len() * 8, ring_bytes, msg).unwrap() };
+    (Arc::new(ring), mem)
+}
+
+fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
+    let (ab, _m1) = make_lean(msg);
+    let (ba, _m2) = make_lean(msg);
+    let total = WARMUP + SAMPLES;
+    let (ab2, ba2) = (ab.clone(), ba.clone());
+    let mut cur_ab = ab.cursor_latest();
+    let mut cur_ba = ba.cursor_latest();
+    let mut pub_ab = ab.publisher();
+    let mut pub_ba = ba2.publisher();
+    let echo = thread::spawn(move || {
+        pin(b);
+        let mut buf = vec![0u8; msg];
+        for _ in 0..total {
+            loop {
+                if let Ok(LeanRead::Message) = ab2.try_read(&mut cur_ab, &mut buf) {
+                    break;
+                }
+                std::hint::spin_loop();
+            }
+            pub_ba.publish(&buf).unwrap();
+        }
+    });
+    pin(a);
+    let mut buf = vec![0u8; msg];
+    let payload = vec![7u8; msg];
+    let mut out = Vec::with_capacity(SAMPLES);
+    for i in 0..total {
+        let t0 = ticks();
+        pub_ab.publish(&payload).unwrap();
+        loop {
+            if let Ok(LeanRead::Message) = ba.try_read(&mut cur_ba, &mut buf) {
+                break;
+            }
+            std::hint::spin_loop();
+        }
+        let t1 = ticks();
+        if i >= WARMUP {
+            out.push(t1 - t0);
+        }
+    }
+    echo.join().unwrap();
+    report(&format!("LeanRing product ({msg} B message)"), out, tpn);
+}
+
 fn main() {
     let args: Vec<usize> = std::env::args()
         .skip(1)
@@ -272,6 +325,10 @@ fn main() {
     println!("cores {a} <-> {b}, {tpn:.3} ticks/ns, {WARMUP} warmup, {SAMPLES} samples");
     raw_floor(a, b, tpn);
     lean_pingpong(a, b, tpn);
+    real_lean_pingpong(a, b, 56, tpn);
+    real_lean_pingpong(a, b, 48, tpn);
+    real_lean_pingpong(a, b, 16, tpn);
+    real_lean_pingpong(a, b, 120, tpn);
     ring_pingpong(a, b, 56, tpn);
     ring_pingpong(a, b, 8, tpn);
 }

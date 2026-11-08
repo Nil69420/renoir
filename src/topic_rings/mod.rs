@@ -7,6 +7,7 @@ pub(crate) mod atomic_bytes;
 pub mod broadcast;
 pub(crate) mod futex;
 mod header_bytes;
+pub mod lean;
 pub mod mpmc;
 pub mod spsc;
 
@@ -14,6 +15,10 @@ pub mod spsc;
 pub use broadcast::{
     BroadcastControlInfo, BroadcastCursor, BroadcastReservation, BroadcastTopicRing, ReadInto,
     BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
+};
+pub use lean::{
+    lean_slot_bytes, LeanCursor, LeanPublisher, LeanRead, LeanRing, LEAN_HEADER_BYTES,
+    LEAN_MAX_SLOT_LINES, LEAN_RING_MAGIC,
 };
 pub use mpmc::{MPMCTopicRing, MPMC_RING_MAGIC};
 pub use spsc::{
