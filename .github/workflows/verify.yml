@@ -87,6 +87,8 @@ jobs:
       run: tests/c/run.sh
     - name: cppcheck
       run: cppcheck --enable=all --inconclusive --error-exitcode=1 --suppress=missingIncludeSystem -Iinclude tests/c/lean_abi_test.c
+    - name: Exported symbol baseline
+      run: tests/abi/check.sh
     - name: C++ wrapper tests
       run: |
         cmake -S . -B build -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF
@@ -124,3 +126,22 @@ jobs:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - run: cargo bench --bench latency_pingpong -- 0 1
+
+  python:
+    name: Python bindings
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - run: pip install maturin pytest
+    - name: Build and test
+      working-directory: renoir-python
+      run: |
+        python -m venv .venv
+        . .venv/bin/activate
+        pip install maturin pytest
+        maturin develop --release
+        python -m pytest -q tests
