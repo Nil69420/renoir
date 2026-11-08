@@ -133,3 +133,7 @@ harness = false
 [[bench]]
 name = "fanout"
 harness = false
+
+[[bench]]
+name = "lean_mp_publish"
+harness = false
