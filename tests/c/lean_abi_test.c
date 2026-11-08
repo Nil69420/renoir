@@ -86,6 +86,26 @@ int main(void) {
     renoir_lean_close(mp_b);
   }
 
+  {
+    RenoirLeanHandle g_pub = NULL;
+    RenoirLeanHandle g_sub = NULL;
+    char g_name[64];
+    (void)snprintf(g_name, sizeof g_name, "lean_abi_gated_%d", (int)getpid());
+    CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_GATED, &g_pub) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER, &g_sub) ==
+          RenoirErrorCode_Success);
+    memset(msg, 0x5A, sizeof msg);
+    for (int i = 0; i < 4; ++i) {
+      CHECK(renoir_lean_publish(g_pub, msg, sizeof msg) == RenoirErrorCode_Success);
+    }
+    CHECK(renoir_lean_publish(g_pub, msg, sizeof msg) == RenoirErrorCode_BufferFull);
+    CHECK(renoir_lean_try_read(g_sub, out, sizeof out) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_publish(g_pub, msg, sizeof msg) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_CONSUMER, &g_sub) != RenoirErrorCode_Success);
+    renoir_lean_close(g_sub);
+    renoir_lean_close(g_pub);
+  }
+
   renoir_lean_close(sub);
   renoir_lean_close(pub);
   renoir_lean_close(NULL);

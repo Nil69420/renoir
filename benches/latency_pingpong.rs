@@ -60,15 +60,55 @@ fn pin(cpu: usize) {
     }
 }
 
+#[repr(align(128))]
+struct Pad([u8; 512]);
+
+struct AlignedBuf {
+    pad: Box<Pad>,
+    len: usize,
+}
+
+impl std::ops::Deref for AlignedBuf {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &self.pad.0[..self.len]
+    }
+}
+
+impl std::ops::DerefMut for AlignedBuf {
+    fn deref_mut(&mut self) -> &mut [u8] {
+        &mut self.pad.0[..self.len]
+    }
+}
+
+fn aligned_buf(len: usize, fill: u8) -> AlignedBuf {
+    AlignedBuf {
+        pad: Box::new(Pad([fill; 512])),
+        len,
+    }
+}
+
+fn aligned_mem(total: usize) -> (std::ptr::NonNull<u8>, &'static mut [u64]) {
+    let mem: &'static mut [u64] = Box::leak(vec![0u64; total / 8 + 1537].into_boxed_slice());
+    let base = mem.as_mut_ptr() as usize;
+    let skew: usize = std::env::var("BENCH_SKEW")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let call = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let aligned = ((base + 4095) & !4095) + if call % 2 == 1 { skew } else { 0 };
+    (std::ptr::NonNull::new(aligned as *mut u8).unwrap(), mem)
+}
+
 fn make_ring(payload: usize) -> (Arc<BroadcastTopicRing>, &'static mut [u64]) {
     let ring_bytes = BroadcastTopicRing::slot_stride(payload) * 64;
     let total = BroadcastTopicRing::required_memory_size(ring_bytes, payload);
-    let mem: &'static mut [u64] = Box::leak(vec![0u64; total / 8 + 1].into_boxed_slice());
-    let ptr = std::ptr::NonNull::new(mem.as_mut_ptr() as *mut u8).unwrap();
+    let (ptr, mem) = aligned_mem(total);
     let ring = unsafe {
         BroadcastTopicRing::from_memory(
             ptr,
-            mem.len() * 8,
+            total,
             ring_bytes,
             payload,
             Arc::new(TopicStats::default()),
@@ -263,10 +303,15 @@ fn lean_pingpong(a: usize, b: usize, tpn: f64) {
 fn make_lean(msg: usize) -> (Arc<LeanRing>, &'static mut [u64]) {
     let ring_bytes = lean_slot_bytes(msg).unwrap() * 64;
     let total = LeanRing::required_memory_size(ring_bytes, msg);
-    let mem: &'static mut [u64] = Box::leak(vec![0u64; total / 8 + 1].into_boxed_slice());
-    let ptr = std::ptr::NonNull::new(mem.as_mut_ptr() as *mut u8).unwrap();
-    let ring = unsafe { LeanRing::from_memory(ptr, mem.len() * 8, ring_bytes, msg).unwrap() };
+    let (ptr, mem) = aligned_mem(total);
+    let ring = unsafe { LeanRing::from_memory(ptr, total, ring_bytes, msg).unwrap() };
     (Arc::new(ring), mem)
+}
+
+#[repr(align(128))]
+struct Side {
+    cursor: renoir::topic_rings::LeanCursor,
+    publisher: renoir::topic_rings::LeanPublisher,
 }
 
 fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
@@ -274,32 +319,36 @@ fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     let (ba, _m2) = make_lean(msg);
     let total = WARMUP + SAMPLES;
     let (ab2, ba2) = (ab.clone(), ba.clone());
-    let mut cur_ab = ab.cursor_latest();
-    let mut cur_ba = ba.cursor_latest();
-    let mut pub_ab = ab.publisher();
-    let mut pub_ba = ba2.publisher();
+    let mut main_side = Box::new(Side {
+        cursor: ba.cursor_latest(),
+        publisher: ab.publisher(),
+    });
+    let mut echo_side = Box::new(Side {
+        cursor: ab.cursor_latest(),
+        publisher: ba2.publisher(),
+    });
     let echo = thread::spawn(move || {
         pin(b);
-        let mut buf = vec![0u8; msg];
+        let mut buf = aligned_buf(msg, 0);
         for _ in 0..total {
             loop {
-                if let Ok(LeanRead::Message) = ab2.try_read(&mut cur_ab, &mut buf) {
+                if let Ok(LeanRead::Message) = ab2.try_read(&mut echo_side.cursor, &mut buf) {
                     break;
                 }
                 std::hint::spin_loop();
             }
-            pub_ba.publish(&buf).unwrap();
+            echo_side.publisher.publish(&buf).unwrap();
         }
     });
     pin(a);
-    let mut buf = vec![0u8; msg];
-    let payload = vec![7u8; msg];
+    let mut buf = aligned_buf(msg, 0);
+    let payload = aligned_buf(msg, 7);
     let mut out = Vec::with_capacity(SAMPLES);
     for i in 0..total {
         let t0 = ticks();
-        pub_ab.publish(&payload).unwrap();
+        main_side.publisher.publish(&payload).unwrap();
         loop {
-            if let Ok(LeanRead::Message) = ba.try_read(&mut cur_ba, &mut buf) {
+            if let Ok(LeanRead::Message) = ba.try_read(&mut main_side.cursor, &mut buf) {
                 break;
             }
             std::hint::spin_loop();
@@ -328,7 +377,7 @@ fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     let total = WARMUP + SAMPLES;
     let echo = thread::spawn(move || {
         pin(b);
-        let mut buf = vec![0u8; msg];
+        let mut buf = aligned_buf(msg, 0);
         for _ in 0..total {
             while renoir_lean_try_read(ab_s as _, buf.as_mut_ptr(), msg) as i32 != 0 {
                 std::hint::spin_loop();
@@ -337,8 +386,8 @@ fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
         }
     });
     pin(a);
-    let mut buf = vec![0u8; msg];
-    let payload = vec![7u8; msg];
+    let mut buf = aligned_buf(msg, 0);
+    let payload = aligned_buf(msg, 7);
     let mut out = Vec::with_capacity(SAMPLES);
     for i in 0..total {
         let t0 = ticks();

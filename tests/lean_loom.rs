@@ -161,3 +161,53 @@ fn multi_producer_reads_are_never_torn() {
         }
     });
 }
+
+struct Gated {
+    ring: Ring,
+    pos: AtomicU64,
+}
+
+fn publish_gated(g: &Gated, idx: u64) {
+    loop {
+        let pos = g.pos.load(Ordering::Acquire);
+        if idx < pos + 2 {
+            break;
+        }
+        thread::yield_now();
+    }
+    publish(&g.ring, idx);
+}
+
+#[test]
+fn gated_reader_is_never_overwritten_mid_read() {
+    loom::model(|| {
+        let g = Arc::new(Gated {
+            ring: Arc::try_unwrap(new_ring()).ok().unwrap(),
+            pos: AtomicU64::new(1),
+        });
+        let w = g.clone();
+        let writer = thread::spawn(move || {
+            for idx in 1..=3 {
+                publish_gated(&w, idx);
+            }
+        });
+        for idx in 1..=3u64 {
+            let s = &g.ring.slots[((idx - 1) & 1) as usize];
+            loop {
+                let s1 = s.seq.load(Ordering::Acquire);
+                if s1 == 2 * idx {
+                    let a = s.a.load(Ordering::Relaxed);
+                    let b = s.b.load(Ordering::Relaxed);
+                    fence(Ordering::Acquire);
+                    assert_eq!(s.seq.load(Ordering::Relaxed), s1, "overwritten mid-read");
+                    assert_eq!((a, b), (idx, idx));
+                    g.pos.store(idx + 1, Ordering::Release);
+                    break;
+                }
+                assert!(s1 < 2 * idx, "lapped despite gating");
+                thread::yield_now();
+            }
+        }
+        writer.join().unwrap();
+    });
+}

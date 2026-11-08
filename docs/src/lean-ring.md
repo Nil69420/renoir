@@ -81,3 +81,15 @@ Failure behaviour, which differs from the single-producer ring:
 
 - A producer killed between claiming and publishing leaves a hole. A reader that polls an unpublished slot while a later slot has been claimed waits 5 ms and then skips the hole, counting it in `lost`.
 - A producer that stalls inside a publish for more than 50 ms can have its slot taken over by a producer that has wrapped the ring. The stalled producer's late completion fails with an error instead of publishing. Because the stalled producer's payload bytes may still land in the slot, this is a known limit: do not suspend producers (SIGSTOP, debugger) while they publish on a multi-producer ring.
+
+## Gated lossless mode
+
+By default a lean ring is lossy: a slow reader is lapped and counts `lost`. Open the ring with the gated flag (`RENOIR_LEAN_GATED`, `LeanFlags::Gated`, `gated=True`, `LeanMode::SingleProducerGated`) and register each consumer that must not lose messages (`RENOIR_LEAN_CONSUMER`, `LeanFlags::Consumer`, `consumer=True`, `register_consumer`). A publisher on a gated ring never overwrites a message that a registered consumer has not read: when the ring is full, `publish` returns `BufferFull` (`RenoirErrorCode_BufferFull`) and the caller decides to spin, retry or drop. Unregistered readers on the same ring stay lossy.
+
+Up to 8 consumers can be registered per ring. Each registered reader stores its position after every read; the publisher keeps a cached minimum and only scans the table when the ring is nearly full.
+
+A dead or stuck consumer must not stop the producers forever. If the slowest registered consumer has not advanced for the gate timeout (100 ms by default, `LeanRing::set_gate_timeout`), the publisher evicts it. An evicted consumer notices on its next read, re-registers at its current position and resumes; whatever the publisher overwrote in the meantime is reported through `lost`. Lossless delivery therefore holds for consumers that make progress within the timeout.
+
+On a gated multi-producer ring (`MultiProducerGated`) producers claim indices with a compare-and-swap that checks the gate first, so the ring never claims a slot it cannot publish.
+
+Read cost: one extra release store per read for registered consumers; unregistered readers pay nothing.

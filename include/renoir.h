@@ -77,9 +77,11 @@
 
 #define LEAN_RING_MAGIC 5495870724919348807
 
-#define LEAN_HEADER_BYTES 192
+
 
 #define LEAN_MAX_SLOT_LINES 8
+
+#define LEAN_MAX_CONSUMERS 8
 
 /**
  * Magic number identifying an MPMC ring control block in shared memory
@@ -162,6 +164,10 @@
 #define RENOIR_LEAN_FROM_OLDEST 1
 
 #define RENOIR_LEAN_MULTI_PRODUCER 2
+
+#define RENOIR_LEAN_GATED 4
+
+#define RENOIR_LEAN_CONSUMER 8
 
 /**
  * Topic registration flag: discard messages left by a previous clean session

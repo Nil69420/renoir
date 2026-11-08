@@ -41,9 +41,29 @@ impl LeanRing {
 }
 
 impl LeanPublisher {
+    fn claim_index(&mut self) -> Result<u64> {
+        if !self.ring.gated {
+            return Ok(self.ring.hdr().claim.fetch_add(1, Ordering::AcqRel) + 1);
+        }
+        loop {
+            let current = self.ring.hdr().claim.load(Ordering::Acquire);
+            let admitted = current + 1;
+            self.gate_admits(admitted)?;
+            if self
+                .ring
+                .hdr()
+                .claim
+                .compare_exchange_weak(current, admitted, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Ok(admitted);
+            }
+        }
+    }
+
     pub(super) fn publish_multi(&mut self, data: &[u8]) -> Result<()> {
+        let idx = self.claim_index()?;
         let ring = &*self.ring;
-        let idx = ring.hdr().claim.fetch_add(1, Ordering::AcqRel) + 1;
         let slot = ring.slot_ptr(idx);
         let seq = unsafe { &*(slot as *const AtomicU64) };
         let previous = idx.saturating_sub(ring.mask + 1) * 2;

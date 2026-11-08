@@ -12,14 +12,19 @@ use super::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
 use super::spsc::SESSION_MARKER_OFFSET;
 
 mod channel;
+mod gate;
 mod init;
 mod multi;
+mod types;
 mod wait;
 
 pub use channel::LeanChannel;
+pub use gate::LEAN_MAX_CONSUMERS;
+pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;
-pub const LEAN_HEADER_BYTES: usize = 192;
+const LEAN_FIXED_HEADER_BYTES: usize = 192;
+pub const LEAN_HEADER_BYTES: usize = LEAN_FIXED_HEADER_BYTES + gate::GATE_TABLE_BYTES;
 pub const LEAN_MAX_SLOT_LINES: usize = 8;
 const LINE: usize = 64;
 const SEQ_BYTES: usize = 8;
@@ -49,7 +54,7 @@ const _: () = assert!(std::mem::offset_of!(LeanHeader, write_idx) == 64);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, mode) == 40);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, wake) == 128);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, claim) == 136);
-const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_HEADER_BYTES);
+const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_FIXED_HEADER_BYTES);
 
 #[derive(Debug)]
 pub struct LeanRing {
@@ -59,54 +64,19 @@ pub struct LeanRing {
     slot_bytes: usize,
     msg_size: usize,
     multi: bool,
+    gated: bool,
+    gate_timeout_ns: AtomicU64,
 }
 
 unsafe impl Send for LeanRing {}
 unsafe impl Sync for LeanRing {}
 
-#[derive(Debug, Clone, Copy)]
-pub struct LeanCursor {
-    next: u64,
-    lost: u64,
-    empty_polls: u32,
-    stalled: Option<(u64, std::time::Instant)>,
-}
-
-impl LeanCursor {
-    fn at(next: u64) -> Self {
-        Self {
-            next,
-            lost: 0,
-            empty_polls: 0,
-            stalled: None,
-        }
-    }
-
-    pub fn lost(&self) -> u64 {
-        self.lost
-    }
-
-    pub fn next_index(&self) -> u64 {
-        self.next
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LeanMode {
-    SingleProducer = 0,
-    MultiProducer = 1,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LeanRead {
-    Empty,
-    Message,
-}
-
 #[derive(Debug)]
 pub struct LeanPublisher {
     ring: Arc<LeanRing>,
     next: u64,
+    gate_cache: u64,
+    blocked: Option<(u64, std::time::Instant)>,
 }
 
 pub const fn lean_slot_bytes(msg_size: usize) -> Option<usize> {
@@ -205,7 +175,9 @@ impl LeanRing {
             mask: slot_count as u64 - 1,
             slot_bytes,
             msg_size,
-            multi: mode == LeanMode::MultiProducer,
+            multi: mode.is_multi_producer(),
+            gated: mode.is_gated(),
+            gate_timeout_ns: AtomicU64::new(gate::DEFAULT_GATE_TIMEOUT.as_nanos() as u64),
         })
     }
 
@@ -225,6 +197,8 @@ impl LeanRing {
         LeanPublisher {
             ring: self.clone(),
             next: self.published() + 1,
+            gate_cache: 0,
+            blocked: None,
         }
     }
 
@@ -343,6 +317,9 @@ impl LeanPublisher {
             return self.publish_multi(data);
         }
         let idx = self.next;
+        if self.ring.gated {
+            self.gate_admits(idx)?;
+        }
         let slot = self.ring.slot_ptr(idx);
         unsafe {
             let seq = &*(slot as *const AtomicU64);

@@ -10,6 +10,18 @@
 
 namespace renoir {
 
+enum class LeanFlags : uint32_t {
+    None = 0,
+    FromOldest = RENOIR_LEAN_FROM_OLDEST,
+    MultiProducer = RENOIR_LEAN_MULTI_PRODUCER,
+    Gated = RENOIR_LEAN_GATED,
+    Consumer = RENOIR_LEAN_CONSUMER,
+};
+
+constexpr LeanFlags operator|(LeanFlags a, LeanFlags b) noexcept {
+    return static_cast<LeanFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
 class LeanChannel {
 public:
     static constexpr size_t kMaxMessageBytes = 504;
@@ -19,6 +31,13 @@ public:
         const uint32_t flags = (fromOldest ? RENOIR_LEAN_FROM_OLDEST : 0U) |
                                (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
         checkResult(renoir_lean_open(name.c_str(), messageSize, slotCount, flags, &handle_),
+                    "lean open");
+        messageSize_ = messageSize;
+    }
+
+    LeanChannel(const std::string& name, uint32_t messageSize, uint32_t slotCount, LeanFlags flags) {
+        checkResult(renoir_lean_open(name.c_str(), messageSize, slotCount,
+                                     static_cast<uint32_t>(flags), &handle_),
                     "lean open");
         messageSize_ = messageSize;
     }

@@ -11,6 +11,8 @@ pub type RenoirLeanHandle = *mut c_void;
 
 pub const RENOIR_LEAN_FROM_OLDEST: u32 = 1;
 pub const RENOIR_LEAN_MULTI_PRODUCER: u32 = 2;
+pub const RENOIR_LEAN_GATED: u32 = 4;
+pub const RENOIR_LEAN_CONSUMER: u32 = 8;
 
 #[inline(always)]
 fn handle<'a>(h: RenoirLeanHandle) -> Option<&'a mut LeanChannel> {
@@ -32,11 +34,10 @@ pub extern "C" fn renoir_lean_open(
         return RenoirErrorCode::InvalidParameter;
     };
     let from_oldest = flags & RENOIR_LEAN_FROM_OLDEST != 0;
-    let mode = if flags & RENOIR_LEAN_MULTI_PRODUCER != 0 {
-        LeanMode::MultiProducer
-    } else {
-        LeanMode::SingleProducer
-    };
+    let mode = LeanMode::new(
+        flags & RENOIR_LEAN_MULTI_PRODUCER != 0,
+        flags & RENOIR_LEAN_GATED != 0,
+    );
     match LeanChannel::open_with_mode(
         name,
         msg_size as usize,
@@ -44,7 +45,12 @@ pub extern "C" fn renoir_lean_open(
         from_oldest,
         mode,
     ) {
-        Ok(channel) => {
+        Ok(mut channel) => {
+            if flags & RENOIR_LEAN_CONSUMER != 0 {
+                if let Err(e) = channel.register_consumer(from_oldest) {
+                    return e.into();
+                }
+            }
             unsafe { *out = Box::into_raw(Box::new(channel)) as RenoirLeanHandle };
             RenoirErrorCode::Success
         }

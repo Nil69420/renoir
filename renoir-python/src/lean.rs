@@ -11,21 +11,23 @@ pub struct PyLeanChannel {
 #[pymethods]
 impl PyLeanChannel {
     #[new]
-    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false, multi_producer=false))]
+    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false, multi_producer=false, gated=false, consumer=false))]
     fn new(
         name: &str,
         msg_size: usize,
         slot_count: usize,
         from_oldest: bool,
         multi_producer: bool,
+        gated: bool,
+        consumer: bool,
     ) -> PyResult<Self> {
-        let mode = if multi_producer {
-            LeanMode::MultiProducer
-        } else {
-            LeanMode::SingleProducer
-        };
-        let inner = LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
-            .map_err(map_err)?;
+        let mode = LeanMode::new(multi_producer, gated);
+        let mut inner =
+            LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
+                .map_err(map_err)?;
+        if consumer {
+            inner.register_consumer(from_oldest).map_err(map_err)?;
+        }
         Ok(Self { inner })
     }
 

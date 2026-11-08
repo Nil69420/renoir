@@ -1,0 +1,87 @@
+use std::time::Instant;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GateHandle {
+    pub(super) entry: usize,
+    pub(super) token: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LeanCursor {
+    pub(super) next: u64,
+    pub(super) lost: u64,
+    pub(super) empty_polls: u32,
+    pub(super) stalled: Option<(u64, Instant)>,
+}
+
+impl LeanCursor {
+    pub(super) fn at(next: u64) -> Self {
+        Self {
+            next,
+            lost: 0,
+            empty_polls: 0,
+            stalled: None,
+        }
+    }
+
+    pub fn lost(&self) -> u64 {
+        self.lost
+    }
+
+    pub fn next_index(&self) -> u64 {
+        self.next
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LeanGatedCursor {
+    pub(super) cursor: LeanCursor,
+    pub(super) handle: Option<GateHandle>,
+}
+
+impl LeanGatedCursor {
+    pub fn lost(&self) -> u64 {
+        self.cursor.lost
+    }
+
+    pub fn next_index(&self) -> u64 {
+        self.cursor.next
+    }
+
+    pub fn is_registered(&self) -> bool {
+        self.handle.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeanMode {
+    SingleProducer = 0,
+    MultiProducer = 1,
+    SingleProducerGated = 2,
+    MultiProducerGated = 3,
+}
+
+impl LeanMode {
+    pub const fn new(multi_producer: bool, gated: bool) -> Self {
+        match (multi_producer, gated) {
+            (false, false) => Self::SingleProducer,
+            (true, false) => Self::MultiProducer,
+            (false, true) => Self::SingleProducerGated,
+            (true, true) => Self::MultiProducerGated,
+        }
+    }
+
+    pub const fn is_multi_producer(self) -> bool {
+        self as u32 & 1 != 0
+    }
+
+    pub const fn is_gated(self) -> bool {
+        self as u32 & 2 != 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeanRead {
+    Empty,
+    Message,
+}

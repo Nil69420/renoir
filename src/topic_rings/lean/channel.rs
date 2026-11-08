@@ -5,12 +5,15 @@ use crate::{
     memory::{BackingType, RegionConfig, SharedMemoryRegion},
 };
 
-use super::{lean_slot_bytes, LeanCursor, LeanMode, LeanPublisher, LeanRead, LeanRing};
+use super::{
+    lean_slot_bytes, LeanCursor, LeanGatedCursor, LeanMode, LeanPublisher, LeanRead, LeanRing,
+};
 
 pub struct LeanChannel {
     ring: Arc<LeanRing>,
     publisher: LeanPublisher,
     cursor: LeanCursor,
+    gated: Option<LeanGatedCursor>,
     _region: SharedMemoryRegion,
 }
 
@@ -66,8 +69,28 @@ impl LeanChannel {
             ring,
             publisher,
             cursor,
+            gated: None,
             _region: region,
         })
+    }
+
+    pub fn register_consumer(&mut self, from_oldest: bool) -> Result<()> {
+        if let Some(mut old) = self.gated.take() {
+            self.ring.unregister_consumer(&mut old);
+        }
+        self.gated = Some(self.ring.register_consumer(from_oldest)?);
+        Ok(())
+    }
+
+    fn active_cursor(&self) -> &LeanCursor {
+        match &self.gated {
+            Some(gated) => &gated.cursor,
+            None => &self.cursor,
+        }
+    }
+
+    pub fn ring(&self) -> &Arc<LeanRing> {
+        &self.ring
     }
 
     #[inline]
@@ -82,27 +105,41 @@ impl LeanChannel {
 
     pub fn wait_readable(&self, spin_iterations: u32, timeout: Option<Duration>) -> bool {
         self.ring
-            .wait_readable(&self.cursor, spin_iterations, timeout)
+            .wait_readable(self.active_cursor(), spin_iterations, timeout)
     }
 
     #[inline]
     pub fn try_read(&mut self, out: &mut [u8]) -> Result<LeanRead> {
-        self.ring.try_read(&mut self.cursor, out)
+        match self.gated.as_mut() {
+            Some(gated) => self.ring.try_read_gated(gated, out),
+            None => self.ring.try_read(&mut self.cursor, out),
+        }
     }
 
     pub fn skip_to_latest(&mut self, keep: u64) -> u64 {
-        self.ring.skip_to_latest(&mut self.cursor, keep)
+        match self.gated.as_mut() {
+            Some(gated) => self.ring.skip_to_latest_gated(gated, keep),
+            None => self.ring.skip_to_latest(&mut self.cursor, keep),
+        }
     }
 
     pub fn lost(&self) -> u64 {
-        self.cursor.lost()
+        self.active_cursor().lost()
     }
 
     pub fn pending(&self) -> usize {
-        self.ring.pending(&self.cursor)
+        self.ring.pending(self.active_cursor())
     }
 
     pub fn msg_size(&self) -> usize {
         self.ring.msg_size()
+    }
+}
+
+impl Drop for LeanChannel {
+    fn drop(&mut self) {
+        if let Some(gated) = self.gated.as_mut() {
+            self.ring.unregister_consumer(gated);
+        }
     }
 }

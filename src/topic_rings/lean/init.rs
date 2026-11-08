@@ -8,7 +8,9 @@ use crate::{
     },
 };
 
-use super::{LeanHeader, LEAN_RING_MAGIC};
+use super::{
+    gate::GateEntry, LeanHeader, LEAN_FIXED_HEADER_BYTES, LEAN_MAX_CONSUMERS, LEAN_RING_MAGIC,
+};
 
 /// # Safety
 ///
@@ -48,6 +50,14 @@ pub(super) unsafe fn attach_header(
             (*header).wake.store(0, Ordering::Relaxed);
             (*header).waiters.store(0, Ordering::Relaxed);
             (*header).claim.store(0, Ordering::Relaxed);
+            for i in 0..LEAN_MAX_CONSUMERS {
+                let entry = &*(header as *const u8)
+                    .add(LEAN_FIXED_HEADER_BYTES)
+                    .cast::<GateEntry>()
+                    .add(i);
+                entry.owner.store(0, Ordering::Relaxed);
+                entry.pos.store(0, Ordering::Relaxed);
+            }
             seal(magic, LEAN_RING_MAGIC);
         }
     }

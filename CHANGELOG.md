@@ -11,6 +11,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
 ### Changed
+- The lean ring header grew from 192 to 704 bytes to hold the consumer table (wire format change, pre-1.0).
 - `librenoir.so` now has SONAME `librenoir.so.0`; the Debian package installs it as `librenoir.so.0` and the Jetson package ships the matching symlinks. `tests/abi/abidiff.sh` compares the built library against a checked-in libabigail baseline in CI.
 
 ### Added
@@ -18,6 +19,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - `renoir::LeanChannel` C++ wrapper (`include/renoir_lean.hpp`), Python `renoir.LeanChannel`, and a safe Rust `LeanChannel` type.
 - Lean ring blocking consumers: `publish_notify` and `wait` (`renoir_lean_publish_notify`, `renoir_lean_wait`, C++ `publishNotify`/`wait`, Python `publish_notify`/`wait`) using a futex handshake with spin-then-sleep. Plain `publish` is unchanged.
 - Lean ring multi-producer mode (`RENOIR_LEAN_MULTI_PRODUCER`, C++ `multiProducer`, Python `multi_producer`, Rust `LeanMode`): claim-and-ticket publishing, hole skipping for dead producers, loom model and SIGKILL chaos test.
+- Lean ring gated lossless mode: registered consumers (up to 8) gate the publisher, which returns `BufferFull` instead of overwriting unread messages and evicts consumers that stop advancing for 100 ms. Rust `LeanMode::*Gated`, `LeanGatedCursor`; C `RENOIR_LEAN_GATED` and `RENOIR_LEAN_CONSUMER`; C++ `LeanFlags`; Python `gated` and `consumer`.
 - Litmus tests (`tests/litmus`) checking the seqlock and wake handshakes against the AArch64 memory model with herd7, and a SIGKILL publisher chaos test.
 - Verification: loom model tests, zero-allocation test, cross-process ordering and first-open race tests, `lean_corrupt_ring` fuzz target, exported-symbol baseline guard (`tests/abi/check.sh`) and `.github/workflows/verify.yml` (Miri, TSan, ASan, loom, fuzz smoke, C ABI, supply chain, aarch64, latency, Python).
 - `TopicPattern::SPMC` is now a true broadcast topic: one publisher,
