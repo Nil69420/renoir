@@ -186,3 +186,55 @@ fn concurrent_producers_and_a_consumer_never_see_a_torn_frame() {
     });
     assert_eq!(consumer.lost(), 0);
 }
+
+#[test]
+fn frames_older_than_the_lifespan_are_dropped_and_fresh_ones_kept() {
+    use renoir::topic_rings::FrameChannel;
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("RENOIR_SHM_DIR", dir.path());
+    let name = format!("frame_life_{}", std::process::id());
+    let mut producer = FrameChannel::open(&name, 256, 8, false, false, false).unwrap();
+    let mut consumer = FrameChannel::open(&name, 256, 8, false, true, false).unwrap();
+    for tag in 0..3u8 {
+        let mut loan = producer.loan(32).unwrap();
+        loan.bytes_mut().fill(tag);
+        loan.commit().unwrap();
+    }
+    thread::sleep(Duration::from_millis(60));
+    for tag in 10..12u8 {
+        let mut loan = producer.loan(32).unwrap();
+        loan.bytes_mut().fill(tag);
+        loan.commit().unwrap();
+    }
+    {
+        let view = consumer
+            .view_fresh(Duration::from_millis(30))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            view.bytes()[0],
+            10,
+            "the three stale frames must be skipped"
+        );
+        assert!(view.age() < Duration::from_millis(60));
+    }
+    assert_eq!(consumer.stale_dropped(), 3);
+    let view = consumer
+        .view_fresh(Duration::from_millis(30))
+        .unwrap()
+        .unwrap();
+    assert_eq!(view.bytes()[0], 11);
+    drop(view);
+    assert!(consumer
+        .view_fresh(Duration::from_millis(30))
+        .unwrap()
+        .is_none());
+    thread::sleep(Duration::from_millis(50));
+    let mut loan = producer.loan(8).unwrap();
+    loan.bytes_mut().fill(1);
+    loan.commit().unwrap();
+    assert!(consumer
+        .view_fresh(Duration::from_secs(60))
+        .unwrap()
+        .is_some());
+}

@@ -263,8 +263,8 @@ def test_lean_deadline(tmp_path, monkeypatch):
 
 
 def test_lean_memory_required():
-    assert renoir.lean_memory_required(48, 64) == 1728 + 64 * 64
-    assert renoir.lean_memory_required(100, 100) == 1728 + 64 * 128
+    assert renoir.lean_memory_required(48, 64) == 3264 + 64 * 64
+    assert renoir.lean_memory_required(100, 100) == 3264 + 64 * 128
     with pytest.raises(renoir.RenoirError):
         renoir.lean_memory_required(0, 64)
 
@@ -320,3 +320,16 @@ def test_frame_channel_dynamic_sizes_and_back_pressure(tmp_path, monkeypatch):
     assert pub.consumer_id() is None
     with pytest.raises(renoir.RenoirError):
         pub.publish(b"")
+
+
+def test_frame_lifespan_drops_stale_frames(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    name = "py_frame_life_%d" % time.monotonic_ns()
+    pub = renoir.FrameChannel(name, 64, 8)
+    sub = renoir.FrameChannel(name, 64, 8, consumer=True)
+    pub.publish(b"old")
+    time.sleep(0.05)
+    pub.publish(b"new")
+    assert sub.read(max_age_ms=20) == b"new"
+    assert sub.stale_dropped() == 1
+    assert sub.read(max_age_ms=20) is None

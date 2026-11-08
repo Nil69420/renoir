@@ -151,6 +151,19 @@ public:
         return View(this, data, len);
     }
 
+    std::optional<View> tryViewFresh(uint64_t maxAgeNs) {
+        const uint8_t* data = nullptr;
+        size_t len = 0;
+        const RenoirErrorCode rc = renoir_frame_view_fresh(handle_, maxAgeNs, &data, &len);
+        if (rc == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
+            return std::nullopt;
+        }
+        checkResult(rc, "frame view fresh");
+        return View(this, data, len);
+    }
+
+    uint64_t staleDropped() const noexcept { return renoir_frame_stale_dropped(handle_); }
+
     bool wait(uint32_t spinIterations = 2000, uint64_t timeoutNs = UINT64_MAX) noexcept {
         return renoir_frame_wait(handle_, spinIterations, timeoutNs) ==
                RenoirErrorCode::RenoirErrorCode_Success;

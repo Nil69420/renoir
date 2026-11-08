@@ -118,6 +118,34 @@ pub extern "C" fn renoir_frame_view(
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_frame_view_fresh(
+    h: RenoirFrameHandle,
+    max_age_ns: u64,
+    out_data: *mut *const u8,
+    out_len: *mut usize,
+) -> RenoirErrorCode {
+    let (Some(h), false, false) = (handle(h), out_data.is_null(), out_len.is_null()) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    match h.view_fresh_raw(Duration::from_nanos(max_age_ns)) {
+        Ok(Some((ptr, len))) => {
+            unsafe {
+                *out_data = ptr;
+                *out_len = len;
+            }
+            RenoirErrorCode::Success
+        }
+        Ok(None) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_frame_stale_dropped(h: RenoirFrameHandle) -> u64 {
+    handle(h).map_or(0, |h| h.stale_dropped())
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_frame_release(h: RenoirFrameHandle) -> RenoirErrorCode {
     match handle(h) {
         Some(h) => h

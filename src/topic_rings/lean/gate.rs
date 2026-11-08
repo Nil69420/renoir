@@ -9,7 +9,7 @@ use super::{
 };
 use crate::error::{RenoirError, Result};
 
-pub const LEAN_MAX_CONSUMERS: usize = 8;
+pub const LEAN_MAX_CONSUMERS: usize = 32;
 pub(super) const GATE_TABLE_BYTES: usize = LEAN_MAX_CONSUMERS * 64;
 const FREE: u64 = 0;
 pub(super) const ACTIVE: u64 = 1;

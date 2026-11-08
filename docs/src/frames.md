@@ -27,7 +27,11 @@ A view is owned: the consumer does not advance its gate position until the view 
 
 ## Dynamic length
 
-Each frame carries its own length. `loan(len)` takes any length from 1 to the ring's maximum frame size; the slot is sized for the maximum. Memory is `1728 B header + slots x (round_up_64(16 + max_frame))`; use `LeanRing::required_frame_memory` or size it from the maximum frame you expect.
+Each frame carries its own length. `loan(len)` takes any length from 1 to the ring's maximum frame size; the slot is sized for the maximum. Memory is `3264 B header + slots x (round_up_64(16 + max_frame))`; use `LeanRing::required_frame_memory` or size it from the maximum frame you expect.
+
+## Lifespan
+
+Each frame is stamped with a monotonic clock when it is committed. `view_fresh(max_age)` skips (and releases) frames older than `max_age` and returns the first fresh one; skipped frames are counted by `stale_dropped()`. This keeps a slow consumer from processing a backlog of stale camera images.
 
 ## Modes and features it shares with the lean ring
 
@@ -44,4 +48,4 @@ Single or multi producer, consumer registration, consumer dependencies (`set_ups
 
 - Liveness uses process ids: processes sharing a frame ring must share a pid namespace, otherwise a live holder could be judged dead and its frame reused.
 - Frame rings cannot be opened as lean rings and the plain lean read calls must not be used on them.
-- At most 8 registered consumers and 16 registered publishers per ring.
+- At most 32 registered consumers and 16 registered publishers per ring.

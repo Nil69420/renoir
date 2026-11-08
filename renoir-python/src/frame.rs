@@ -44,12 +44,24 @@ impl PyFrameChannel {
         }
     }
 
-    fn read<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
-        Ok(self
-            .inner
-            .view()
-            .map_err(map_err)?
-            .map(|view| PyBytes::new(py, view.bytes())))
+    #[pyo3(signature = (max_age_ms=None))]
+    fn read<'py>(
+        &mut self,
+        py: Python<'py>,
+        max_age_ms: Option<u64>,
+    ) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        let view = match max_age_ms {
+            Some(ms) => self
+                .inner
+                .view_fresh(std::time::Duration::from_millis(ms))
+                .map_err(map_err)?,
+            None => self.inner.view().map_err(map_err)?,
+        };
+        Ok(view.map(|view| PyBytes::new(py, view.bytes())))
+    }
+
+    fn stale_dropped(&self) -> u64 {
+        self.inner.stale_dropped()
     }
 
     #[pyo3(signature = (spin_iterations=2000, timeout_ms=None))]

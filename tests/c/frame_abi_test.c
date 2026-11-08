@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "renoir.h"
@@ -75,6 +76,23 @@ int main(void) {
   CHECK(renoir_frame_consumer_id(sub) >= 0);
   CHECK(renoir_frame_consumer_id(pub) == -1);
   CHECK(renoir_frame_live_publishers(pub) >= 1);
+
+  while (renoir_frame_view(sub, &in, &len) == RenoirErrorCode_Success) {
+    CHECK(renoir_frame_release(sub) == RenoirErrorCode_Success);
+  }
+  CHECK(renoir_frame_loan(pub, 16, &out) == RenoirErrorCode_Success);
+  CHECK(renoir_frame_commit(pub) == RenoirErrorCode_Success);
+  CHECK(renoir_frame_view_fresh(sub, 60ULL * 1000000000ULL, &in, &len) == RenoirErrorCode_Success);
+  CHECK(len == 16);
+  CHECK(renoir_frame_release(sub) == RenoirErrorCode_Success);
+  CHECK(renoir_frame_loan(pub, 16, &out) == RenoirErrorCode_Success);
+  CHECK(renoir_frame_commit(pub) == RenoirErrorCode_Success);
+  {
+    const struct timespec pause = {0, 20000000L};
+    (void)nanosleep(&pause, NULL);
+  }
+  CHECK(renoir_frame_view_fresh(sub, 1000ULL, &in, &len) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_frame_stale_dropped(sub) == 1);
 
   renoir_frame_close(sub);
   renoir_frame_close(pub);

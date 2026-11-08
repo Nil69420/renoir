@@ -10,7 +10,7 @@ It was lapped by the publisher. Raise the slot count (see Sizing), read faster, 
 A registered consumer has not read for the ring's whole depth. Either the consumer is too slow (raise depth or speed it up) or it is stuck. A consumer that makes no progress for 100 ms is evicted automatically and the publisher continues; the evicted consumer's `lost` counter shows what it missed.
 
 ## `All lean consumer slots are in use`
-A gated ring supports 8 registered consumers. Unregister or close consumers that are gone; a crashed consumer's entry is reclaimed after eviction.
+A gated ring supports 32 registered consumers. Unregister or close consumers that are gone; a crashed consumer's entry is reclaimed after eviction.
 
 ## RPC `call` returns `BufferEmpty`
 The timeout elapsed with no response: the server is not running, is busy, or uses a different `max_payload` or `request_slots` (those mismatches fail at open). Check that exactly one server runs per service.

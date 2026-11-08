@@ -15,6 +15,7 @@ pub struct FrameChannel {
     consumer: Option<LeanGatedCursor>,
     pending_loan: Option<(u64, usize)>,
     pending_view: Option<u64>,
+    stale_dropped: u64,
     _region: SharedMemoryRegion,
 }
 
@@ -64,6 +65,7 @@ impl FrameChannel {
             consumer,
             pending_loan: None,
             pending_view: None,
+            stale_dropped: 0,
             _region: region,
         })
     }
@@ -81,6 +83,52 @@ impl FrameChannel {
     pub fn view(&mut self) -> Result<Option<FrameView<'_>>> {
         let cursor = self.consumer.as_mut().ok_or_else(not_a_consumer)?;
         self.ring.view_frame(cursor)
+    }
+
+    pub fn view_fresh(&mut self, max_age: Duration) -> Result<Option<FrameView<'_>>> {
+        let limit = u32::try_from(max_age.as_micros()).unwrap_or(u32::MAX);
+        let cursor = self.consumer.as_mut().ok_or_else(not_a_consumer)?;
+        loop {
+            match self.ring.peek_frame(cursor)? {
+                None => return Ok(None),
+                Some((idx, _)) if self.ring.frame_age_micros(idx) > limit => {
+                    self.ring.release_frame(cursor, idx);
+                    self.stale_dropped += 1;
+                }
+                Some((idx, len)) => {
+                    return Ok(Some(FrameView::new(&self.ring, cursor, idx, len)));
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn stale_dropped(&self) -> u64 {
+        self.stale_dropped
+    }
+
+    pub fn view_fresh_raw(&mut self, max_age: Duration) -> Result<Option<(*const u8, usize)>> {
+        if self.pending_view.is_some() {
+            return Err(RenoirError::invalid_parameter(
+                "view",
+                "A frame view is already held",
+            ));
+        }
+        let limit = u32::try_from(max_age.as_micros()).unwrap_or(u32::MAX);
+        let cursor = self.consumer.as_mut().ok_or_else(not_a_consumer)?;
+        loop {
+            match self.ring.peek_frame(cursor)? {
+                None => return Ok(None),
+                Some((idx, _)) if self.ring.frame_age_micros(idx) > limit => {
+                    self.ring.release_frame(cursor, idx);
+                    self.stale_dropped += 1;
+                }
+                Some((idx, len)) => {
+                    self.pending_view = Some(idx);
+                    return Ok(Some((self.ring.frame_ptr(idx), len)));
+                }
+            }
+        }
     }
 
     pub fn loan_raw(&mut self, len: usize) -> Result<*mut u8> {

@@ -11,6 +11,17 @@ pub const LEAN_MAX_FRAME_BYTES: usize = 64 << 20;
 pub(super) const FRAME_HEADER_BYTES: usize = 8;
 const TOMBSTONE: u32 = u32::MAX;
 
+fn now_micros() -> u32 {
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+    (ts.tv_sec as u64)
+        .wrapping_mul(1_000_000)
+        .wrapping_add(ts.tv_nsec as u64 / 1000) as u32
+}
+
 #[must_use]
 pub const fn frame_slot_bytes(max_frame: usize) -> Option<usize> {
     if max_frame == 0 || max_frame > LEAN_MAX_FRAME_BYTES {
@@ -86,6 +97,15 @@ impl LeanRing {
 
     fn frame_len_ptr(&self, idx: u64) -> *mut u32 {
         unsafe { self.slot_ptr(idx).add(SEQ_BYTES).cast::<u32>() }
+    }
+
+    fn frame_stamp_ptr(&self, idx: u64) -> *mut u32 {
+        unsafe { self.slot_ptr(idx).add(SEQ_BYTES + 4).cast::<u32>() }
+    }
+
+    #[must_use]
+    pub fn frame_age_micros(&self, idx: u64) -> u32 {
+        now_micros().wrapping_sub(unsafe { self.frame_stamp_ptr(idx).read() })
     }
 
     pub fn peek_frame(&self, cursor: &mut LeanGatedCursor) -> Result<Option<(u64, usize)>> {
@@ -165,7 +185,21 @@ pub struct FrameView<'a> {
     len: usize,
 }
 
-impl FrameView<'_> {
+impl<'a> FrameView<'a> {
+    pub(super) fn new(
+        ring: &'a LeanRing,
+        cursor: &'a mut LeanGatedCursor,
+        idx: u64,
+        len: usize,
+    ) -> Self {
+        Self {
+            ring,
+            cursor,
+            idx,
+            len,
+        }
+    }
+
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.ring.frame_data(self.idx), self.len) }
@@ -184,6 +218,11 @@ impl FrameView<'_> {
     #[must_use]
     pub fn index(&self) -> u64 {
         self.idx
+    }
+
+    #[must_use]
+    pub fn age(&self) -> std::time::Duration {
+        std::time::Duration::from_micros(u64::from(self.ring.frame_age_micros(self.idx)))
     }
 
     #[must_use]
@@ -249,7 +288,10 @@ impl LeanPublisher {
         let ring = self.ring.clone();
         let stored = len.map_or(TOMBSTONE, |l| l as u32);
         if ring.multi || len.is_some() {
-            unsafe { ring.frame_len_ptr(idx).write(stored) };
+            unsafe {
+                ring.frame_len_ptr(idx).write(stored);
+                ring.frame_stamp_ptr(idx).write(now_micros());
+            }
         }
         if ring.multi {
             let committed = commit_slot_multi(&ring, idx);

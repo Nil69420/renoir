@@ -24,4 +24,6 @@
 
 In C use `RENOIR_LEAN_RELIABLE_PUBLISHER` and `RENOIR_LEAN_RELIABLE_SUBSCRIBER` when opening, and `renoir_lean_set_deadline`, `renoir_lean_wait_deadline` and `renoir_lean_deadline_misses` for deadlines.
 
-Not supported, by design: message lifespan and liveliness leases. They need a per-message timestamp or a clock read on every publish, which the 100 ns path cannot afford; put a timestamp in your payload if you need it.
+Lifespan: supported on frame rings, where each frame is stamped with a monotonic microsecond clock at commit (`FrameChannel::view_fresh`, `renoir_frame_view_fresh`, C++ `tryViewFresh`, Python `read(max_age_ms=...)`); frames older than the limit are released and counted in `stale_dropped`. Ages up to about 35 minutes are exact. It is not available on the lean ring, whose 100 ns path cannot afford a clock read per publish: put a timestamp in your own message if you need it there.
+
+Liveliness: `live_publishers()` counts the registered publisher processes that are still alive (process id and start time are checked), so a consumer can tell a crashed publisher from a quiet one; there is no heartbeat lease or manual assertion.

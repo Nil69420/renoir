@@ -11,7 +11,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ### Fixed
 - `lean_slot_bytes` no longer wraps on message sizes close to `usize::MAX` (found by Kani): in release builds such a size was accepted as a one-line slot; it is now rejected.
-- Multi-producer rings no longer skip or take over the slot of a producer that is merely slow or suspended: producers register their process id and start time in a 16-entry table (lean header grows from 704 to 1728 bytes), and a claimed slot is skipped only when its owner process is dead or after 10 s.
+- Multi-producer rings no longer skip or take over the slot of a producer that is merely slow or suspended: producers register their process id and start time in a 16-entry table (lean header grows from 704 to 1728 bytes, later 3264 with 32 consumer entries), and a claimed slot is skipped only when its owner process is dead or after 10 s.
 - Gated multi-producer rings no longer lose a message when a producer is descheduled for more than 5 ms after claiming a slot: the reader now waits up to the gate timeout before skipping a claimed but unpublished slot.
 
 ### Fixed
@@ -19,11 +19,13 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
 ### Changed
+- A gated lean or frame ring now supports 32 registered consumers instead of 8 (the header grows to 3264 bytes).
 - Build: `env_logger` is now optional (CLI feature only), `loom` is a `cfg(loom)` dev-dependency, the iceoryx2 comparison benchmarks build from `benches/comparison`, and test runs use a new `testing` profile (no LTO, 16 codegen units). Debug `cargo test --no-run` is about 26% faster and `cargo clippy --all-targets` about 31% faster; clean release-profile test builds drop from 75 s to 19 s. The shipped `release` profile is unchanged.
 - The lean ring header grew from 192 to 1728 bytes to hold the consumer and producer tables (wire format change, pre-1.0).
 - `librenoir.so` now has SONAME `librenoir.so.0`; the Debian package installs it as `librenoir.so.0` and the Jetson package ships the matching symlinks. `tests/abi/abidiff.sh` compares the built library against a checked-in libabigail baseline in CI.
 
 ### Added
+- Frame lifespan: `view_fresh` / `renoir_frame_view_fresh` / `tryViewFresh` / `read(max_age_ms=...)` drop frames older than a limit, using a monotonic stamp written at commit.
 - Frame rings (`FrameChannel`, `renoir_frame_*`, C++ `renoir_frame.hpp`, Python `FrameChannel`): dynamic-length frames up to 64 MiB, written in place by the producer (`loan`/`commit`) and read in place by consumers (`view`/`release`) with no copy. Views are owned: the gate holds the slot until release, a live holder is never evicted by a timer, and a holder or loaner that dies is reclaimed through process-liveness checks. Gate entries now record the holder's process id and start time.
 - Consumer dependencies on gated lean rings (the Disruptor sequence barrier): `set_upstream` / `consumer_id` (`renoir_lean_set_upstream`, `renoir_lean_consumer_id`, C++ `setUpstream`/`consumerId`, Python `set_upstream`/`consumer_id`). A downstream consumer only sees messages its upstream has already consumed; chains are cycle-checked in shared memory and an upstream that is unregistered or evicted releases its downstream.
 - Service discovery and monitoring without a daemon: `renoir::discovery::{scan, sweep}`, `renoir_discover` and `renoir_discover_sweep` in C, and the `renoir-monitor` tool (`list`, `watch`, `sweep`). Rings describe themselves in their headers, so discovery costs nothing at publish time.

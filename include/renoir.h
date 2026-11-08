@@ -87,7 +87,7 @@
 
 #define LEAN_MAX_FRAME_BYTES (64 << 20)
 
-#define LEAN_MAX_CONSUMERS 8
+#define LEAN_MAX_CONSUMERS 32
 
 #define LEAN_MAX_PRODUCERS 16
 
@@ -846,6 +846,13 @@ enum RenoirErrorCode renoir_frame_abort(RenoirFrameHandle h);
 enum RenoirErrorCode renoir_frame_view(RenoirFrameHandle h,
                                        const uint8_t **out_data,
                                        uintptr_t *out_len);
+
+enum RenoirErrorCode renoir_frame_view_fresh(RenoirFrameHandle h,
+                                             uint64_t max_age_ns,
+                                             const uint8_t **out_data,
+                                             uintptr_t *out_len);
+
+uint64_t renoir_frame_stale_dropped(RenoirFrameHandle h);
 
 enum RenoirErrorCode renoir_frame_release(RenoirFrameHandle h);
 

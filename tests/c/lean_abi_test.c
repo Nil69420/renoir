@@ -157,9 +157,9 @@ int main(void) {
   {
     size_t bytes = 0;
     CHECK(renoir_lean_memory_required(48, 64, &bytes) == RenoirErrorCode_Success);
-    CHECK(bytes == 1728 + 64 * 64);
+    CHECK(bytes == 3264 + 64 * 64);
     CHECK(renoir_lean_memory_required(100, 100, &bytes) == RenoirErrorCode_Success);
-    CHECK(bytes == 1728 + 64 * 128);
+    CHECK(bytes == 3264 + 64 * 128);
     CHECK(renoir_lean_memory_required(0, 64, &bytes) == RenoirErrorCode_InvalidParameter);
     CHECK(renoir_lean_memory_required(505, 64, &bytes) == RenoirErrorCode_InvalidParameter);
     CHECK(renoir_lean_memory_required(48, 1, &bytes) == RenoirErrorCode_InvalidParameter);
