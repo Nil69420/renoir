@@ -180,6 +180,21 @@ impl LeanChannel {
         }
     }
 
+    #[must_use]
+    pub fn consumer_id(&self) -> Option<usize> {
+        self.gated.as_ref().and_then(LeanGatedCursor::consumer_id)
+    }
+
+    pub fn set_upstream(&mut self, upstream: usize) -> Result<()> {
+        let Some(gated) = self.gated.as_mut() else {
+            return Err(RenoirError::invalid_parameter(
+                "channel",
+                "Only registered consumers can have an upstream",
+            ));
+        };
+        self.ring.set_upstream(gated, upstream)
+    }
+
     pub fn live_publishers(&self) -> usize {
         self.ring.live_publishers()
     }

@@ -21,7 +21,8 @@ pub(super) const DEFAULT_GATE_TIMEOUT: Duration = Duration::from_millis(100);
 pub(super) struct GateEntry {
     pub(super) owner: AtomicU64,
     pub(super) pos: AtomicU64,
-    pad: [u8; 48],
+    pub(super) after: AtomicU64,
+    pad: [u8; 40],
 }
 
 const _: () = assert!(std::mem::size_of::<GateEntry>() == 64);
@@ -64,6 +65,7 @@ impl LeanRing {
         Ok(LeanGatedCursor {
             cursor: LeanCursor::at(start),
             handle: Some(self.claim_gate_entry(start)?),
+            upstream: None,
         })
     }
 
@@ -81,6 +83,9 @@ impl LeanRing {
 
     #[inline]
     pub fn try_read_gated(&self, cursor: &mut LeanGatedCursor, out: &mut [u8]) -> Result<LeanRead> {
+        if cursor.upstream.is_some() && self.upstream_limit(cursor) <= cursor.cursor.next {
+            return Ok(LeanRead::Empty);
+        }
         let read = self.try_read(&mut cursor.cursor, out);
         if matches!(read, Ok(LeanRead::Message)) {
             self.sync_gate(cursor);
@@ -89,13 +94,106 @@ impl LeanRing {
     }
 
     pub fn skip_to_latest_gated(&self, cursor: &mut LeanGatedCursor, keep: u64) -> u64 {
-        let skipped = self.skip_to_latest(&mut cursor.cursor, keep);
+        let skipped = if cursor.upstream.is_some() {
+            let limit = self.upstream_limit(cursor);
+            let target = self
+                .published()
+                .saturating_sub(keep.max(1) - 1)
+                .max(1)
+                .min(limit);
+            if target > cursor.cursor.next {
+                let skipped = target - cursor.cursor.next;
+                cursor.cursor.lost += skipped;
+                cursor.cursor.next = target;
+                skipped
+            } else {
+                0
+            }
+        } else {
+            self.skip_to_latest(&mut cursor.cursor, keep)
+        };
         self.sync_gate(cursor);
         skipped
     }
 
     pub fn pending_gated(&self, cursor: &LeanGatedCursor) -> usize {
-        self.pending(&cursor.cursor)
+        let pending = self.pending(&cursor.cursor);
+        match cursor.upstream {
+            Some(up) => match self.upstream_pos(up) {
+                Some(limit) => pending.min(limit.saturating_sub(cursor.cursor.next) as usize),
+                None => pending,
+            },
+            None => pending,
+        }
+    }
+
+    fn upstream_pos(&self, up: GateHandle) -> Option<u64> {
+        let entry = self.gate_entry(up.entry);
+        (entry.owner.load(Ordering::Acquire) == (up.token << 2) | ACTIVE)
+            .then(|| entry.pos.load(Ordering::Acquire))
+    }
+
+    #[cold]
+    pub(super) fn upstream_limit(&self, cursor: &mut LeanGatedCursor) -> u64 {
+        let Some(up) = cursor.upstream else {
+            return u64::MAX;
+        };
+        match self.upstream_pos(up) {
+            Some(limit) => limit,
+            None => {
+                cursor.upstream = None;
+                u64::MAX
+            }
+        }
+    }
+
+    pub fn set_upstream(&self, cursor: &mut LeanGatedCursor, upstream: usize) -> Result<()> {
+        let Some(me) = cursor.handle else {
+            return Err(RenoirError::invalid_parameter(
+                "cursor",
+                "Consumer is not registered",
+            ));
+        };
+        if upstream >= LEAN_MAX_CONSUMERS || upstream == me.entry {
+            return Err(RenoirError::invalid_parameter(
+                "upstream",
+                "Upstream must be another registered consumer",
+            ));
+        }
+        let target = self.gate_entry(upstream);
+        let owner = target.owner.load(Ordering::Acquire);
+        if owner & STATE_MASK != ACTIVE {
+            return Err(RenoirError::invalid_parameter(
+                "upstream",
+                "Upstream consumer is not registered",
+            ));
+        }
+        let mut walk = target.after.load(Ordering::Acquire);
+        for _ in 0..LEAN_MAX_CONSUMERS {
+            if walk == 0 {
+                break;
+            }
+            let next = ((walk & 0xFF) - 1) as usize;
+            if next == me.entry {
+                return Err(RenoirError::invalid_parameter(
+                    "upstream",
+                    "Upstream chain would form a cycle",
+                ));
+            }
+            if next >= LEAN_MAX_CONSUMERS {
+                break;
+            }
+            walk = self.gate_entry(next).after.load(Ordering::Acquire);
+        }
+        let token = owner >> 2;
+        self.gate_entry(me.entry)
+            .after
+            .store((token << 8) | (upstream as u64 + 1), Ordering::Release);
+        cursor.upstream = Some(GateHandle {
+            entry: upstream,
+            token,
+        });
+        Ok(())
     }
 
     fn claim_gate_entry(&self, start: u64) -> Result<GateHandle> {
@@ -107,6 +205,7 @@ impl LeanRing {
             }
             let token = (seen >> 2) + 1;
             entry.pos.store(start, Ordering::Relaxed);
+            entry.after.store(0, Ordering::Relaxed);
             if entry
                 .owner
                 .compare_exchange(

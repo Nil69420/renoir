@@ -126,6 +126,10 @@ public:
     uint64_t lost() const noexcept { return renoir_lean_lost(handle_); }
     size_t pending() const noexcept { return renoir_lean_pending(handle_); }
     size_t livePublishers() const noexcept { return renoir_lean_live_publishers(handle_); }
+    int consumerId() const noexcept { return renoir_lean_consumer_id(handle_); }
+    RenoirErrorCode setUpstream(uint32_t upstream) noexcept {
+        return renoir_lean_set_upstream(handle_, upstream);
+    }
     uint32_t messageSize() const noexcept { return messageSize_; }
 
 private:

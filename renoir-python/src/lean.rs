@@ -131,6 +131,14 @@ impl PyLeanChannel {
         self.inner.live_publishers()
     }
 
+    fn consumer_id(&self) -> Option<usize> {
+        self.inner.consumer_id()
+    }
+
+    fn set_upstream(&mut self, upstream: usize) -> PyResult<()> {
+        self.inner.set_upstream(upstream).map_err(map_err)
+    }
+
     #[getter]
     fn msg_size(&self) -> usize {
         self.inner.msg_size()

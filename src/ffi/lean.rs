@@ -269,6 +269,24 @@ pub extern "C" fn renoir_lean_live_publishers(h: RenoirLeanHandle) -> usize {
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_lean_consumer_id(h: RenoirLeanHandle) -> i32 {
+    handle(h)
+        .and_then(|h| h.consumer_id())
+        .map_or(-1, |id| id as i32)
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_set_upstream(h: RenoirLeanHandle, upstream: u32) -> RenoirErrorCode {
+    match handle(h) {
+        Some(h) => match h.set_upstream(upstream as usize) {
+            Ok(()) => RenoirErrorCode::Success,
+            Err(e) => e.into(),
+        },
+        None => RenoirErrorCode::InvalidParameter,
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_lean_close(h: RenoirLeanHandle) {
     if !h.is_null() {
         drop(unsafe { Box::from_raw(h as *mut LeanChannel) });

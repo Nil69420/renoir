@@ -18,10 +18,12 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
 ### Changed
+- Build: `env_logger` is now optional (CLI feature only), `loom` is a `cfg(loom)` dev-dependency, the iceoryx2 comparison benchmarks build from `benches/comparison`, and test runs use a new `testing` profile (no LTO, 16 codegen units). Debug `cargo test --no-run` is about 26% faster and `cargo clippy --all-targets` about 31% faster; clean release-profile test builds drop from 75 s to 19 s. The shipped `release` profile is unchanged.
 - The lean ring header grew from 192 to 1728 bytes to hold the consumer and producer tables (wire format change, pre-1.0).
 - `librenoir.so` now has SONAME `librenoir.so.0`; the Debian package installs it as `librenoir.so.0` and the Jetson package ships the matching symlinks. `tests/abi/abidiff.sh` compares the built library against a checked-in libabigail baseline in CI.
 
 ### Added
+- Consumer dependencies on gated lean rings (the Disruptor sequence barrier): `set_upstream` / `consumer_id` (`renoir_lean_set_upstream`, `renoir_lean_consumer_id`, C++ `setUpstream`/`consumerId`, Python `set_upstream`/`consumer_id`). A downstream consumer only sees messages its upstream has already consumed; chains are cycle-checked in shared memory and an upstream that is unregistered or evicted releases its downstream.
 - Service discovery and monitoring without a daemon: `renoir::discovery::{scan, sweep}`, `renoir_discover` and `renoir_discover_sweep` in C, and the `renoir-monitor` tool (`list`, `watch`, `sweep`). Rings describe themselves in their headers, so discovery costs nothing at publish time.
 - Liveliness: `live_publishers()` on the lean ring (`renoir_lean_live_publishers`, C++ `livePublishers`, Python `live_publishers`) counts registered publisher processes that are still alive, so a consumer can tell a crashed publisher from a quiet one.
 - Lean ring: single-writer broadcast ring with one cache line per message of up to 56 bytes (up to 504 bytes across 8 lines), exposed in C as `renoir_lean_*`. Measured about 65-76 ns one-way between pinned cores on x86, against about 250 ns for the broadcast topic ring. Handles are direct pointers with no global registry lock.

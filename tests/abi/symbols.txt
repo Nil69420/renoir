@@ -31,6 +31,7 @@ renoir_image_frame_validate
 renoir_imu_sample_init
 renoir_imu_sample_validate
 renoir_lean_close
+renoir_lean_consumer_id
 renoir_lean_deadline_misses
 renoir_lean_live_publishers
 renoir_lean_lost
@@ -42,6 +43,7 @@ renoir_lean_publish_batch
 renoir_lean_publish_notify
 renoir_lean_read_batch
 renoir_lean_set_deadline
+renoir_lean_set_upstream
 renoir_lean_skip_to_latest
 renoir_lean_try_read
 renoir_lean_wait

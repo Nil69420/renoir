@@ -39,6 +39,7 @@ impl LeanCursor {
 pub struct LeanGatedCursor {
     pub(super) cursor: LeanCursor,
     pub(super) handle: Option<GateHandle>,
+    pub(super) upstream: Option<GateHandle>,
 }
 
 impl LeanGatedCursor {
@@ -55,6 +56,16 @@ impl LeanGatedCursor {
     #[must_use]
     pub fn is_registered(&self) -> bool {
         self.handle.is_some()
+    }
+
+    #[must_use]
+    pub fn consumer_id(&self) -> Option<usize> {
+        self.handle.map(|h| h.entry)
+    }
+
+    #[must_use]
+    pub fn has_upstream(&self) -> bool {
+        self.upstream.is_some()
     }
 }
 

@@ -126,7 +126,20 @@ impl LeanRing {
     }
 
     pub fn read_batch_gated(&self, cursor: &mut LeanGatedCursor, out: &mut [u8]) -> Result<usize> {
-        let read = self.read_batch(&mut cursor.cursor, out);
+        let allowed = if cursor.upstream.is_some() {
+            let limit = self.upstream_limit(cursor);
+            let room = limit.saturating_sub(cursor.cursor.next);
+            let bytes = usize::try_from(room)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(self.msg_size);
+            out.len().min(bytes)
+        } else {
+            out.len()
+        };
+        if allowed < self.msg_size && cursor.upstream.is_some() {
+            return Ok(0);
+        }
+        let read = self.read_batch(&mut cursor.cursor, &mut out[..allowed]);
         if matches!(read, Ok(n) if n > 0) {
             self.sync_gate(cursor);
         }

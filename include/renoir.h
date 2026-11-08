@@ -875,6 +875,10 @@ uintptr_t renoir_lean_pending(RenoirLeanHandle h);
 
 uintptr_t renoir_lean_live_publishers(RenoirLeanHandle h);
 
+int32_t renoir_lean_consumer_id(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_set_upstream(RenoirLeanHandle h, uint32_t upstream);
+
 void renoir_lean_close(RenoirLeanHandle h);
 
 /**
