@@ -34,6 +34,15 @@ fn publish_cost(c: &mut Criterion) {
     group.bench_function("publish_multi_producer_uncontended", |b| {
         b.iter(|| mp_publisher.publish(black_box(&data)).unwrap())
     });
+    let mut cursor = ring.cursor_latest();
+    let mut sink = [0u8; 32];
+    group.bench_function("publish_then_try_read", |b| {
+        b.iter(|| {
+            publisher.publish(black_box(&data)).unwrap();
+            ring.try_read(&mut cursor, &mut sink).unwrap();
+            black_box(&sink);
+        })
+    });
     let batch = [7u8; 32 * 8];
     group.bench_function("eight_singles", |b| {
         b.iter(|| {

@@ -68,6 +68,7 @@ pub struct LeanRing {
     msg_size: usize,
     multi: bool,
     gated: bool,
+    plain: bool,
     gate_timeout_ns: AtomicU64,
 }
 
@@ -180,6 +181,7 @@ impl LeanRing {
             msg_size,
             multi: mode.is_multi_producer(),
             gated: mode.is_gated(),
+            plain: !mode.is_multi_producer() && !mode.is_gated(),
             gate_timeout_ns: AtomicU64::new(gate::DEFAULT_GATE_TIMEOUT.as_nanos() as u64),
         })
     }
@@ -225,6 +227,27 @@ impl LeanRing {
 
     #[inline]
     pub fn try_read(&self, cursor: &mut LeanCursor, out: &mut [u8]) -> Result<LeanRead> {
+        if out.len() >= self.msg_size {
+            let slot = self.slot_ptr(cursor.next);
+            let seq = unsafe { &*(slot as *const AtomicU64) };
+            let s1 = seq.load(Ordering::Acquire);
+            let want = 2 * cursor.next;
+            if s1 == want {
+                unsafe { atomic_load_bytes(slot.add(SEQ_BYTES), out.as_mut_ptr(), self.msg_size) };
+                fence(Ordering::Acquire);
+                if seq.load(Ordering::Relaxed) == s1 {
+                    cursor.next += 1;
+                    return Ok(LeanRead::Message);
+                }
+            } else if s1 < want && !self.multi {
+                return Ok(LeanRead::Empty);
+            }
+        }
+        self.try_read_general(cursor, out)
+    }
+
+    #[inline(never)]
+    fn try_read_general(&self, cursor: &mut LeanCursor, out: &mut [u8]) -> Result<LeanRead> {
         if out.len() < self.msg_size {
             return Err(RenoirError::invalid_parameter(
                 "buffer",
@@ -310,6 +333,15 @@ impl LeanPublisher {
 
     #[inline]
     pub fn publish(&mut self, data: &[u8]) -> Result<()> {
+        if self.ring.plain && data.len() == self.ring.msg_size {
+            self.write_plain(data);
+            return Ok(());
+        }
+        self.publish_general(data)
+    }
+
+    #[inline(never)]
+    fn publish_general(&mut self, data: &[u8]) -> Result<()> {
         if data.len() != self.ring.msg_size {
             return Err(RenoirError::invalid_parameter(
                 "payload",
@@ -319,10 +351,16 @@ impl LeanPublisher {
         if self.ring.multi {
             return self.publish_multi(data);
         }
-        let idx = self.next;
         if self.ring.gated {
-            self.gate_admits(idx)?;
+            self.gate_admits(self.next)?;
         }
+        self.write_plain(data);
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn write_plain(&mut self, data: &[u8]) {
+        let idx = self.next;
         let slot = self.ring.slot_ptr(idx);
         unsafe {
             let seq = &*(slot as *const AtomicU64);
@@ -333,6 +371,5 @@ impl LeanPublisher {
         }
         self.ring.write_idx().store(idx, Ordering::Release);
         self.next = idx + 1;
-        Ok(())
     }
 }
