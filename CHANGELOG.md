@@ -9,6 +9,8 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ### Added
 - Lean ring: single-writer broadcast ring with one cache line per message of up to 56 bytes (up to 504 bytes across 8 lines), exposed in C as `renoir_lean_*`. Measured about 65-76 ns one-way between pinned cores on x86, against about 250 ns for the broadcast topic ring. Handles are direct pointers with no global registry lock.
+- `renoir::LeanChannel` C++ wrapper (`include/renoir_lean.hpp`), Python `renoir.LeanChannel`, and a safe Rust `LeanChannel` type.
+- Verification: loom model tests, zero-allocation test, cross-process ordering and first-open race tests, `lean_corrupt_ring` fuzz target, exported-symbol baseline guard (`tests/abi/check.sh`) and `.github/workflows/verify.yml` (Miri, TSan, ASan, loom, fuzz smoke, C ABI, supply chain, aarch64, latency, Python).
 - `TopicPattern::SPMC` is now a true broadcast topic: one publisher,
   any number of subscribers, each receiving every message. Slow
   subscribers are overrun (oldest messages skipped, counted via
