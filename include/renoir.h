@@ -87,6 +87,8 @@
 
 #define LEAN_MAX_CONSUMERS 8
 
+#define LEAN_MAX_PRODUCERS 16
+
 /**
  * Magic number identifying an MPMC ring control block in shared memory
  */
