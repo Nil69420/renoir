@@ -24,3 +24,15 @@ Request-response round trip (spinning server): 243 ns for 8 bytes, 331 ns for 64
 ## Method notes
 
 Payload buffers and per-thread state are cache-line isolated and the ring memory is page aligned, because a benchmark that lets two threads share a cache line through the allocator can move a result by 10 to 20 ns. Before every run we check that nothing else is spinning on the pinned cores; one stray process once polluted a whole session of our own measurements.
+
+## Running on the Jetson Orin Nano
+
+The Orin's generic timer ticks at about 31 MHz, roughly 32 ns per tick, so a single 140 ns round trip cannot be timed directly. On non-x86 targets the ping-pong bench therefore times bursts: it measures 512 consecutive round trips with one pair of timestamps and reports the per-round-trip mean, so the quantisation error shrinks by a factor of 512. Percentiles in that mode are percentiles of burst means, not of individual round trips. Override the burst size with `BENCH_BURST=<n>` (use 1 on x86).
+
+```
+sudo nvpmodel -m 0 && sudo jetson_clocks
+BENCH_BURST=512 cargo bench --bench latency_pingpong -- 2 4
+BENCH_BURST=512 cargo bench --bench vs_iceoryx2 -- 2 4
+```
+
+Pick two different physical cores that your real-time threads do not use, and record the CPU model, kernel, `nvpmodel` mode and governor next to the numbers. Latency below the burst resolution cannot be claimed from this mode, and a hardware cycle counter (PMU) based timer has not been implemented.
