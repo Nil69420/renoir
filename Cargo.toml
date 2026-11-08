@@ -129,3 +129,7 @@ harness = false
 [[bench]]
 name = "rpc_latency"
 harness = false
+
+[[bench]]
+name = "fanout"
+harness = false
