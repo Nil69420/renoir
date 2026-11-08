@@ -107,7 +107,7 @@ extended-description = """High-performance shared memory manager for inter-proce
 Provides a stable C ABI (librenoir.so) and a CLI for shared-memory region and
 topic management."""
 assets = [
-    ["target/release/librenoir.so", "usr/lib/", "644"],
+    ["target/release/librenoir.so", "usr/lib/librenoir.so.0", "644"],
     ["include/renoir.h", "usr/include/", "644"],
     ["target/release/renoir-cli", "usr/bin/", "755"],
 ]

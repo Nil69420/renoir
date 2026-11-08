@@ -89,6 +89,10 @@ jobs:
       run: cppcheck --enable=all --inconclusive --error-exitcode=1 --suppress=missingIncludeSystem -Iinclude tests/c/lean_abi_test.c
     - name: Exported symbol baseline
       run: tests/abi/check.sh
+    - name: ABI compatibility (libabigail)
+      run: |
+        sudo apt-get update && sudo apt-get install -y abigail-tools
+        tests/abi/abidiff.sh
     - name: C++ wrapper tests
       run: |
         cmake -S . -B build -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF

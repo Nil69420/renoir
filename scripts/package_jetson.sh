@@ -13,14 +13,15 @@ NAME=renoir-jetson-$VERSION-aarch64
 OUT=dist/$NAME
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include" "$OUT/bin"
-cp target/$TARGET/release/librenoir.so "$OUT/lib/"
+cp target/$TARGET/release/librenoir.so "$OUT/lib/librenoir.so.0"
+ln -s librenoir.so.0 "$OUT/lib/librenoir.so"
 cp include/renoir.h include/renoir.hpp include/renoir_lean.hpp "$OUT/include/"
 cp target/$TARGET/release/renoir-cli "$OUT/bin/"
 cp scripts/jetson_soak.sh tools/soak/renoir_soak.c "$OUT/"
 cat > "$OUT/README.txt" <<'EOT'
 Renoir for Jetson (aarch64). Built against glibc 2.35 (Ubuntu 22.04 / JetPack 6).
 
-  lib/librenoir.so      shared library (C ABI)
+  lib/librenoir.so.0    shared library (C ABI, SONAME librenoir.so.0)
   include/renoir.h      C header     include/renoir.hpp  C++ wrapper
   bin/renoir-cli        introspection: ./bin/renoir-cli topics [--watch]
   jetson_soak.sh        soak test (needs gcc on the device)

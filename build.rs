@@ -55,6 +55,18 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rustc-env=RENOIR_BUILD_INFO=Built with large payloads support");
+
+    #[cfg(target_os = "linux")]
+    {
+        println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,librenoir.so.0");
+        if let Ok(out) = env::var("OUT_DIR") {
+            if let Some(profile_dir) = Path::new(&out).ancestors().nth(3) {
+                let link = profile_dir.join("librenoir.so.0");
+                let _ = std::fs::remove_file(&link);
+                let _ = std::os::unix::fs::symlink("librenoir.so", &link);
+            }
+        }
+    }
 }
 
 /// Generate ROS2-specific integration headers and examples
