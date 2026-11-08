@@ -376,7 +376,7 @@ fn test_wake_latency_is_far_below_polling_interval() {
     };
 
     let mut latencies = Vec::new();
-    while latencies.len() < iterations {
+    while (latencies.len() as u64) + cursor.overruns() < iterations as u64 {
         if ring.wait_readable(&cursor, Some(Duration::from_secs(5))) {
             let now = epoch.elapsed().as_nanos() as u64;
             let t = published_at.load(Ordering::Acquire);
@@ -389,6 +389,10 @@ fn test_wake_latency_is_far_below_polling_interval() {
         }
     }
     publisher.join().unwrap();
+    assert!(
+        latencies.len() >= iterations / 2,
+        "consumer lapped too often"
+    );
     latencies.sort_unstable();
     let p50 = latencies[latencies.len() / 2];
     let p99 = latencies[latencies.len() * 99 / 100];

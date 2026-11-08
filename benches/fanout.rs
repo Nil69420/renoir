@@ -1,6 +1,6 @@
 mod support;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -101,10 +101,9 @@ fn iox_fanout(publisher_cpu: usize, consumer_cpus: &[usize], msg: usize, tpn: f6
         .unwrap();
     let ack = acks(consumer_cpus.len());
     let ready = Arc::new(Barrier::new(consumer_cpus.len() + 1));
-    let stop = Arc::new(AtomicBool::new(false));
     let mut handles = Vec::new();
     for (i, cpu) in consumer_cpus.iter().copied().enumerate() {
-        let (ack, ready, name) = (ack.clone(), ready.clone(), name.clone());
+        let (ack, ready, name) = (ack.clone(), ready.clone(), name);
         handles.push(thread::spawn(move || {
             pin(cpu);
             let node = NodeBuilder::new().create::<ipc::Service>().unwrap();
@@ -142,7 +141,6 @@ fn iox_fanout(publisher_cpu: usize, consumer_cpus: &[usize], msg: usize, tpn: f6
             out.push(t1 - t0);
         }
     }
-    stop.store(true, Ordering::Relaxed);
     for h in handles {
         h.join().unwrap();
     }
