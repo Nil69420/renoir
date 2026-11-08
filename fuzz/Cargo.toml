@@ -33,3 +33,10 @@ path = "fuzz_targets/broadcast_corrupt_ring.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "lean_corrupt_ring"
+path = "fuzz_targets/lean_corrupt_ring.rs"
+test = false
+doc = false
+bench = false
