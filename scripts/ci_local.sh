@@ -16,5 +16,7 @@ for san in thread address; do
   step "sanitizer $san"
   RUSTFLAGS="-Zsanitizer=$san" cargo +nightly test -Zbuild-std --target x86_64-unknown-linux-gnu $SAN_SUITES
 done
+if command -v java >/dev/null 2>&1; then step formal; ./formal/run.sh >/dev/null && echo formal ok; fi
+if command -v cargo-kani >/dev/null 2>&1; then step kani; cargo kani --lib -Z unstable-options 2>&1 | grep -E "Complete|FAILED"; fi
 step audit; cargo deny check >/dev/null && echo deny ok
 echo "ci_local: all green"
