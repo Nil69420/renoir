@@ -42,7 +42,14 @@ fn encode(n: u64) -> [u8; MSG] {
     b
 }
 
+fn die_with_parent() {
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+    }
+}
+
 fn slow_consumer_child() {
+    die_with_parent();
     let name = std::env::var(NAME).unwrap();
     let h = open(&name, RENOIR_LEAN_CONSUMER);
     let mut buf = [0u8; MSG];

@@ -46,6 +46,14 @@ pub fn samples_for(payload: usize) -> (usize, usize) {
     }
 }
 
+pub fn burst_size() -> usize {
+    std::env::var("BENCH_BURST")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|b| *b >= 1)
+        .unwrap_or(if cfg!(target_arch = "x86_64") { 1 } else { 512 })
+}
+
 pub fn pin(cpu: usize) {
     unsafe {
         let mut set: libc::cpu_set_t = std::mem::zeroed();

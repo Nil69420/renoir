@@ -277,7 +277,9 @@ struct Side {
 pub fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     let (ab, _m1) = make_lean(msg);
     let (ba, _m2) = make_lean(msg);
-    let total = WARMUP + SAMPLES;
+    let burst = burst_size();
+    let (warm_samples, samples) = (WARMUP / burst, (SAMPLES / burst).max(200));
+    let total = (warm_samples + samples) * burst;
     let (ab2, ba2) = (ab.clone(), ba.clone());
     let mut main_side = Box::new(Side {
         cursor: ba.cursor_latest(),
@@ -303,23 +305,30 @@ pub fn real_lean_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     pin(a);
     let mut buf = aligned_buf(msg, 0);
     let payload = aligned_buf(msg, 7);
-    let mut out = Vec::with_capacity(SAMPLES);
-    for i in 0..total {
+    let mut out = Vec::with_capacity(samples);
+    for i in 0..warm_samples + samples {
         let t0 = ticks();
-        main_side.publisher.publish(&payload).unwrap();
-        loop {
-            if let Ok(LeanRead::Message) = ba.try_read(&mut main_side.cursor, &mut buf) {
-                break;
+        for _ in 0..burst {
+            main_side.publisher.publish(&payload).unwrap();
+            loop {
+                if let Ok(LeanRead::Message) = ba.try_read(&mut main_side.cursor, &mut buf) {
+                    break;
+                }
+                std::hint::spin_loop();
             }
-            std::hint::spin_loop();
         }
         let t1 = ticks();
-        if i >= WARMUP {
-            out.push(t1 - t0);
+        if i >= warm_samples {
+            out.push((t1 - t0) / burst as u64);
         }
     }
     echo.join().unwrap();
-    report(&format!("LeanRing product ({msg} B message)"), out, tpn);
+    let label = if burst > 1 {
+        format!("LeanRing product ({msg} B message, burst {burst})")
+    } else {
+        format!("LeanRing product ({msg} B message)")
+    };
+    report(&label, out, tpn);
 }
 
 pub fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
@@ -334,7 +343,9 @@ pub fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
         h as usize
     };
     let (ab_p, ab_s, ba_p, ba_s) = (open("ab", 0), open("ab", 0), open("ba", 0), open("ba", 0));
-    let total = WARMUP + SAMPLES;
+    let burst = burst_size();
+    let (warm_samples, samples) = (WARMUP / burst, (SAMPLES / burst).max(200));
+    let total = (warm_samples + samples) * burst;
     let echo = thread::spawn(move || {
         pin(b);
         let mut buf = aligned_buf(msg, 0);
@@ -348,16 +359,18 @@ pub fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
     pin(a);
     let mut buf = aligned_buf(msg, 0);
     let payload = aligned_buf(msg, 7);
-    let mut out = Vec::with_capacity(SAMPLES);
-    for i in 0..total {
+    let mut out = Vec::with_capacity(samples);
+    for i in 0..warm_samples + samples {
         let t0 = ticks();
-        renoir_lean_publish(ab_p as _, payload.as_ptr(), msg);
-        while renoir_lean_try_read(ba_s as _, buf.as_mut_ptr(), msg) as i32 != 0 {
-            std::hint::spin_loop();
+        for _ in 0..burst {
+            renoir_lean_publish(ab_p as _, payload.as_ptr(), msg);
+            while renoir_lean_try_read(ba_s as _, buf.as_mut_ptr(), msg) as i32 != 0 {
+                std::hint::spin_loop();
+            }
         }
         let t1 = ticks();
-        if i >= WARMUP {
-            out.push(t1 - t0);
+        if i >= warm_samples {
+            out.push((t1 - t0) / burst as u64);
         }
     }
     echo.join().unwrap();
@@ -365,5 +378,10 @@ pub fn ffi_pingpong(a: usize, b: usize, msg: usize, tpn: f64) {
         renoir_lean_close(h as _);
     }
     let _ = std::fs::remove_dir_all(&dir);
-    report(&format!("C ABI lean ({msg} B message)"), out, tpn);
+    let label = if burst > 1 {
+        format!("C ABI lean ({msg} B message, burst {burst})")
+    } else {
+        format!("C ABI lean ({msg} B message)")
+    };
+    report(&label, out, tpn);
 }

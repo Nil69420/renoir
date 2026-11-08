@@ -67,7 +67,14 @@ fn spawn(name: &str, id: u64, generation: u64, limit: u64) -> std::process::Chil
         .unwrap()
 }
 
+fn die_with_parent() {
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+    }
+}
+
 fn publisher_child() {
+    die_with_parent();
     let name = std::env::var(NAME).unwrap();
     let id: u64 = std::env::var(ID).unwrap().parse().unwrap();
     let generation: u64 = std::env::var(GEN).unwrap().parse().unwrap();

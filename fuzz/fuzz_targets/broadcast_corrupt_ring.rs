@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use renoir::topic::TopicStats;
-use renoir::topic_rings::{BroadcastTopicRing, ReadInto};
+use renoir::topic_rings::{BroadcastTopicRing, ReadInto, ViewRead};
 use std::sync::Arc;
 
 const SLOTS: usize = 8;
@@ -48,6 +48,16 @@ fuzz_target!(|data: &[u8]| {
             Ok(_) => {}
         }
         let _ = ring.try_consume(&mut cursor);
+    }
+    let mut view_cursor = ring.cursor_oldest();
+    for _ in 0..4 {
+        match ring.view(&mut view_cursor) {
+            Ok(ViewRead::View(v)) => {
+                let _ = ring.view_is_intact(&v);
+                let _ = ring.release_view(&mut view_cursor, &v);
+            }
+            Ok(ViewRead::Empty) | Err(_) => break,
+        }
     }
     let _ = ring.skip_to_latest(&mut cursor, 3);
 });

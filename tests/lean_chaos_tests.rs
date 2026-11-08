@@ -38,7 +38,14 @@ fn encode(value: u64) -> [u8; MSG] {
     b
 }
 
+fn die_with_parent() {
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+    }
+}
+
 fn publisher_child(name: &str, generation: u64, limit: u64) {
+    die_with_parent();
     let h = open(name, 0);
     let mut n = 0u64;
     while n < limit {
