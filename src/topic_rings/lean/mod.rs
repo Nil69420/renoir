@@ -15,6 +15,7 @@ mod batch;
 mod channel;
 mod gate;
 mod init;
+mod inspect;
 mod liveness;
 #[cfg(test)]
 mod liveness_tests;
@@ -25,6 +26,7 @@ mod wait;
 
 pub use channel::LeanChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
+pub use inspect::{inspect as inspect_lean_header, LeanInfo};
 pub use liveness::LEAN_MAX_PRODUCERS;
 pub use qos::{DeadlineWait, LeanQos, LeanReliability};
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};

@@ -12,9 +12,9 @@ use crate::error::{RenoirError, Result};
 pub const LEAN_MAX_CONSUMERS: usize = 8;
 pub(super) const GATE_TABLE_BYTES: usize = LEAN_MAX_CONSUMERS * 64;
 const FREE: u64 = 0;
-const ACTIVE: u64 = 1;
+pub(super) const ACTIVE: u64 = 1;
 const EVICTED: u64 = 2;
-const STATE_MASK: u64 = 3;
+pub(super) const STATE_MASK: u64 = 3;
 pub(super) const DEFAULT_GATE_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[repr(C)]

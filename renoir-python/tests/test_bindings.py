@@ -276,3 +276,22 @@ def test_lean_wait_adaptive(tmp_path, monkeypatch):
     assert sub.wait_adaptive(10) is False
     pub.publish_notify(b"a" * 16)
     assert sub.wait_adaptive(1000) is True
+
+
+def test_discover_lists_rings_and_sweep_keeps_open_ones(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    name = "py_discover_%d" % time.monotonic_ns()
+    ch = renoir.LeanChannel(name, 24, 32)
+    ch.publish(b"x" * 24)
+    rings = {r["name"]: r for r in renoir.discover()}
+    assert name in rings
+    ring = rings[name]
+    assert ring["kind"] == "lean"
+    assert ring["msg_size"] == 24
+    assert ring["slot_count"] == 32
+    assert ring["published"] == 1
+    assert ring["live_publishers"] >= 1
+    assert len(ring["mapped_by"]) >= 1
+    renoir.sweep(dry_run=True, ignore_unreadable=True)
+    assert name in {r["name"] for r in renoir.discover()}
+    assert ch.live_publishers() >= 1

@@ -167,6 +167,22 @@
  */
 #define MAX_CHUNKS_PER_MESSAGE 1024
 
+#define RENOIR_RING_NAME_BYTES 64
+
+#define RENOIR_SWEEP_DRY_RUN 1
+
+#define RENOIR_SWEEP_IGNORE_UNREADABLE 2
+
+#define RENOIR_RING_KIND_LEAN 0
+
+#define RENOIR_RING_KIND_BROADCAST 1
+
+#define RENOIR_RING_KIND_SPSC 2
+
+#define RENOIR_RING_KIND_MPMC 3
+
+#define RENOIR_RING_MODE_NONE UINT32_MAX
+
 #define RENOIR_LEAN_FROM_OLDEST 1
 
 #define RENOIR_LEAN_MULTI_PRODUCER 2
@@ -326,6 +342,20 @@ typedef struct RenoirRegionRegistryEntry {
   uint32_t ref_count;
   uint32_t creator_pid;
 } RenoirRegionRegistryEntry;
+
+typedef struct RenoirRingInfo {
+  char name[RENOIR_RING_NAME_BYTES];
+  uint32_t kind;
+  uint32_t mode;
+  uint32_t msg_size;
+  uint32_t slot_count;
+  uint64_t published;
+  uint64_t file_bytes;
+  uint32_t live_publishers;
+  uint32_t registered_consumers;
+  uint32_t mapped_by_count;
+  uint32_t reserved;
+} RenoirRingInfo;
 
 typedef void *RenoirLeanHandle;
 
@@ -788,6 +818,12 @@ enum RenoirErrorCode renoir_control_region_cleanup_stale(RenoirControlRegionHand
  * Destroy a control region
  */
 enum RenoirErrorCode renoir_control_region_destroy(RenoirControlRegionHandle control_handle);
+
+enum RenoirErrorCode renoir_discover(struct RenoirRingInfo *out,
+                                     uintptr_t capacity,
+                                     uintptr_t *total);
+
+enum RenoirErrorCode renoir_discover_sweep(uint32_t flags, uintptr_t *removed);
 
 enum RenoirErrorCode renoir_lean_open(const char *name,
                                       uint32_t msg_size,

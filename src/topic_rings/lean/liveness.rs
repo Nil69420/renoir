@@ -7,17 +7,17 @@ use super::{LeanPublisher, LeanRing, LEAN_FIXED_HEADER_BYTES};
 pub const LEAN_MAX_PRODUCERS: usize = 16;
 pub(super) const PRODUCER_TABLE_BYTES: usize = LEAN_MAX_PRODUCERS * 64;
 pub(super) const HARD_STALL: Duration = Duration::from_secs(10);
-const FREE: u64 = 0;
-const ACTIVE: u64 = 1;
+pub(super) const FREE: u64 = 0;
+pub(super) const ACTIVE: u64 = 1;
 const INIT: u64 = 2;
-const STATE_MASK: u64 = 3;
+pub(super) const STATE_MASK: u64 = 3;
 
 #[repr(C)]
 pub(super) struct ProducerEntry {
-    owner: AtomicU64,
+    pub(super) owner: AtomicU64,
     pub(super) pid: AtomicU32,
     pad_pid: u32,
-    start: AtomicU64,
+    pub(super) start: AtomicU64,
     lo: AtomicU64,
     hi: AtomicU64,
     pad: [u8; 24],
@@ -86,7 +86,10 @@ pub(super) fn process_start_time(pid: u32) -> u64 {
         .unwrap_or(0)
 }
 
-fn process_alive(pid: u32, start: u64) -> bool {
+pub(crate) fn process_alive(pid: u32, start: u64) -> bool {
+    if cfg!(miri) {
+        return pid == std::process::id();
+    }
     let Ok(raw) = i32::try_from(pid) else {
         return false;
     };

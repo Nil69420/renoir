@@ -41,6 +41,7 @@
 // Core modules
 pub mod allocators;
 pub mod buffers;
+pub mod discovery;
 pub mod error;
 pub mod memory;
 pub mod metadata_modules;

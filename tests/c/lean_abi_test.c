@@ -152,6 +152,41 @@ int main(void) {
     CHECK(renoir_lean_memory_required(48, 64, NULL) == RenoirErrorCode_InvalidParameter);
   }
 
+  {
+    size_t total = 0;
+    RenoirRingInfo infos[16];
+    int found = 0;
+    CHECK(renoir_discover(NULL, 0, &total) == RenoirErrorCode_Success);
+    CHECK(total >= 1);
+    CHECK(renoir_discover(NULL, 1, &total) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_discover(infos, 16, NULL) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_discover(infos, 16, &total) == RenoirErrorCode_Success);
+    for (size_t i = 0; i < total && i < 16; ++i) {
+      if (strcmp(infos[i].name, name) == 0) {
+        found = 1;
+        CHECK(infos[i].kind == RENOIR_RING_KIND_LEAN);
+        CHECK(infos[i].msg_size == 24);
+        CHECK(infos[i].slot_count == 64);
+        CHECK(infos[i].live_publishers >= 1);
+        CHECK(infos[i].mapped_by_count >= 1);
+      }
+    }
+    CHECK(found == 1);
+    size_t removed = 99;
+    char mine[160];
+    (void)snprintf(mine, sizeof mine, "%s/renoir_%s", dir, name);
+    CHECK(renoir_discover_sweep(RENOIR_SWEEP_DRY_RUN | RENOIR_SWEEP_IGNORE_UNREADABLE, &removed) ==
+          RenoirErrorCode_Success);
+    CHECK(access(mine, F_OK) == 0);
+    size_t dry_removed = removed;
+    CHECK(renoir_discover_sweep(RENOIR_SWEEP_IGNORE_UNREADABLE, &removed) ==
+          RenoirErrorCode_Success);
+    CHECK(removed == dry_removed);
+    CHECK(access(mine, F_OK) == 0);
+    CHECK(renoir_discover(infos, 16, &total) == RenoirErrorCode_Success);
+    CHECK(total == 1);
+  }
+
   renoir_lean_close(sub);
   renoir_lean_close(pub);
   renoir_lean_close(NULL);

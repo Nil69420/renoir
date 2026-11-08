@@ -7,6 +7,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 pub mod buffers;
+pub mod discover;
 pub mod lean;
 pub mod memory;
 pub mod rpc;

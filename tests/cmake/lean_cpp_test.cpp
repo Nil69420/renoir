@@ -1,3 +1,4 @@
+#include "renoir_discovery.hpp"
 #include "renoir_lean.hpp"
 #include "renoir_rpc.hpp"
 
@@ -121,6 +122,19 @@ int main() {
         threw = true;
     }
     CHECK(threw);
+
+    bool listed = false;
+    for (const renoir::RingInfo& ring : renoir::discover()) {
+        if (ring.name == name) {
+            listed = true;
+            CHECK(ring.kind == renoir::RingKind::Lean);
+            CHECK(ring.hasMode);
+            CHECK(ring.msgSize == sizeof(Imu));
+            CHECK(ring.slotCount == 128);
+            CHECK(ring.livePublishers >= 1);
+        }
+    }
+    CHECK(listed);
 
     const std::string path = std::string(dir) + "/renoir_" + name;
     unlink(path.c_str());

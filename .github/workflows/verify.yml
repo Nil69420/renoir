@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: '0 3 * * *'
 
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 

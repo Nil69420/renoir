@@ -16,3 +16,4 @@
 - [Sizing and memory](sizing.md)
 - [Troubleshooting](troubleshooting.md)
 - [Performance](performance.md)
+- [Discovery and monitoring](discovery.md)

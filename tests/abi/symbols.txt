@@ -20,6 +20,8 @@ renoir_control_region_destroy
 renoir_control_region_list_regions
 renoir_control_region_register_buffer_pool
 renoir_control_region_stats
+renoir_discover
+renoir_discover_sweep
 renoir_free_region_entries
 renoir_free_region_names
 renoir_free_string
