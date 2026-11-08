@@ -4,7 +4,7 @@ use std::{
     os::fd::RawFd,
     ptr::NonNull,
     sync::{
-        atomic::{AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering},
         Arc,
     },
 };
@@ -13,6 +13,7 @@ use crate::{
     error::{RenoirError, Result},
     sync::MioEventNotification,
     topic::{Message, MessageDescriptor, MessageHeader, TopicStats},
+    topic_rings::init_guard::{claim, seal, Claim},
 };
 
 /// Magic number identifying an SPSC ring control block in shared memory
@@ -64,7 +65,7 @@ impl RingControlInfo {
 #[repr(C)]
 #[derive(Debug)]
 struct SPSCRingHeader {
-    magic: u64,
+    magic: AtomicU64,
     capacity: usize,
     session: AtomicU8,
     write_pos: AtomicUsize,
@@ -123,7 +124,7 @@ impl SPSCTopicRing {
             base.cast::<SPSCRingHeader>()
                 .as_ptr()
                 .write(SPSCRingHeader {
-                    magic: SPSC_RING_MAGIC,
+                    magic: AtomicU64::new(SPSC_RING_MAGIC),
                     capacity,
                     session: AtomicU8::new(SESSION_DIRTY),
                     write_pos: AtomicUsize::new(0),
@@ -184,28 +185,26 @@ impl SPSCTopicRing {
         }
 
         let header_ptr = memory.cast::<SPSCRingHeader>();
-        let existing_magic = unsafe { (*header_ptr.as_ptr()).magic };
-        let existing_capacity = unsafe { (*header_ptr.as_ptr()).capacity };
-
-        if existing_magic == SPSC_RING_MAGIC {
-            if existing_capacity != capacity {
-                return Err(RenoirError::invalid_parameter(
-                    "capacity",
-                    "Existing ring has a different capacity",
-                ));
+        let header = header_ptr.as_ptr();
+        let magic = unsafe { &*(header as *const AtomicU64) };
+        match claim(magic, SPSC_RING_MAGIC)? {
+            Claim::Attach => {
+                if unsafe { (*header).capacity } != capacity {
+                    return Err(RenoirError::invalid_parameter(
+                        "capacity",
+                        "Existing ring has a different capacity",
+                    ));
+                }
             }
-        } else {
-            unsafe {
-                header_ptr.as_ptr().write(SPSCRingHeader {
-                    magic: SPSC_RING_MAGIC,
-                    capacity,
-                    session: AtomicU8::new(SESSION_DIRTY),
-                    write_pos: AtomicUsize::new(0),
-                    read_pos: AtomicUsize::new(0),
-                    cached_read_pos: AtomicUsize::new(0),
-                    cached_write_pos: AtomicUsize::new(0),
-                });
-            }
+            Claim::Create => unsafe {
+                std::ptr::addr_of_mut!((*header).capacity).write(capacity);
+                (*header).session.store(SESSION_DIRTY, Ordering::Relaxed);
+                (*header).write_pos.store(0, Ordering::Relaxed);
+                (*header).read_pos.store(0, Ordering::Relaxed);
+                (*header).cached_read_pos.store(0, Ordering::Relaxed);
+                (*header).cached_write_pos.store(0, Ordering::Relaxed);
+                seal(magic, SPSC_RING_MAGIC);
+            },
         }
 
         let notifier = MioEventNotification::new()
