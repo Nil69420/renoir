@@ -32,8 +32,14 @@ pub(crate) fn check_slots(slots: usize) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn request_ring_name(service: &str) -> String {
-    format!("{service}_req")
+pub const RPC_MAX_SERVERS: usize = 4;
+
+pub(crate) fn request_ring_name(service: &str, shard: usize) -> String {
+    if shard == 0 {
+        format!("{service}_req")
+    } else {
+        format!("{service}_req{shard}")
+    }
 }
 
 pub(crate) fn response_ring_name(service: &str, client_id: u32) -> String {

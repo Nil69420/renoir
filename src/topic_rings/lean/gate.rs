@@ -14,6 +14,7 @@ pub(super) const GATE_TABLE_BYTES: usize = LEAN_MAX_CONSUMERS * 64;
 const FREE: u64 = 0;
 pub(super) const ACTIVE: u64 = 1;
 const EVICTED: u64 = 2;
+const INIT: u64 = 3;
 pub(super) const STATE_MASK: u64 = 3;
 pub(super) const DEFAULT_GATE_TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -53,6 +54,25 @@ impl LeanRing {
         let entry = self.gate_entry(entry_index);
         let pid = entry.pid.load(Ordering::Acquire);
         pid != 0 && !super::liveness::process_alive(pid, entry.start.load(Ordering::Acquire))
+    }
+
+    #[must_use]
+    pub fn live_consumers(&self) -> usize {
+        (0..LEAN_MAX_CONSUMERS)
+            .filter(|&i| self.gate_entry_alive(i))
+            .count()
+    }
+
+    #[must_use]
+    pub fn live_consumers_before(&self, entry_index: usize) -> usize {
+        (0..entry_index.min(LEAN_MAX_CONSUMERS))
+            .filter(|&i| self.gate_entry_alive(i))
+            .count()
+    }
+
+    fn gate_entry_alive(&self, entry_index: usize) -> bool {
+        self.gate_entry(entry_index).owner.load(Ordering::Acquire) & STATE_MASK == ACTIVE
+            && !self.gate_holder_dead(entry_index)
     }
 
     pub fn set_gate_timeout(&self, timeout: Duration) {
@@ -210,30 +230,37 @@ impl LeanRing {
     }
 
     fn claim_gate_entry(&self, start: u64) -> Result<GateHandle> {
-        for entry_index in 0..LEAN_MAX_CONSUMERS {
-            let entry = self.gate_entry(entry_index);
-            let seen = entry.owner.load(Ordering::Acquire);
-            if seen & STATE_MASK == ACTIVE {
-                continue;
-            }
-            let token = (seen >> 2) + 1;
-            entry.pos.store(start, Ordering::Relaxed);
-            entry.after.store(0, Ordering::Relaxed);
-            entry.pid.store(std::process::id(), Ordering::Relaxed);
-            entry.start.store(
-                super::liveness::process_start_time(std::process::id()),
-                Ordering::Relaxed,
-            );
-            if entry
-                .owner
-                .compare_exchange(
-                    seen,
-                    (token << 2) | ACTIVE,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
+        let pid = std::process::id();
+        let process_start = super::liveness::process_start_time(pid);
+        for pass in 0..2 {
+            for entry_index in 0..LEAN_MAX_CONSUMERS {
+                let entry = self.gate_entry(entry_index);
+                let seen = entry.owner.load(Ordering::Acquire);
+                let claimable = seen & STATE_MASK != ACTIVE && seen & STATE_MASK != INIT
+                    || (seen & STATE_MASK == ACTIVE
+                        && pass == 1
+                        && self.gate_holder_dead(entry_index));
+                if !claimable {
+                    continue;
+                }
+                let token = (seen >> 2) + 1;
+                if entry
+                    .owner
+                    .compare_exchange(
+                        seen,
+                        (token << 2) | INIT,
+                        Ordering::AcqRel,
+                        Ordering::Relaxed,
+                    )
+                    .is_err()
+                {
+                    continue;
+                }
+                entry.pos.store(start, Ordering::Relaxed);
+                entry.after.store(0, Ordering::Relaxed);
+                entry.pid.store(pid, Ordering::Relaxed);
+                entry.start.store(process_start, Ordering::Relaxed);
+                entry.owner.store((token << 2) | ACTIVE, Ordering::Release);
                 return Ok(GateHandle {
                     entry: entry_index,
                     token,

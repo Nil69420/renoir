@@ -7,7 +7,7 @@ use crate::{
 
 use super::{
     check_ring_fits, check_slots, decode, encode, message_size, request_ring_name,
-    response_ring_name, RESPONSE_SLOTS,
+    response_ring_name, RESPONSE_SLOTS, RPC_MAX_SERVERS,
 };
 
 const MAX_CACHED_CLIENTS: usize = 64;
@@ -21,6 +21,7 @@ pub struct RpcRequest {
 
 pub struct RpcServer {
     service: String,
+    shard: usize,
     max_payload: usize,
     requests: LeanChannel,
     responses: HashMap<u32, LeanChannel>,
@@ -32,21 +33,35 @@ impl RpcServer {
         let msg = message_size(max_payload)?;
         check_ring_fits(msg)?;
         check_slots(request_slots)?;
-        let mut requests = LeanChannel::open_with_mode(
-            &request_ring_name(service),
-            msg,
-            request_slots,
-            false,
-            LeanMode::MultiProducerGated,
-        )?;
-        requests.register_consumer(false)?;
-        Ok(Self {
-            service: service.to_owned(),
-            max_payload,
-            requests,
-            responses: HashMap::with_capacity(MAX_CACHED_CLIENTS),
-            scratch: vec![0u8; msg],
-        })
+        for shard in 0..RPC_MAX_SERVERS {
+            let mut requests = LeanChannel::open_with_mode(
+                &request_ring_name(service, shard),
+                msg,
+                request_slots,
+                false,
+                LeanMode::MultiProducerGated,
+            )?;
+            requests.register_consumer(false)?;
+            if requests.live_consumers_before_me() == 0 {
+                return Ok(Self {
+                    service: service.to_owned(),
+                    shard,
+                    max_payload,
+                    requests,
+                    responses: HashMap::with_capacity(MAX_CACHED_CLIENTS),
+                    scratch: vec![0u8; msg],
+                });
+            }
+            requests.unregister_consumer();
+        }
+        Err(RenoirError::concurrency(
+            "All RPC server shards for this service are taken",
+        ))
+    }
+
+    #[must_use]
+    pub fn shard(&self) -> usize {
+        self.shard
     }
 
     pub fn poll(&mut self, payload: &mut [u8]) -> Result<Option<RpcRequest>> {

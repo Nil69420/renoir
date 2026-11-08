@@ -135,3 +135,62 @@ fn process_start_time_is_read_and_distinguishes_processes() {
     assert_ne!(own, super::liveness::process_start_time(1));
     assert_eq!(super::liveness::process_start_time(u32::MAX), 0);
 }
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn registration_reclaims_entries_of_dead_consumers() {
+    let (ring, _mem) = make();
+    let mut cursors: Vec<_> = (0..super::LEAN_MAX_CONSUMERS)
+        .map(|_| ring.register_consumer(false).unwrap())
+        .collect();
+    assert!(ring.register_consumer(false).is_err());
+    assert_eq!(ring.live_consumers(), super::LEAN_MAX_CONSUMERS);
+    let dead = reaped_pid();
+    for id in 0..super::LEAN_MAX_CONSUMERS / 2 {
+        ring.gate_entry(id).pid.store(dead, Ordering::Release);
+    }
+    assert_eq!(ring.live_consumers(), super::LEAN_MAX_CONSUMERS / 2);
+    assert_eq!(
+        ring.live_consumers_before(super::LEAN_MAX_CONSUMERS),
+        super::LEAN_MAX_CONSUMERS / 2
+    );
+    let fresh = ring.register_consumer(false).unwrap();
+    assert!(fresh.consumer_id().unwrap() < super::LEAN_MAX_CONSUMERS / 2);
+    assert_eq!(ring.live_consumers(), super::LEAN_MAX_CONSUMERS / 2 + 1);
+    for c in &mut cursors {
+        ring.unregister_consumer(c);
+    }
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn concurrent_registration_never_shares_or_corrupts_an_entry() {
+    let (ring, _mem) = make();
+    for _ in 0..50 {
+        let ids = std::sync::Mutex::new(Vec::new());
+        let barrier = std::sync::Barrier::new(16);
+        std::thread::scope(|scope| {
+            for _ in 0..16 {
+                let ring = &ring;
+                let ids = &ids;
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    let mut cursor = ring.register_consumer(false).unwrap();
+                    let id = cursor.consumer_id().unwrap();
+                    let entry = ring.gate_entry(id);
+                    assert_eq!(entry.pid.load(Ordering::Acquire), std::process::id());
+                    ids.lock().unwrap().push(id);
+                    barrier.wait();
+                    assert_eq!(entry.pid.load(Ordering::Acquire), std::process::id());
+                    ring.unregister_consumer(&mut cursor);
+                });
+            }
+        });
+        let mut ids = ids.into_inner().unwrap();
+        ids.sort_unstable();
+        let total = ids.len();
+        ids.dedup();
+        assert_eq!(total, 16);
+        assert_eq!(ids.len(), 16, "two live consumers shared a gate entry");
+    }
+}

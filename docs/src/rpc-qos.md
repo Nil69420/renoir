@@ -8,7 +8,7 @@
 - Each client owns a response ring `<service>_rsp_<client id>`, written only by the server. Responses carry the request sequence number, and a client discards any response that is not for its current call.
 - Payload is limited to 488 bytes (the 504-byte lean maximum minus a 16-byte header). Client and server must open the service with the same payload size and request slot count.
 - `call` blocks with a spin-then-futex wait until the response arrives or the timeout expires (`RenoirErrorCode_BufferEmpty` in C). A client that calls while no server runs times out; its request stays in the ring and is answered if a server starts and reads it.
-- Exactly one server per service: two servers would each answer every request.
+- Up to 4 servers per service (`RPC_MAX_SERVERS`). Each server owns one request ring (a shard) exclusively, taking the lowest free shard when it opens, so two servers never answer the same request. Clients spread across the live shards by client id and fail over to another live shard when the server they use dies; a request resent after failover may be processed twice, so make handlers idempotent. A dead server's shard is freed for the next server to open.
 - Measured on x86 with pinned cores and a spinning server, round trip p50: 243 ns for 8 bytes, 331 ns for 64 bytes, 395 ns for 256 bytes (`cargo bench --bench rpc_latency`).
 
 ## QoS profiles

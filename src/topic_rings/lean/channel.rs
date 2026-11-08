@@ -195,6 +195,23 @@ impl LeanChannel {
         self.ring.set_upstream(gated, upstream)
     }
 
+    #[must_use]
+    pub fn live_consumers(&self) -> usize {
+        self.ring.live_consumers()
+    }
+
+    #[must_use]
+    pub fn live_consumers_before_me(&self) -> usize {
+        self.consumer_id()
+            .map_or(0, |id| self.ring.live_consumers_before(id))
+    }
+
+    pub fn unregister_consumer(&mut self) {
+        if let Some(mut gated) = self.gated.take() {
+            self.ring.unregister_consumer(&mut gated);
+        }
+    }
+
     pub fn live_publishers(&self) -> usize {
         self.ring.live_publishers()
     }
