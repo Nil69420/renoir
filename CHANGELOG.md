@@ -8,6 +8,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 ## [Unreleased]
 
 ### Fixed
+- A ring left half-initialised by a killed process no longer blocks later openers forever: after 2 seconds the next opener takes over the initialisation.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
 ### Changed
@@ -21,6 +22,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - Lean ring multi-producer mode (`RENOIR_LEAN_MULTI_PRODUCER`, C++ `multiProducer`, Python `multi_producer`, Rust `LeanMode`): claim-and-ticket publishing, hole skipping for dead producers, loom model and SIGKILL chaos test.
 - Lean ring gated lossless mode: registered consumers (up to 8) gate the publisher, which returns `BufferFull` instead of overwriting unread messages and evicts consumers that stop advancing for 100 ms. Rust `LeanMode::*Gated`, `LeanGatedCursor`; C `RENOIR_LEAN_GATED` and `RENOIR_LEAN_CONSUMER`; C++ `LeanFlags`; Python `gated` and `consumer`.
 - Lean ring batching: `publish_batch` and `read_batch` (`renoir_lean_publish_batch`, `renoir_lean_read_batch`, C++ `publishBatch`/`readBatch`, Python `publish_batch`/`read_batch`).
+- Adaptive spin-then-futex wait (`wait_adaptive`, `renoir_lean_wait_adaptive`, C++ `waitAdaptive`, Python `wait_adaptive`) and a sizing calculator (`renoir_lean_memory_required`, Python `lean_memory_required`).
 - Request-response (`renoir::rpc::{RpcServer, RpcClient}`, `renoir_rpc_*`, C++ `renoir_rpc.hpp`, Python `RpcServer`/`RpcClient`): one server, many clients, 243 ns round trip for 8-byte payloads on x86.
 - In-place frame views for broadcast (SPMC) topics: `BroadcastTopicRing::view`, `renoir_subscribe_view` and `renoir_subscribe_view_release`, C++ `Subscriber::view`/`releaseView`. Consumption cost is independent of payload size (about 160-180 ns at 921,600 bytes); the data is validated after use and reported as overwritten if the producer lapped the slot.
 - Documentation: benchmarks, sizing, troubleshooting; `RELEASING.md`, `scripts/repro_build.sh`, `scripts/sbom.sh`.

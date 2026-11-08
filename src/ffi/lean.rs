@@ -196,6 +196,22 @@ pub extern "C" fn renoir_lean_deadline_misses(h: RenoirLeanHandle) -> u64 {
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_lean_wait_adaptive(
+    h: RenoirLeanHandle,
+    timeout_ns: u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let timeout = (timeout_ns != u64::MAX).then(|| Duration::from_nanos(timeout_ns));
+    if h.wait_adaptive(timeout) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_lean_wait(
     h: RenoirLeanHandle,
     spin_iterations: u32,

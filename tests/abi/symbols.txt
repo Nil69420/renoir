@@ -42,6 +42,7 @@ renoir_lean_set_deadline
 renoir_lean_skip_to_latest
 renoir_lean_try_read
 renoir_lean_wait
+renoir_lean_wait_adaptive
 renoir_lean_wait_deadline
 renoir_manager_clear_all
 renoir_manager_create

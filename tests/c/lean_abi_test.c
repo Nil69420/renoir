@@ -61,6 +61,8 @@ int main(void) {
   CHECK(renoir_lean_publish_notify(pub, msg, sizeof msg) == RenoirErrorCode_Success);
   CHECK(renoir_lean_wait(sub, 0, 1000000) == RenoirErrorCode_Success);
   CHECK(renoir_lean_wait(NULL, 0, 0) == RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_wait_adaptive(sub, 1000000) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait_adaptive(NULL, 0) == RenoirErrorCode_InvalidParameter);
   CHECK(renoir_lean_publish_notify(pub, NULL, 24) == RenoirErrorCode_InvalidParameter);
 
   {

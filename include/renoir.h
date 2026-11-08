@@ -793,6 +793,10 @@ enum RenoirErrorCode renoir_lean_open(const char *name,
                                       uint32_t flags,
                                       RenoirLeanHandle *out);
 
+enum RenoirErrorCode renoir_lean_memory_required(uint32_t msg_size,
+                                                 uint32_t slot_count,
+                                                 uintptr_t *out_bytes);
+
 enum RenoirErrorCode renoir_lean_publish(RenoirLeanHandle h, const uint8_t *data, uintptr_t len);
 
 enum RenoirErrorCode renoir_lean_publish_notify(RenoirLeanHandle h,
@@ -814,6 +818,8 @@ enum RenoirErrorCode renoir_lean_set_deadline(RenoirLeanHandle h, uint64_t deadl
 enum RenoirErrorCode renoir_lean_wait_deadline(RenoirLeanHandle h, uint32_t spin_iterations);
 
 uint64_t renoir_lean_deadline_misses(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_wait_adaptive(RenoirLeanHandle h, uint64_t timeout_ns);
 
 enum RenoirErrorCode renoir_lean_wait(RenoirLeanHandle h,
                                       uint32_t spin_iterations,

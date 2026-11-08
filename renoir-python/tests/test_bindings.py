@@ -267,3 +267,12 @@ def test_lean_memory_required():
     assert renoir.lean_memory_required(100, 100) == 704 + 64 * 128
     with pytest.raises(renoir.RenoirError):
         renoir.lean_memory_required(0, 64)
+
+
+def test_lean_wait_adaptive(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    pub = renoir.LeanChannel("py_lean_adapt", 16, 8)
+    sub = renoir.LeanChannel("py_lean_adapt", 16, 8)
+    assert sub.wait_adaptive(10) is False
+    pub.publish_notify(b"a" * 16)
+    assert sub.wait_adaptive(1000) is True

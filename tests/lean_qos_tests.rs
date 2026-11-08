@@ -86,3 +86,26 @@ fn deadline_miss_is_reported_and_counted() {
     assert_eq!(subscriber.wait_deadline(10), DeadlineWait::Ready);
     assert_eq!(subscriber.deadline_misses(), 2);
 }
+
+#[test]
+#[cfg_attr(miri, ignore = "Miri has no file-backed mmap")]
+fn adaptive_wait_grows_when_spinning_wins_and_shrinks_when_it_does_not() {
+    shm_dir();
+    let name = unique("adaptive");
+    let mut publisher = LeanChannel::open(&name, 8, 16, false).unwrap();
+    let mut subscriber = LeanChannel::open(&name, 8, 16, false).unwrap();
+    let start = subscriber.spin_budget();
+    publisher.publish(&1u64.to_le_bytes()).unwrap();
+    assert!(subscriber.wait_adaptive(Some(Duration::from_millis(50))));
+    assert!(subscriber.spin_budget() > start);
+    let mut out = [0u8; 8];
+    subscriber.try_read(&mut out).unwrap();
+    let grown = subscriber.spin_budget();
+    assert!(!subscriber.wait_adaptive(Some(Duration::from_millis(10))));
+    assert!(subscriber.spin_budget() < grown);
+    for _ in 0..20 {
+        let _ = subscriber.wait_adaptive(Some(Duration::from_millis(1)));
+    }
+    assert!(subscriber.spin_budget() >= 32);
+    assert!(subscriber.spin_budget() <= 100_000);
+}

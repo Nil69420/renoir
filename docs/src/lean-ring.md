@@ -102,3 +102,13 @@ Read cost: one extra release store per read for registered consumers; unregister
 `publish_batch` (`renoir_lean_publish_batch`, `publishBatch`, `publish_batch`) writes several messages given as one contiguous buffer whose length is a multiple of the message size, and `read_batch` (`renoir_lean_read_batch`, `readBatch`, `read_batch`) reads up to as many as fit in the output buffer. Every message keeps its own sequence word, so readers still see messages one by one and in order; a batch is not atomic.
 
 Savings measured on x86 for eight 32-byte messages: 28.6 ns as one batch against 51.8 ns as eight publishes on a single-producer ring, and 170 ns against 212 ns on a multi-producer ring, where the batch claims all eight indices with one atomic add. A gated ring publishes as many messages of the batch as fit and reports the count; if none fit, `publish_batch` returns `BufferFull`. `read_batch` returns zero when nothing is available and `renoir_lean_read_batch` reports that with `RenoirErrorCode_Success` and a count of zero. On a gated ring a batch read updates the consumer position once per batch.
+
+## Adaptive waiting
+
+`wait_adaptive` (`renoir_lean_wait_adaptive`, `waitAdaptive`, `wait_adaptive`) tunes the spin budget itself. It starts at 1000 iterations, doubles the budget (up to 100,000) each time data arrives while still spinning, and halves it (down to 32) each time it has to fall through to the futex. Frequent messages therefore keep consumers on the polling path with no syscall, and sparse streams stop burning CPU. Use `wait` with an explicit spin count when you need a fixed budget.
+
+## Crash recovery
+
+- A publisher killed mid-publish leaves an odd sequence word in one slot. Readers see that slot as empty; the next publisher (single-producer) resumes at the published index and rewrites it, so the ring heals without intervention.
+- A process killed while initialising a ring leaves a half-initialised header. If nothing else holds the region, the next opener wipes and rebuilds it. If other processes already hold it, the next opener waits 2 seconds and then takes over the initialisation.
+- A consumer killed while registered on a gated ring stalls publishers only until the gate timeout (100 ms by default) evicts it.

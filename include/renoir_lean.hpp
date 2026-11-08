@@ -90,6 +90,11 @@ public:
 
     uint64_t deadlineMisses() const noexcept { return renoir_lean_deadline_misses(handle_); }
 
+    bool waitAdaptive(uint64_t timeoutNs = UINT64_MAX) noexcept {
+        return renoir_lean_wait_adaptive(handle_, timeoutNs) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
     bool wait(uint32_t spinIterations = 2000, uint64_t timeoutNs = UINT64_MAX) noexcept {
         return renoir_lean_wait(handle_, spinIterations, timeoutNs) ==
                RenoirErrorCode::RenoirErrorCode_Success;

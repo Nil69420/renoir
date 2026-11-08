@@ -92,3 +92,28 @@ fn mpmc_concurrent_first_open_agrees_on_one_header() {
         }
     }
 }
+
+const INITIALIZING_SENTINEL: u64 = 0x4942_4E49_5F42_5254;
+
+#[test]
+fn ring_left_half_initialised_by_a_dead_opener_is_taken_over() {
+    let size = SPSCTopicRing::required_memory_size(CAPACITY);
+    let mem = Mem::new(size);
+    unsafe { (mem.0.as_ptr() as *mut u64).write(INITIALIZING_SENTINEL) };
+    let started = std::time::Instant::now();
+    let ring = unsafe {
+        SPSCTopicRing::from_memory(mem.0, size, CAPACITY, Arc::new(TopicStats::default()))
+    }
+    .unwrap();
+    assert_eq!(ring.capacity(), CAPACITY);
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+
+    let size = MPMCTopicRing::required_memory_size(CAPACITY);
+    let mem = Mem::new(size);
+    unsafe { (mem.0.as_ptr() as *mut u64).write(INITIALIZING_SENTINEL) };
+    let ring = unsafe {
+        MPMCTopicRing::from_memory(mem.0, size, CAPACITY, Arc::new(TopicStats::default()))
+    }
+    .unwrap();
+    assert_eq!(ring.capacity(), CAPACITY);
+}

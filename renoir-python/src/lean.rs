@@ -68,6 +68,13 @@ impl PyLeanChannel {
         Ok(PyBytes::new(py, &bytes.as_bytes()[..count * size]))
     }
 
+    #[pyo3(signature = (timeout_ms=None))]
+    fn wait_adaptive(&mut self, py: Python<'_>, timeout_ms: Option<u64>) -> bool {
+        let timeout = timeout_ms.map(std::time::Duration::from_millis);
+        let inner = &mut self.inner;
+        py.detach(|| inner.wait_adaptive(timeout))
+    }
+
     #[pyo3(signature = (deadline_ms=None))]
     fn set_deadline(&mut self, deadline_ms: Option<u64>) {
         self.inner

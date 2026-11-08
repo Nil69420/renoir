@@ -9,6 +9,10 @@ use super::{
     lean_slot_bytes, LeanCursor, LeanGatedCursor, LeanMode, LeanPublisher, LeanRead, LeanRing,
 };
 
+const SPIN_START: u32 = 1_000;
+const SPIN_MIN: u32 = 32;
+const SPIN_MAX: u32 = 100_000;
+
 pub struct LeanChannel {
     ring: Arc<LeanRing>,
     publisher: LeanPublisher,
@@ -16,6 +20,7 @@ pub struct LeanChannel {
     gated: Option<LeanGatedCursor>,
     pub(super) deadline: Option<Duration>,
     pub(super) deadline_misses: u64,
+    spin_budget: u32,
     _region: SharedMemoryRegion,
 }
 
@@ -74,6 +79,7 @@ impl LeanChannel {
             gated: None,
             deadline: None,
             deadline_misses: 0,
+            spin_budget: SPIN_START,
             _region: region,
         })
     }
@@ -117,6 +123,20 @@ impl LeanChannel {
             Some(gated) => self.ring.read_batch_gated(gated, out),
             None => self.ring.read_batch(&mut self.cursor, out),
         }
+    }
+
+    pub fn wait_adaptive(&mut self, timeout: Option<Duration>) -> bool {
+        if self.wait_readable(self.spin_budget, Some(Duration::ZERO)) {
+            self.spin_budget = (self.spin_budget.saturating_mul(2)).min(SPIN_MAX);
+            return true;
+        }
+        self.spin_budget = (self.spin_budget / 2).max(SPIN_MIN);
+        self.wait_readable(0, timeout)
+    }
+
+    #[must_use]
+    pub fn spin_budget(&self) -> u32 {
+        self.spin_budget
     }
 
     pub fn wait_readable(&self, spin_iterations: u32, timeout: Option<Duration>) -> bool {
