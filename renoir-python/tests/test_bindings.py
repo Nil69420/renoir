@@ -260,3 +260,10 @@ def test_lean_deadline(tmp_path, monkeypatch):
     assert sub.deadline_misses() == 1
     pub.publish(b"d" * 16)
     assert sub.wait_deadline(10) is True
+
+
+def test_lean_memory_required():
+    assert renoir.lean_memory_required(48, 64) == 704 + 64 * 64
+    assert renoir.lean_memory_required(100, 100) == 704 + 64 * 128
+    with pytest.raises(renoir.RenoirError):
+        renoir.lean_memory_required(0, 64)

@@ -142,6 +142,7 @@ fn renoir_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("Publisher", m.py().get_type::<PyPublisher>())?;
     m.add("Subscriber", m.py().get_type::<PySubscriber>())?;
     m.add("LeanChannel", m.py().get_type::<lean::PyLeanChannel>())?;
+    m.add_function(wrap_pyfunction!(lean::lean_memory_required, m)?)?;
     m.add("RpcClient", m.py().get_type::<rpc::PyRpcClient>())?;
     m.add("RpcServer", m.py().get_type::<rpc::PyRpcServer>())?;
     m.add("RenoirError", m.py().get_type::<RenoirError>())?;

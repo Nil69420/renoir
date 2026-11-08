@@ -18,6 +18,8 @@ slot_bytes = 64 x ceil((msg_size + 8) / 64)        (msg_size 1..=504)
 | 121..=184 | 192 | 192 KiB + 704 B |
 | 441..=504 | 512 | 512 KiB + 704 B |
 
+`renoir_lean_memory_required(msg_size, slot_count, &bytes)` (Python `lean_memory_required`) computes this exactly, including the round-down of the slot count to a power of two.
+
 Choosing the slot count: a lossy ring needs enough slots that a reader pausing for its worst-case scheduling delay is not lapped, `slots >= rate x worst_pause`. An IMU at 1 kHz with a 20 ms worst pause needs 20 slots, so 32. A gated ring needs the same figure for a consumer to avoid making the publisher see `BufferFull`.
 
 ## Broadcast ring (frames and larger messages)

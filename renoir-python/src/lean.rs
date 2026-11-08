@@ -125,3 +125,15 @@ impl PyLeanChannel {
         self.inner.msg_size()
     }
 }
+
+#[pyfunction]
+pub fn lean_memory_required(msg_size: usize, slot_count: usize) -> PyResult<usize> {
+    let slot_bytes = ::renoir::topic_rings::lean_slot_bytes(msg_size)
+        .ok_or_else(|| crate::RenoirError::new_err("msg_size must be between 1 and 504"))?;
+    if slot_count < 2 {
+        return Err(crate::RenoirError::new_err("slot_count must be at least 2"));
+    }
+    let ring_bytes = slot_bytes * slot_count;
+    let slots = ::renoir::topic_rings::LeanRing::slot_count_for(ring_bytes, msg_size);
+    Ok(::renoir::topic_rings::LEAN_HEADER_BYTES + slots * slot_bytes)
+}

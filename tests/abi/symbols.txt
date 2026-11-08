@@ -31,6 +31,7 @@ renoir_imu_sample_validate
 renoir_lean_close
 renoir_lean_deadline_misses
 renoir_lean_lost
+renoir_lean_memory_required
 renoir_lean_open
 renoir_lean_pending
 renoir_lean_publish

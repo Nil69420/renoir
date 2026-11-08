@@ -61,6 +61,26 @@ pub extern "C" fn renoir_lean_open(
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_lean_memory_required(
+    msg_size: u32,
+    slot_count: u32,
+    out_bytes: *mut usize,
+) -> RenoirErrorCode {
+    if out_bytes.is_null() || slot_count < 2 {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let Some(slot_bytes) = crate::topic_rings::lean_slot_bytes(msg_size as usize) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let ring_bytes = slot_bytes * slot_count as usize;
+    let slots = crate::topic_rings::LeanRing::slot_count_for(ring_bytes, msg_size as usize);
+    unsafe {
+        *out_bytes = crate::topic_rings::LEAN_HEADER_BYTES + slots * slot_bytes;
+    }
+    RenoirErrorCode::Success
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_lean_publish(
     h: RenoirLeanHandle,
     data: *const u8,

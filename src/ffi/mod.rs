@@ -73,8 +73,8 @@ pub use rpc::{
 };
 
 pub use lean::{
-    renoir_lean_close, renoir_lean_deadline_misses, renoir_lean_lost, renoir_lean_open,
-    renoir_lean_pending, renoir_lean_publish, renoir_lean_publish_batch,
+    renoir_lean_close, renoir_lean_deadline_misses, renoir_lean_lost, renoir_lean_memory_required,
+    renoir_lean_open, renoir_lean_pending, renoir_lean_publish, renoir_lean_publish_batch,
     renoir_lean_publish_notify, renoir_lean_read_batch, renoir_lean_set_deadline,
     renoir_lean_skip_to_latest, renoir_lean_try_read, renoir_lean_wait, renoir_lean_wait_deadline,
     RenoirLeanHandle, RENOIR_LEAN_CONSUMER, RENOIR_LEAN_FROM_OLDEST, RENOIR_LEAN_GATED,

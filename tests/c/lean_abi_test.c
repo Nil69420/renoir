@@ -137,6 +137,18 @@ int main(void) {
     renoir_lean_close(g_pub);
   }
 
+  {
+    size_t bytes = 0;
+    CHECK(renoir_lean_memory_required(48, 64, &bytes) == RenoirErrorCode_Success);
+    CHECK(bytes == 704 + 64 * 64);
+    CHECK(renoir_lean_memory_required(100, 100, &bytes) == RenoirErrorCode_Success);
+    CHECK(bytes == 704 + 64 * 128);
+    CHECK(renoir_lean_memory_required(0, 64, &bytes) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_memory_required(505, 64, &bytes) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_memory_required(48, 1, &bytes) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_memory_required(48, 64, NULL) == RenoirErrorCode_InvalidParameter);
+  }
+
   renoir_lean_close(sub);
   renoir_lean_close(pub);
   renoir_lean_close(NULL);
