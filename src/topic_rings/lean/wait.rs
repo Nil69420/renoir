@@ -46,7 +46,7 @@ impl LeanRing {
         }
     }
 
-    fn notify(&self) {
+    pub(super) fn notify(&self) {
         fence(Ordering::SeqCst);
         let h = self.hdr();
         if h.waiters.load(Ordering::Relaxed) != 0 {

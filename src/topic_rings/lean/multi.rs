@@ -107,15 +107,26 @@ impl LeanPublisher {
 }
 
 pub(super) fn fill_slot_multi(ring: &LeanRing, idx: u64, data: &[u8]) -> Result<()> {
+    begin_slot_multi(ring, idx)?;
+    let slot = ring.slot_ptr(idx);
+    unsafe { atomic_store_bytes(slot.add(SEQ_BYTES), data.as_ptr(), data.len()) };
+    commit_slot_multi(ring, idx)
+}
+
+pub(super) fn begin_slot_multi(ring: &LeanRing, idx: u64) -> Result<()> {
     let slot = ring.slot_ptr(idx);
     let seq = unsafe { &*(slot as *const AtomicU64) };
     let previous = idx.saturating_sub(ring.mask + 1) * 2;
-    let writing = 2 * idx - 1;
-    acquire_slot(ring, seq, previous, writing)?;
+    acquire_slot(ring, seq, previous, 2 * idx - 1)?;
     fence(Ordering::Release);
-    unsafe { atomic_store_bytes(slot.add(SEQ_BYTES), data.as_ptr(), data.len()) };
+    Ok(())
+}
+
+pub(super) fn commit_slot_multi(ring: &LeanRing, idx: u64) -> Result<()> {
+    let slot = ring.slot_ptr(idx);
+    let seq = unsafe { &*(slot as *const AtomicU64) };
     if seq
-        .compare_exchange(writing, 2 * idx, Ordering::Release, Ordering::Relaxed)
+        .compare_exchange(2 * idx - 1, 2 * idx, Ordering::Release, Ordering::Relaxed)
         .is_err()
     {
         return Err(RenoirError::concurrency(
