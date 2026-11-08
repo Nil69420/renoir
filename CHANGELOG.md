@@ -18,7 +18,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.
 
 ### Changed
-- The lean ring header grew from 192 to 704 bytes to hold the consumer table (wire format change, pre-1.0).
+- The lean ring header grew from 192 to 1728 bytes to hold the consumer and producer tables (wire format change, pre-1.0).
 - `librenoir.so` now has SONAME `librenoir.so.0`; the Debian package installs it as `librenoir.so.0` and the Jetson package ships the matching symlinks. `tests/abi/abidiff.sh` compares the built library against a checked-in libabigail baseline in CI.
 
 ### Added
