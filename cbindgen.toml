@@ -28,6 +28,7 @@ include = [
     "RenoirTopicManagerHandle",
     "RenoirPublisherHandle",
     "RenoirSubscriberHandle",
+    "RenoirLeanHandle",
     "RenoirMessageHandle",
     "RenoirReservedBufferHandle",
     "RenoirReceivedMessageHandle",

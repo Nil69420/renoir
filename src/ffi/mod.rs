@@ -7,6 +7,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 pub mod buffers;
+pub mod lean;
 pub mod memory;
 pub mod sensor;
 pub mod topics;
@@ -61,6 +62,12 @@ pub use topics::{renoir_subscriber_get_event_fd, renoir_wait_event};
 pub use sensor::{
     renoir_image_frame_header_init, renoir_image_frame_payload_size, renoir_image_frame_validate,
     renoir_imu_sample_init, renoir_imu_sample_validate,
+};
+
+pub use lean::{
+    renoir_lean_close, renoir_lean_lost, renoir_lean_open, renoir_lean_pending,
+    renoir_lean_publish, renoir_lean_skip_to_latest, renoir_lean_try_read, RenoirLeanHandle,
+    RENOIR_LEAN_FROM_OLDEST,
 };
 
 // Version API

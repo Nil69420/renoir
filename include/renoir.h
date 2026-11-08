@@ -159,6 +159,8 @@
  */
 #define MAX_CHUNKS_PER_MESSAGE 1024
 
+#define RENOIR_LEAN_FROM_OLDEST 1
+
 /**
  * Topic registration flag: discard messages left by a previous clean session
  * when no live process holds the topic
@@ -306,6 +308,8 @@ typedef struct RenoirRegionRegistryEntry {
   uint32_t ref_count;
   uint32_t creator_pid;
 } RenoirRegionRegistryEntry;
+
+typedef void *RenoirLeanHandle;
 
 typedef void *RenoirRegionHandle;
 
@@ -749,6 +753,26 @@ enum RenoirErrorCode renoir_control_region_cleanup_stale(RenoirControlRegionHand
  * Destroy a control region
  */
 enum RenoirErrorCode renoir_control_region_destroy(RenoirControlRegionHandle control_handle);
+
+enum RenoirErrorCode renoir_lean_open(const char *name,
+                                      uint32_t msg_size,
+                                      uint32_t slot_count,
+                                      uint32_t flags,
+                                      RenoirLeanHandle *out);
+
+enum RenoirErrorCode renoir_lean_publish(RenoirLeanHandle h, const uint8_t *data, uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_try_read(RenoirLeanHandle h,
+                                          uint8_t *buffer,
+                                          uintptr_t buffer_len);
+
+uint64_t renoir_lean_skip_to_latest(RenoirLeanHandle h, uint64_t keep);
+
+uint64_t renoir_lean_lost(RenoirLeanHandle h);
+
+uintptr_t renoir_lean_pending(RenoirLeanHandle h);
+
+void renoir_lean_close(RenoirLeanHandle h);
 
 /**
  * Create a shared memory manager with control region
