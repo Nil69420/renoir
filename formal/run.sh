@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")"
+JAR=${TLA2TOOLS:-$HOME/.local/tla/tla2tools.jar}
+if [ ! -f "$JAR" ]; then
+  mkdir -p "$(dirname "$JAR")"
+  curl -sL -o "$JAR" https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
+fi
+tlc() { java -XX:+UseParallelGC -cp "$JAR" tlc2.TLC -workers 4 -deadlock "$@" 2>&1; }
+echo "OLD rule must violate both invariants (the model reproduces the bugs)"
+tlc -config LeanMP_OLD.cfg LeanMP.tla | grep -q "Invariant NoLossOfLiveProducer is violated"
+sed 's/INVARIANTS.*/INVARIANTS NoTornRead/' LeanMP_OLD.cfg > "${TMPDIR:-/tmp}/LeanMP_OLD_torn.cfg"
+tlc -config "${TMPDIR:-/tmp}/LeanMP_OLD_torn.cfg" LeanMP.tla | grep -q "Invariant NoTornRead is violated"
+echo "NEW rule must satisfy both invariants"
+for cfg in "2 2 4" "3 2 5" "2 4 7" "3 3 6"; do
+  set -- $cfg
+  sed "s/P = 2 MaxIdx = 4/P = $1 MaxIdx = $3/; s/N = 2/N = $2/" LeanMP_NEW.cfg > "${TMPDIR:-/tmp}/LeanMP_NEW_big.cfg"
+  tlc -config "${TMPDIR:-/tmp}/LeanMP_NEW_big.cfg" LeanMP.tla | grep -q "No error has been found"
+  echo "NEW ok: P=$1 N=$2 MaxIdx=$3"
+done
+echo "formal: all green"
