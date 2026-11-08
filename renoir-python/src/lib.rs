@@ -3,6 +3,8 @@
 //! A thin PyO3 translation layer over the existing Rust API — no logic is
 //! reimplemented here; every call forwards to `::renoir::*`.
 
+mod lean;
+
 use ::renoir::{
     topic::{TopicConfig, TopicPattern},
     topic_manager_modules::TopicManager,
@@ -11,7 +13,7 @@ use pyo3::{create_exception, exceptions::PyException, prelude::*, types::PyBytes
 
 create_exception!(renoir, RenoirError, PyException);
 
-fn map_err(e: ::renoir::RenoirError) -> PyErr {
+pub(crate) fn map_err(e: ::renoir::RenoirError) -> PyErr {
     PyErr::new::<RenoirError, _>(e.to_string())
 }
 
@@ -138,6 +140,7 @@ fn renoir_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("TopicManager", m.py().get_type::<PyTopicManager>())?;
     m.add("Publisher", m.py().get_type::<PyPublisher>())?;
     m.add("Subscriber", m.py().get_type::<PySubscriber>())?;
+    m.add("LeanChannel", m.py().get_type::<lean::PyLeanChannel>())?;
     m.add("RenoirError", m.py().get_type::<RenoirError>())?;
     Ok(())
 }

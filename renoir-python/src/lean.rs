@@ -1,0 +1,62 @@
+use ::renoir::topic_rings::{LeanChannel, LeanRead};
+use pyo3::{prelude::*, types::PyBytes};
+
+use crate::map_err;
+
+#[pyclass(name = "LeanChannel")]
+pub struct PyLeanChannel {
+    inner: LeanChannel,
+}
+
+#[pymethods]
+impl PyLeanChannel {
+    #[new]
+    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false))]
+    fn new(name: &str, msg_size: usize, slot_count: usize, from_oldest: bool) -> PyResult<Self> {
+        let inner = LeanChannel::open(name, msg_size, slot_count, from_oldest).map_err(map_err)?;
+        Ok(Self { inner })
+    }
+
+    fn publish(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner.publish(payload.as_bytes()).map_err(map_err)
+    }
+
+    fn try_read<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        let size = self.inner.msg_size();
+        let mut out = None;
+        let mut failure = None;
+        let inner = &mut self.inner;
+        let bytes = PyBytes::new_with(py, size, |buf| match inner.try_read(buf) {
+            Ok(LeanRead::Message) => {
+                out = Some(());
+                Ok(())
+            }
+            Ok(LeanRead::Empty) => Ok(()),
+            Err(e) => {
+                failure = Some(e);
+                Ok(())
+            }
+        })?;
+        if let Some(e) = failure {
+            return Err(map_err(e));
+        }
+        Ok(out.map(|()| bytes))
+    }
+
+    fn skip_to_latest(&mut self, keep: u64) -> u64 {
+        self.inner.skip_to_latest(keep)
+    }
+
+    fn lost(&self) -> u64 {
+        self.inner.lost()
+    }
+
+    fn pending(&self) -> usize {
+        self.inner.pending()
+    }
+
+    #[getter]
+    fn msg_size(&self) -> usize {
+        self.inner.msg_size()
+    }
+}

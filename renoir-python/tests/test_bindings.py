@@ -147,3 +147,27 @@ def test_many_messages_ring_full_behavior():
         received += 1
 
     assert received == sent
+
+
+def test_lean_channel_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    pub = renoir.LeanChannel("py_lean", 16, 64)
+    sub = renoir.LeanChannel("py_lean", 16, 64, True)
+    assert sub.msg_size == 16
+    assert sub.try_read() is None
+    for i in range(10):
+        pub.publish(bytes([i]) * 16)
+    assert sub.pending() == 10
+    for i in range(10):
+        assert sub.try_read() == bytes([i]) * 16
+    assert sub.try_read() is None
+    assert sub.lost() == 0
+
+
+def test_lean_channel_rejects_bad_sizes(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    with pytest.raises(renoir.RenoirError):
+        renoir.LeanChannel("py_lean_bad", 0, 8)
+    pub = renoir.LeanChannel("py_lean_bad2", 16, 8)
+    with pytest.raises(renoir.RenoirError):
+        pub.publish(b"short")
