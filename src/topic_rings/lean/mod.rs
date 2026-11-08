@@ -1,7 +1,7 @@
 use std::{
     ptr::NonNull,
     sync::{
-        atomic::{fence, AtomicU32, AtomicU64, AtomicU8, Ordering},
+        atomic::{fence, AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
 };
@@ -13,6 +13,7 @@ use super::spsc::SESSION_MARKER_OFFSET;
 
 mod batch;
 mod channel;
+mod cursor;
 mod gate;
 mod init;
 mod inspect;
@@ -77,6 +78,7 @@ pub struct LeanRing {
     gated: bool,
     plain: bool,
     gate_timeout_ns: AtomicU64,
+    gate_only_dead: AtomicBool,
 }
 
 unsafe impl Send for LeanRing {}
@@ -158,6 +160,21 @@ impl LeanRing {
             )
         })?;
         let slot_count = Self::slot_count_for(ring_bytes, msg_size);
+        Self::from_geometry(memory, memory_size, slot_bytes, slot_count, msg_size, mode)
+    }
+
+    /// # Safety
+    ///
+    /// Same contract as [`LeanRing::from_memory`]; `slot_bytes` and `slot_count` must describe
+    /// the layout the memory is (or will be) initialised with.
+    pub(super) unsafe fn from_geometry(
+        memory: NonNull<u8>,
+        memory_size: usize,
+        slot_bytes: usize,
+        slot_count: usize,
+        msg_size: usize,
+        mode: LeanMode,
+    ) -> Result<Self> {
         if slot_count < 2 {
             return Err(RenoirError::invalid_parameter(
                 "ring_capacity",
@@ -192,6 +209,7 @@ impl LeanRing {
             gated: mode.is_gated(),
             plain: !mode.is_multi_producer() && !mode.is_gated(),
             gate_timeout_ns: AtomicU64::new(gate::DEFAULT_GATE_TIMEOUT.as_nanos() as u64),
+            gate_only_dead: AtomicBool::new(false),
         })
     }
 
@@ -215,24 +233,6 @@ impl LeanRing {
             blocked: None,
             producer: None,
             announced: false,
-        }
-    }
-
-    pub fn cursor_latest(&self) -> LeanCursor {
-        LeanCursor::at(self.published() + 1)
-    }
-
-    pub fn cursor_oldest(&self) -> LeanCursor {
-        let w = self.published();
-        LeanCursor::at(w.saturating_sub(self.mask).max(1))
-    }
-
-    pub fn pending(&self, cursor: &LeanCursor) -> usize {
-        let w = self.published();
-        if cursor.next > w {
-            0
-        } else {
-            (w - cursor.next + 1).min(self.mask + 1) as usize
         }
     }
 
@@ -293,30 +293,6 @@ impl LeanRing {
                 ));
             }
             self.resync(cursor);
-        }
-    }
-
-    pub fn skip_to_latest(&self, cursor: &mut LeanCursor, keep: u64) -> u64 {
-        let w = self.published();
-        let target = w.saturating_sub(keep.max(1) - 1).max(1);
-        if target > cursor.next {
-            let skipped = target - cursor.next;
-            cursor.lost += skipped;
-            cursor.next = target;
-            skipped
-        } else {
-            0
-        }
-    }
-
-    #[cold]
-    fn resync(&self, cursor: &mut LeanCursor) {
-        let w = self.published();
-        let keep = (self.mask + 1) * 3 / 4;
-        let target = w.saturating_sub(keep.max(1) - 1).max(1);
-        if target > cursor.next {
-            cursor.lost += target - cursor.next;
-            cursor.next = target;
         }
     }
 

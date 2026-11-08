@@ -40,7 +40,7 @@ pub(super) struct ProducerHandle {
     token: u64,
 }
 
-pub(super) fn process_start_time(pid: u32) -> u64 {
+pub(crate) fn process_start_time(pid: u32) -> u64 {
     let mut path = [0u8; 32];
     let prefix = b"/proc/";
     path[..prefix.len()].copy_from_slice(prefix);

@@ -1,5 +1,5 @@
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
@@ -22,7 +22,10 @@ pub(super) struct GateEntry {
     pub(super) owner: AtomicU64,
     pub(super) pos: AtomicU64,
     pub(super) after: AtomicU64,
-    pad: [u8; 40],
+    pub(super) pid: AtomicU32,
+    pad_pid: u32,
+    pub(super) start: AtomicU64,
+    pad: [u8; 24],
 }
 
 const _: () = assert!(std::mem::size_of::<GateEntry>() == 64);
@@ -40,6 +43,16 @@ impl LeanRing {
                 .cast::<GateEntry>()
                 .add(i))
         }
+    }
+
+    pub fn set_gate_evicts_only_dead(&self, only_dead: bool) {
+        self.gate_only_dead.store(only_dead, Ordering::Relaxed);
+    }
+
+    fn gate_holder_dead(&self, entry_index: usize) -> bool {
+        let entry = self.gate_entry(entry_index);
+        let pid = entry.pid.load(Ordering::Acquire);
+        pid != 0 && !super::liveness::process_alive(pid, entry.start.load(Ordering::Acquire))
     }
 
     pub fn set_gate_timeout(&self, timeout: Duration) {
@@ -206,6 +219,11 @@ impl LeanRing {
             let token = (seen >> 2) + 1;
             entry.pos.store(start, Ordering::Relaxed);
             entry.after.store(0, Ordering::Relaxed);
+            entry.pid.store(std::process::id(), Ordering::Relaxed);
+            entry.start.store(
+                super::liveness::process_start_time(std::process::id()),
+                Ordering::Relaxed,
+            );
             if entry
                 .owner
                 .compare_exchange(
@@ -297,7 +315,12 @@ impl LeanPublisher {
             }
             let timeout = Duration::from_nanos(self.ring.gate_timeout_ns.load(Ordering::Relaxed));
             match self.blocked {
-                Some((pos, since)) if pos == min && since.elapsed() >= timeout => {
+                Some((pos, since))
+                    if pos == min
+                        && since.elapsed() >= timeout
+                        && (!self.ring.gate_only_dead.load(Ordering::Relaxed)
+                            || self.ring.gate_holder_dead(laggard)) =>
+                {
                     self.ring.evict(laggard);
                     self.blocked = None;
                 }
