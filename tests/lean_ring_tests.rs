@@ -305,8 +305,11 @@ fn live_publishers_counts_registered_publishers_and_drops_on_release() {
             LeanRing::from_memory_mode(ptr, mem.len() * 8, ring_bytes, 16, mode).unwrap()
         });
         assert_eq!(ring.live_publishers(), 0);
-        let first = ring.publisher();
-        let second = ring.publisher();
+        let mut first = ring.publisher();
+        let mut second = ring.publisher();
+        assert_eq!(ring.live_publishers(), 0);
+        first.announce();
+        second.announce();
         assert_eq!(ring.live_publishers(), 2);
         drop(first);
         assert_eq!(ring.live_publishers(), 1);

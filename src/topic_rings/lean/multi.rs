@@ -88,6 +88,7 @@ impl LeanPublisher {
     }
 
     pub(super) fn publish_multi(&mut self, data: &[u8]) -> Result<()> {
+        self.announce();
         let idx = self.claim_index()?;
         let filled = fill_slot_multi(&self.ring, idx, data);
         self.end_claim();
@@ -97,6 +98,7 @@ impl LeanPublisher {
     }
 
     pub(super) fn claim_range(&mut self, count: u64) -> u64 {
+        self.announce();
         self.begin_claim();
         let first = self.ring.hdr().claim.fetch_add(count, Ordering::AcqRel) + 1;
         self.mark_claimed(first, count);

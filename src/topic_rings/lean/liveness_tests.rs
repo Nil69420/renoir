@@ -57,6 +57,7 @@ fn alive_claimer_is_waited_for_past_every_timeout() {
     let mut cursor = ring.register_consumer(true).unwrap();
     let mut slow = ring.publisher();
     let mut fast = ring.publisher();
+    slow.announce();
     let idx = slow.claim_index().unwrap();
     assert_eq!(idx, 1);
     fast.publish(&[2u8; MSG]).unwrap();
@@ -86,6 +87,7 @@ fn dead_claimer_is_skipped_promptly() {
     let mut cursor = ring.register_consumer(true).unwrap();
     let mut doomed = ring.publisher();
     let mut fast = ring.publisher();
+    doomed.announce();
     let idx = doomed.claim_index().unwrap();
     assert_eq!(idx, 1);
     fast.publish(&[2u8; MSG]).unwrap();
@@ -106,12 +108,30 @@ fn dead_claimer_is_skipped_promptly() {
 fn producer_table_entries_are_reused_after_drop() {
     let (ring, _mem) = make();
     for _ in 0..(super::LEAN_MAX_PRODUCERS * 3) {
-        let publisher = ring.publisher();
+        let mut publisher = ring.publisher();
+        assert!(publisher.producer.is_none());
+        publisher.announce();
         assert!(publisher.producer.is_some());
     }
     let held: Vec<_> = (0..super::LEAN_MAX_PRODUCERS)
-        .map(|_| ring.publisher())
+        .map(|_| {
+            let mut p = ring.publisher();
+            p.announce();
+            p
+        })
         .collect();
     assert!(held.iter().all(|p| p.producer.is_some()));
-    assert!(ring.publisher().producer.is_none());
+    let mut extra = ring.publisher();
+    extra.announce();
+    assert!(extra.producer.is_none());
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn process_start_time_is_read_and_distinguishes_processes() {
+    let own = super::liveness::process_start_time(std::process::id());
+    assert_ne!(own, 0);
+    assert_eq!(own, super::liveness::process_start_time(std::process::id()));
+    assert_ne!(own, super::liveness::process_start_time(1));
+    assert_eq!(super::liveness::process_start_time(u32::MAX), 0);
 }

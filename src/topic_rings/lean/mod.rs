@@ -87,6 +87,7 @@ pub struct LeanPublisher {
     gate_cache: u64,
     blocked: Option<(u64, std::time::Instant)>,
     producer: Option<liveness::ProducerHandle>,
+    announced: bool,
 }
 
 pub const fn lean_slot_bytes(msg_size: usize) -> Option<usize> {
@@ -210,7 +211,8 @@ impl LeanRing {
             next: self.published() + 1,
             gate_cache: 0,
             blocked: None,
-            producer: self.register_producer(),
+            producer: None,
+            announced: false,
         }
     }
 

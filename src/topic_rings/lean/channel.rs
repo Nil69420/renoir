@@ -21,6 +21,7 @@ pub struct LeanChannel {
     pub(super) deadline: Option<Duration>,
     pub(super) deadline_misses: u64,
     spin_budget: u32,
+    announced: bool,
     _region: SharedMemoryRegion,
 }
 
@@ -80,6 +81,7 @@ impl LeanChannel {
             deadline: None,
             deadline_misses: 0,
             spin_budget: SPIN_START,
+            announced: false,
             _region: region,
         })
     }
@@ -105,16 +107,19 @@ impl LeanChannel {
 
     #[inline]
     pub fn publish(&mut self, data: &[u8]) -> Result<()> {
+        self.announce();
         self.publisher.publish(data)
     }
 
     #[inline]
     pub fn publish_notify(&mut self, data: &[u8]) -> Result<()> {
+        self.announce();
         self.publisher.publish_notify(data)
     }
 
     #[inline]
     pub fn publish_batch(&mut self, data: &[u8]) -> Result<usize> {
+        self.announce();
         self.publisher.publish_batch(data)
     }
 
@@ -165,6 +170,14 @@ impl LeanChannel {
 
     pub fn pending(&self) -> usize {
         self.ring.pending(self.active_cursor())
+    }
+
+    #[inline]
+    fn announce(&mut self) {
+        if !self.announced {
+            self.announced = true;
+            self.publisher.announce();
+        }
     }
 
     pub fn live_publishers(&self) -> usize {

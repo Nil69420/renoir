@@ -40,16 +40,49 @@ pub(super) struct ProducerHandle {
     token: u64,
 }
 
-fn process_start_time(pid: u32) -> u64 {
-    let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+pub(super) fn process_start_time(pid: u32) -> u64 {
+    let mut path = [0u8; 32];
+    let prefix = b"/proc/";
+    path[..prefix.len()].copy_from_slice(prefix);
+    let mut at = prefix.len();
+    let mut digits = [0u8; 10];
+    let mut count = 0;
+    let mut rest = pid;
+    loop {
+        digits[count] = b'0' + (rest % 10) as u8;
+        count += 1;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    while count > 0 {
+        count -= 1;
+        path[at] = digits[count];
+        at += 1;
+    }
+    let suffix = b"/stat";
+    path[at..at + suffix.len()].copy_from_slice(suffix);
+    let fd = unsafe { libc::open(path.as_ptr().cast(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return 0;
+    }
+    let mut buf = [0u8; 1024];
+    let got = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+    unsafe { libc::close(fd) };
+    let Ok(got) = usize::try_from(got) else {
         return 0;
     };
-    let Some((_, rest)) = stat.rsplit_once(')') else {
+    let text = &buf[..got];
+    let Some(close) = text.iter().rposition(|&b| b == b')') else {
         return 0;
     };
-    rest.split_whitespace()
+    text[close + 1..]
+        .split(|b| b.is_ascii_whitespace())
+        .filter(|field| !field.is_empty())
         .nth(19)
-        .and_then(|v| v.parse().ok())
+        .and_then(|field| std::str::from_utf8(field).ok())
+        .and_then(|field| field.parse().ok())
         .unwrap_or(0)
 }
 
@@ -176,6 +209,13 @@ impl LeanRing {
 }
 
 impl LeanPublisher {
+    pub fn announce(&mut self) {
+        if !self.announced {
+            self.announced = true;
+            self.producer = self.ring.register_producer();
+        }
+    }
+
     #[inline(always)]
     pub(super) fn begin_claim(&self) {
         if let Some(h) = self.producer {
