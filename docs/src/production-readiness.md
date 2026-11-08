@@ -13,10 +13,10 @@ This page lists the evidence behind Renoir's claims and its known limits, so you
 | Multi-producer protocol | TLA+ model (`formal/LeanMP.tla`): no torn read and no lost message from a live producer under the liveness rule; the old timer rule fails both |
 | Frame ownership | TLA+ model (`formal/FrameGate.tla`): no slot overwritten while a live consumer holds it; evicting live holders by timer fails |
 | Sizing arithmetic | Kani proofs (`src/topic_rings/lean/proofs.rs`); the first run found and fixed a real overflow |
-| Corrupt shared memory cannot crash readers | cargo-fuzz targets for lean, broadcast and frame rings (millions of executions per target, no crash), plus corrupt-header unit tests |
+| Corrupt shared memory cannot crash readers | cargo-fuzz targets for lean, broadcast and frame rings (60-second runs: 0.6 to 3.5 million executions per target, no crash), plus corrupt-header unit tests |
 | Crash recovery | Chaos tests that SIGKILL publishers, consumers, frame holders, frame loaners and RPC servers while traffic runs |
 | No allocation, lock, syscall or panic on the hot paths | A counting-allocator test (steady state, all lean modes, broadcast view, RPC) and `objdump` review of the publish and read fast paths |
-| Latency | Criterion-free pinned ping-pong benchmarks, published with method and caveats in `docs/src/benchmarks.md` |
+| Latency | Pinned-core ping-pong benchmarks, published with method and caveats in `docs/src/benchmarks.md` |
 | ABI stability | SONAME `librenoir.so.0`, an exported-symbol baseline check and a libabigail comparison against a checked-in baseline in CI |
 | Supply chain | `cargo deny`, `cargo audit`, an SBOM, and a reproducible `librenoir.so` build |
 
