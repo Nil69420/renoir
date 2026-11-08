@@ -13,3 +13,5 @@ What the model does not cover:
 - Memory ordering: the model is sequentially consistent. Weak-memory behaviour is covered separately by the herd7 litmus tests in `tests/litmus` and the native arm64 CI job.
 - Bounded size: results hold for the checked bounds, not for all sizes.
 - The code itself: the model is hand-written from the Rust, not extracted from it. Keep them in step when the protocol changes.
+
+`FrameGate.tla` models the frame ring ownership protocol: the producer admission rule, consumers viewing and releasing, consumer death, and eviction. The property is `NoOverwriteWhileHeld`: no slot is overwritten while a consumer that is not dead still holds it. `FrameGate_Timer.cfg` lets the gate evict a live holder, as the lean ring's timer rule does, and TLC finds the violation; `FrameGate_Death.cfg` evicts only dead holders and TLC finds none (up to 3 slots, 3 consumers, 7 frames, 85,256 distinct states). It does not model the pid-reuse or pid-namespace limits, weak memory, or the multi-producer claim path (see `LeanMP.tla`).

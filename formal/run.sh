@@ -18,4 +18,12 @@ for cfg in "2 2 4" "3 2 5" "2 4 7" "3 3 6"; do
   tlc -config "${TMPDIR:-/tmp}/LeanMP_NEW_big.cfg" LeanMP.tla | grep -q "No error has been found"
   echo "NEW ok: P=$1 N=$2 MaxIdx=$3"
 done
+echo "FrameGate: the timer rule must violate ownership, the death rule must not"
+tlc -config FrameGate_Timer.cfg FrameGate.tla | grep -q "Invariant NoOverwriteWhileHeld is violated"
+for cfg in "2 5 {c1,c2}" "3 6 {c1,c2}" "2 5 {c1,c2,c3}" "3 7 {c1,c2,c3}"; do
+  set -- $cfg
+  sed "s/N = 2 MaxIdx = 5 Consumers = {c1, c2}/N = $1 MaxIdx = $2 Consumers = $3/" FrameGate_Death.cfg > "${TMPDIR:-/tmp}/FrameGate_big.cfg"
+  tlc -config "${TMPDIR:-/tmp}/FrameGate_big.cfg" FrameGate.tla | grep -q "No error has been found"
+  echo "FrameGate ok: N=$1 MaxIdx=$2 Consumers=$3"
+done
 echo "formal: all green"

@@ -48,4 +48,4 @@ One-way p50 latency, owned zero-copy on both sides, cores 2 and 4 of an i7-11800
 | 64 KiB | 113 ns | 383 ns |
 | 921,600 B | 95 ns | 398 ns |
 
-With each side touching the first 64 B: 124 to 137 ns against 429 to 447 ns. These rows measure ownership hand-over, not data movement; a frame that is actually written and read costs what the memory system charges for it in both libraries. iceoryx2 was run in its default configuration and offers dynamic subscribers and history that Renoir's frame ring does not; see `.ai/benchmarks` for the caveats recorded with the run.
+With each side touching the first 64 B: 124 to 137 ns against 429 to 447 ns. These rows measure ownership hand-over, not data movement; a frame that is actually written and read costs what the memory system charges for it in both libraries. iceoryx2 was run in its default configuration and offers dynamic subscribers and history that Renoir's frame ring does not. The numbers are from one run on one machine.
