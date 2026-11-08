@@ -11,7 +11,10 @@ use crate::error::{RenoirError, Result};
 use super::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
 use super::spsc::SESSION_MARKER_OFFSET;
 
+mod channel;
 mod init;
+
+pub use channel::LeanChannel;
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;
 pub const LEAN_HEADER_BYTES: usize = 192;

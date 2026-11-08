@@ -1,0 +1,81 @@
+use std::sync::Arc;
+
+use crate::{
+    error::{RenoirError, Result},
+    memory::{BackingType, RegionConfig, SharedMemoryRegion},
+};
+
+use super::{lean_slot_bytes, LeanCursor, LeanPublisher, LeanRead, LeanRing};
+
+pub struct LeanChannel {
+    ring: Arc<LeanRing>,
+    publisher: LeanPublisher,
+    cursor: LeanCursor,
+    _region: SharedMemoryRegion,
+}
+
+impl LeanChannel {
+    pub fn open(name: &str, msg_size: usize, slot_count: usize, from_oldest: bool) -> Result<Self> {
+        let slot_bytes = lean_slot_bytes(msg_size).ok_or_else(|| {
+            RenoirError::invalid_parameter("msg_size", "Lean message size must be 1..=504 bytes")
+        })?;
+        if slot_count == 0 {
+            return Err(RenoirError::invalid_parameter(
+                "slot_count",
+                "Lean slot count must be non-zero",
+            ));
+        }
+        let ring_bytes = slot_bytes
+            .checked_mul(slot_count)
+            .ok_or_else(|| RenoirError::invalid_parameter("slot_count", "Ring size overflows"))?;
+        let size = LeanRing::required_memory_size(ring_bytes, msg_size);
+        let region = SharedMemoryRegion::new(RegionConfig {
+            name: name.to_owned(),
+            size,
+            backing_type: BackingType::FileBacked,
+            ..RegionConfig::default()
+        })?;
+        let ptr = std::ptr::NonNull::new(unsafe { region.as_mut_ptr_unsafe::<u8>() })
+            .ok_or_else(|| RenoirError::invalid_parameter("region", "Region mapping is null"))?;
+        let ring =
+            Arc::new(unsafe { LeanRing::from_memory(ptr, region.size(), ring_bytes, msg_size)? });
+        let cursor = if from_oldest {
+            ring.cursor_oldest()
+        } else {
+            ring.cursor_latest()
+        };
+        let publisher = ring.publisher();
+        Ok(Self {
+            ring,
+            publisher,
+            cursor,
+            _region: region,
+        })
+    }
+
+    #[inline]
+    pub fn publish(&mut self, data: &[u8]) -> Result<()> {
+        self.publisher.publish(data)
+    }
+
+    #[inline]
+    pub fn try_read(&mut self, out: &mut [u8]) -> Result<LeanRead> {
+        self.ring.try_read(&mut self.cursor, out)
+    }
+
+    pub fn skip_to_latest(&mut self, keep: u64) -> u64 {
+        self.ring.skip_to_latest(&mut self.cursor, keep)
+    }
+
+    pub fn lost(&self) -> u64 {
+        self.cursor.lost()
+    }
+
+    pub fn pending(&self) -> usize {
+        self.ring.pending(&self.cursor)
+    }
+
+    pub fn msg_size(&self) -> usize {
+        self.ring.msg_size()
+    }
+}

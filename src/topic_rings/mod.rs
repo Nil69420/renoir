@@ -17,7 +17,7 @@ pub use broadcast::{
     BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
 };
 pub use lean::{
-    lean_slot_bytes, LeanCursor, LeanPublisher, LeanRead, LeanRing, LEAN_HEADER_BYTES,
+    lean_slot_bytes, LeanChannel, LeanCursor, LeanPublisher, LeanRead, LeanRing, LEAN_HEADER_BYTES,
     LEAN_MAX_SLOT_LINES, LEAN_RING_MAGIC,
 };
 pub use mpmc::{MPMCTopicRing, MPMC_RING_MAGIC};
