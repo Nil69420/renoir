@@ -13,6 +13,7 @@ use super::spsc::SESSION_MARKER_OFFSET;
 
 mod channel;
 mod init;
+mod multi;
 mod wait;
 
 pub use channel::LeanChannel;
@@ -33,17 +34,21 @@ struct LeanHeader {
     pad_session: [u8; 7],
     slot_bytes: u64,
     msg_size: u64,
-    pad_cold: [u8; 24],
+    mode: u32,
+    pad_cold: [u8; 20],
     write_idx: AtomicU64,
     pad_write: [u8; 56],
     wake: AtomicU32,
     waiters: AtomicU32,
-    pad_wake: [u8; 56],
+    claim: AtomicU64,
+    pad_wake: [u8; 48],
 }
 
 const _: () = assert!(std::mem::offset_of!(LeanHeader, session) == SESSION_MARKER_OFFSET);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, write_idx) == 64);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, mode) == 40);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, wake) == 128);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, claim) == 136);
 const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_HEADER_BYTES);
 
 #[derive(Debug)]
@@ -53,6 +58,7 @@ pub struct LeanRing {
     mask: u64,
     slot_bytes: usize,
     msg_size: usize,
+    multi: bool,
 }
 
 unsafe impl Send for LeanRing {}
@@ -62,9 +68,20 @@ unsafe impl Sync for LeanRing {}
 pub struct LeanCursor {
     next: u64,
     lost: u64,
+    empty_polls: u32,
+    stalled: Option<(u64, std::time::Instant)>,
 }
 
 impl LeanCursor {
+    fn at(next: u64) -> Self {
+        Self {
+            next,
+            lost: 0,
+            empty_polls: 0,
+            stalled: None,
+        }
+    }
+
     pub fn lost(&self) -> u64 {
         self.lost
     }
@@ -72,6 +89,12 @@ impl LeanCursor {
     pub fn next_index(&self) -> u64 {
         self.next
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeanMode {
+    SingleProducer = 0,
+    MultiProducer = 1,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +149,25 @@ impl LeanRing {
         ring_bytes: usize,
         msg_size: usize,
     ) -> Result<Self> {
+        Self::from_memory_mode(
+            memory,
+            memory_size,
+            ring_bytes,
+            msg_size,
+            LeanMode::SingleProducer,
+        )
+    }
+
+    /// # Safety
+    ///
+    /// Same contract as [`LeanRing::from_memory`].
+    pub unsafe fn from_memory_mode(
+        memory: NonNull<u8>,
+        memory_size: usize,
+        ring_bytes: usize,
+        msg_size: usize,
+        mode: LeanMode,
+    ) -> Result<Self> {
         let slot_bytes = lean_slot_bytes(msg_size).ok_or_else(|| {
             RenoirError::invalid_parameter(
                 "max_payload_size",
@@ -155,6 +197,7 @@ impl LeanRing {
             slot_count as u64,
             slot_bytes as u64,
             msg_size as u64,
+            mode as u32,
         )?;
         Ok(Self {
             header,
@@ -162,6 +205,7 @@ impl LeanRing {
             mask: slot_count as u64 - 1,
             slot_bytes,
             msg_size,
+            multi: mode == LeanMode::MultiProducer,
         })
     }
 
@@ -185,18 +229,12 @@ impl LeanRing {
     }
 
     pub fn cursor_latest(&self) -> LeanCursor {
-        LeanCursor {
-            next: self.published() + 1,
-            lost: 0,
-        }
+        LeanCursor::at(self.published() + 1)
     }
 
     pub fn cursor_oldest(&self) -> LeanCursor {
         let w = self.published();
-        LeanCursor {
-            next: w.saturating_sub(self.mask).max(1),
-            lost: 0,
-        }
+        LeanCursor::at(w.saturating_sub(self.mask).max(1))
     }
 
     pub fn pending(&self, cursor: &LeanCursor) -> usize {
@@ -230,6 +268,9 @@ impl LeanRing {
                     return Ok(LeanRead::Message);
                 }
             } else if s1 < want {
+                if self.multi && self.hole_expired(cursor) {
+                    continue;
+                }
                 return Ok(LeanRead::Empty);
             }
             attempts += 1;
@@ -297,6 +338,9 @@ impl LeanPublisher {
                 "payload",
                 "Lean payload must be exactly the topic message size",
             ));
+        }
+        if self.ring.multi {
+            return self.publish_multi(data);
         }
         let idx = self.next;
         let slot = self.ring.slot_ptr(idx);

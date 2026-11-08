@@ -5,7 +5,7 @@ use crate::{
     memory::{BackingType, RegionConfig, SharedMemoryRegion},
 };
 
-use super::{lean_slot_bytes, LeanCursor, LeanPublisher, LeanRead, LeanRing};
+use super::{lean_slot_bytes, LeanCursor, LeanMode, LeanPublisher, LeanRead, LeanRing};
 
 pub struct LeanChannel {
     ring: Arc<LeanRing>,
@@ -16,6 +16,22 @@ pub struct LeanChannel {
 
 impl LeanChannel {
     pub fn open(name: &str, msg_size: usize, slot_count: usize, from_oldest: bool) -> Result<Self> {
+        Self::open_with_mode(
+            name,
+            msg_size,
+            slot_count,
+            from_oldest,
+            LeanMode::SingleProducer,
+        )
+    }
+
+    pub fn open_with_mode(
+        name: &str,
+        msg_size: usize,
+        slot_count: usize,
+        from_oldest: bool,
+        mode: LeanMode,
+    ) -> Result<Self> {
         let slot_bytes = lean_slot_bytes(msg_size).ok_or_else(|| {
             RenoirError::invalid_parameter("msg_size", "Lean message size must be 1..=504 bytes")
         })?;
@@ -37,8 +53,9 @@ impl LeanChannel {
         })?;
         let ptr = std::ptr::NonNull::new(unsafe { region.as_mut_ptr_unsafe::<u8>() })
             .ok_or_else(|| RenoirError::invalid_parameter("region", "Region mapping is null"))?;
-        let ring =
-            Arc::new(unsafe { LeanRing::from_memory(ptr, region.size(), ring_bytes, msg_size)? });
+        let ring = Arc::new(unsafe {
+            LeanRing::from_memory_mode(ptr, region.size(), ring_bytes, msg_size, mode)?
+        });
         let cursor = if from_oldest {
             ring.cursor_oldest()
         } else {

@@ -161,6 +161,8 @@
 
 #define RENOIR_LEAN_FROM_OLDEST 1
 
+#define RENOIR_LEAN_MULTI_PRODUCER 2
+
 /**
  * Topic registration flag: discard messages left by a previous clean session
  * when no live process holds the topic

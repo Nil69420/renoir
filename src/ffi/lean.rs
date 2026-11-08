@@ -3,13 +3,14 @@ use std::{
     time::Duration,
 };
 
-use crate::topic_rings::{LeanChannel, LeanRead};
+use crate::topic_rings::{LeanChannel, LeanMode, LeanRead};
 
 use super::types::RenoirErrorCode;
 
 pub type RenoirLeanHandle = *mut c_void;
 
 pub const RENOIR_LEAN_FROM_OLDEST: u32 = 1;
+pub const RENOIR_LEAN_MULTI_PRODUCER: u32 = 2;
 
 #[inline(always)]
 fn handle<'a>(h: RenoirLeanHandle) -> Option<&'a mut LeanChannel> {
@@ -31,7 +32,18 @@ pub extern "C" fn renoir_lean_open(
         return RenoirErrorCode::InvalidParameter;
     };
     let from_oldest = flags & RENOIR_LEAN_FROM_OLDEST != 0;
-    match LeanChannel::open(name, msg_size as usize, slot_count as usize, from_oldest) {
+    let mode = if flags & RENOIR_LEAN_MULTI_PRODUCER != 0 {
+        LeanMode::MultiProducer
+    } else {
+        LeanMode::SingleProducer
+    };
+    match LeanChannel::open_with_mode(
+        name,
+        msg_size as usize,
+        slot_count as usize,
+        from_oldest,
+        mode,
+    ) {
         Ok(channel) => {
             unsafe { *out = Box::into_raw(Box::new(channel)) as RenoirLeanHandle };
             RenoirErrorCode::Success

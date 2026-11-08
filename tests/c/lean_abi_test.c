@@ -63,6 +63,29 @@ int main(void) {
   CHECK(renoir_lean_wait(NULL, 0, 0) == RenoirErrorCode_InvalidParameter);
   CHECK(renoir_lean_publish_notify(pub, NULL, 24) == RenoirErrorCode_InvalidParameter);
 
+  {
+    RenoirLeanHandle mp_a = NULL;
+    RenoirLeanHandle mp_b = NULL;
+    RenoirLeanHandle wrong = NULL;
+    char mp_name[64];
+    (void)snprintf(mp_name, sizeof mp_name, "lean_abi_mp_%d", (int)getpid());
+    CHECK(renoir_lean_open(mp_name, 24, 64, RENOIR_LEAN_MULTI_PRODUCER, &mp_a) ==
+          RenoirErrorCode_Success);
+    CHECK(renoir_lean_open(mp_name, 24, 64,
+                           RENOIR_LEAN_MULTI_PRODUCER | RENOIR_LEAN_FROM_OLDEST,
+                           &mp_b) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_open(mp_name, 24, 64, 0, &wrong) != RenoirErrorCode_Success);
+    memset(msg, 0xAB, sizeof msg);
+    CHECK(renoir_lean_publish(mp_a, msg, sizeof msg) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_publish(mp_b, msg, sizeof msg) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_pending(mp_b) == 2);
+    CHECK(renoir_lean_try_read(mp_b, out, sizeof out) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_try_read(mp_b, out, sizeof out) == RenoirErrorCode_Success);
+    CHECK(out[0] == 0xAB);
+    renoir_lean_close(mp_a);
+    renoir_lean_close(mp_b);
+  }
+
   renoir_lean_close(sub);
   renoir_lean_close(pub);
   renoir_lean_close(NULL);

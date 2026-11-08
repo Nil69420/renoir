@@ -15,9 +15,10 @@ public:
     static constexpr size_t kMaxMessageBytes = 504;
 
     LeanChannel(const std::string& name, uint32_t messageSize, uint32_t slotCount,
-                bool fromOldest = false) {
-        checkResult(renoir_lean_open(name.c_str(), messageSize, slotCount,
-                                     fromOldest ? RENOIR_LEAN_FROM_OLDEST : 0, &handle_),
+                bool fromOldest = false, bool multiProducer = false) {
+        const uint32_t flags = (fromOldest ? RENOIR_LEAN_FROM_OLDEST : 0U) |
+                               (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
+        checkResult(renoir_lean_open(name.c_str(), messageSize, slotCount, flags, &handle_),
                     "lean open");
         messageSize_ = messageSize;
     }

@@ -102,3 +102,62 @@ fn lapped_reader_detects_overwrite() {
         writer.join().unwrap();
     });
 }
+
+struct MpRing {
+    ring: Ring,
+    claim: AtomicU64,
+}
+
+fn publish_mp(m: &MpRing) {
+    let idx = m.claim.fetch_add(1, Ordering::AcqRel) + 1;
+    let s = &m.ring.slots[((idx - 1) & 1) as usize];
+    let previous = if idx > 2 { 2 * (idx - 2) } else { 0 };
+    loop {
+        if s.seq
+            .compare_exchange(previous, 2 * idx - 1, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            break;
+        }
+        thread::yield_now();
+    }
+    fence(Ordering::Release);
+    s.a.store(idx, Ordering::Relaxed);
+    s.b.store(idx, Ordering::Relaxed);
+    assert!(s
+        .seq
+        .compare_exchange(2 * idx - 1, 2 * idx, Ordering::Release, Ordering::Relaxed)
+        .is_ok());
+    m.ring.write_idx.fetch_max(idx, Ordering::Release);
+}
+
+#[test]
+fn multi_producer_reads_are_never_torn() {
+    loom::model(|| {
+        let ring = new_ring();
+        let m = Arc::new(MpRing {
+            ring: Arc::try_unwrap(ring).ok().unwrap(),
+            claim: AtomicU64::new(0),
+        });
+        let a = m.clone();
+        let b = m.clone();
+        let t1 = thread::spawn(move || {
+            publish_mp(&a);
+            publish_mp(&a);
+        });
+        let t2 = thread::spawn(move || publish_mp(&b));
+        for idx in 1..=3u64 {
+            if let Some((x, y)) = try_read(&m.ring, idx) {
+                assert_eq!(x, y);
+                assert_eq!(x, idx);
+            }
+        }
+        t1.join().unwrap();
+        t2.join().unwrap();
+        for idx in 2..=3u64 {
+            if let Some((x, y)) = try_read(&m.ring, idx) {
+                assert_eq!((x, y), (idx, idx));
+            }
+        }
+    });
+}

@@ -1,4 +1,4 @@
-use ::renoir::topic_rings::{LeanChannel, LeanRead};
+use ::renoir::topic_rings::{LeanChannel, LeanMode, LeanRead};
 use pyo3::{prelude::*, types::PyBytes};
 
 use crate::map_err;
@@ -11,9 +11,21 @@ pub struct PyLeanChannel {
 #[pymethods]
 impl PyLeanChannel {
     #[new]
-    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false))]
-    fn new(name: &str, msg_size: usize, slot_count: usize, from_oldest: bool) -> PyResult<Self> {
-        let inner = LeanChannel::open(name, msg_size, slot_count, from_oldest).map_err(map_err)?;
+    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false, multi_producer=false))]
+    fn new(
+        name: &str,
+        msg_size: usize,
+        slot_count: usize,
+        from_oldest: bool,
+        multi_producer: bool,
+    ) -> PyResult<Self> {
+        let mode = if multi_producer {
+            LeanMode::MultiProducer
+        } else {
+            LeanMode::SingleProducer
+        };
+        let inner = LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
+            .map_err(map_err)?;
         Ok(Self { inner })
     }
 

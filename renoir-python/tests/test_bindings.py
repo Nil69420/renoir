@@ -174,6 +174,18 @@ def test_lean_channel_wait_and_notify(tmp_path, monkeypatch):
     assert sub.try_read() == b"x" * 16
 
 
+def test_lean_channel_multi_producer(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    a = renoir.LeanChannel("py_lean_mp", 16, 64, False, True)
+    b = renoir.LeanChannel("py_lean_mp", 16, 64, True, True)
+    a.publish(b"a" * 16)
+    b.publish(b"b" * 16)
+    assert b.try_read() == b"a" * 16
+    assert b.try_read() == b"b" * 16
+    with pytest.raises(renoir.RenoirError):
+        renoir.LeanChannel("py_lean_mp", 16, 64)
+
+
 def test_lean_channel_rejects_bad_sizes(tmp_path, monkeypatch):
     monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
     with pytest.raises(renoir.RenoirError):

@@ -68,6 +68,7 @@ pub use lean::{
     renoir_lean_close, renoir_lean_lost, renoir_lean_open, renoir_lean_pending,
     renoir_lean_publish, renoir_lean_publish_notify, renoir_lean_skip_to_latest,
     renoir_lean_try_read, renoir_lean_wait, RenoirLeanHandle, RENOIR_LEAN_FROM_OLDEST,
+    RENOIR_LEAN_MULTI_PRODUCER,
 };
 
 // Version API

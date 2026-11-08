@@ -19,6 +19,7 @@ pub(super) unsafe fn attach_header(
     slot_count: u64,
     slot_bytes: u64,
     msg_size: u64,
+    mode: u32,
 ) -> Result<()> {
     let magic = &*(header as *const AtomicU64);
     match claim(magic, LEAN_RING_MAGIC)? {
@@ -30,15 +31,23 @@ pub(super) unsafe fn attach_header(
                     "Existing lean ring has a different geometry",
                 ));
             }
+            if h.mode != mode {
+                return Err(RenoirError::invalid_parameter(
+                    "ring",
+                    "Existing lean ring uses a different producer mode",
+                ));
+            }
         }
         Claim::Create => {
             std::ptr::addr_of_mut!((*header).slot_count).write(slot_count);
             std::ptr::addr_of_mut!((*header).slot_bytes).write(slot_bytes);
             std::ptr::addr_of_mut!((*header).msg_size).write(msg_size);
+            std::ptr::addr_of_mut!((*header).mode).write(mode);
             (*header).session.store(SESSION_DIRTY, Ordering::Relaxed);
             (*header).write_idx.store(0, Ordering::Relaxed);
             (*header).wake.store(0, Ordering::Relaxed);
             (*header).waiters.store(0, Ordering::Relaxed);
+            (*header).claim.store(0, Ordering::Relaxed);
             seal(magic, LEAN_RING_MAGIC);
         }
     }

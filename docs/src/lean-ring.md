@@ -70,3 +70,14 @@ under QEMU. See `.github/workflows/verify.yml`.
 A publisher that uses plain `publish` does not wake sleeping consumers; a consumer that calls `wait` with a finite timeout and `spin_iterations` large enough for its latency budget still works against either publisher.
 
 The store-buffering handshake between `publish_notify` and `wait` is checked against the AArch64 memory model with `herd7` (`tests/litmus/wake_handshake.litmus`, plus a negative control with the fence removed).
+
+## Multiple producers
+
+Open the channel with the multi-producer flag (`RENOIR_LEAN_MULTI_PRODUCER`, `multiProducer`, `multi_producer=True`, `LeanMode::MultiProducer`) and any number of threads or processes may publish to it. The mode is stored in the ring header and a mismatching open is rejected, so single- and multi-producer publishers can never share a ring.
+
+Each publish claims a sequence number with an atomic add, takes a per-slot ticket with a compare-and-swap, copies the payload and publishes. An uncontended publish costs about 26 ns against about 7 ns for the single-producer path, and readers pay nothing extra on the hot path.
+
+Failure behaviour, which differs from the single-producer ring:
+
+- A producer killed between claiming and publishing leaves a hole. A reader that polls an unpublished slot while a later slot has been claimed waits 5 ms and then skips the hole, counting it in `lost`.
+- A producer that stalls inside a publish for more than 50 ms can have its slot taken over by a producer that has wrapped the ring. The stalled producer's late completion fails with an error instead of publishing. Because the stalled producer's payload bytes may still land in the slot, this is a known limit: do not suspend producers (SIGSTOP, debugger) while they publish on a multi-producer ring.
