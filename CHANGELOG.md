@@ -7,6 +7,8 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-08
+
 ### Fixed
 - A ring left half-initialised by a killed process no longer blocks later openers forever: after 2 seconds the next opener takes over the initialisation.
 - SPSC and MPMC ring headers are now initialised through a compare-and-swap handshake, removing a data race when two openers created the same ring concurrently.

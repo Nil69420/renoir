@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(renoir VERSION 0.1.0 LANGUAGES C CXX)
+project(renoir VERSION 0.9.0 LANGUAGES C CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)

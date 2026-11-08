@@ -1,6 +1,6 @@
 [package]
 name = "renoir"
-version = "0.1.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["Nilanjan Chowdhury <78751630+Nil69420@users.noreply.github.com>"]
 description = "High-performance shared memory manager for inter-process communication"
