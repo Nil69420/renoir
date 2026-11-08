@@ -46,6 +46,15 @@ public:
         return renoir_lean_publish(handle_, static_cast<const uint8_t*>(data), len);
     }
 
+    RenoirErrorCode publishNotify(const void* data, size_t len) noexcept {
+        return renoir_lean_publish_notify(handle_, static_cast<const uint8_t*>(data), len);
+    }
+
+    bool wait(uint32_t spinIterations = 2000, uint64_t timeoutNs = UINT64_MAX) noexcept {
+        return renoir_lean_wait(handle_, spinIterations, timeoutNs) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
     template <typename T>
     RenoirErrorCode publish(const T& value) noexcept {
         static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");

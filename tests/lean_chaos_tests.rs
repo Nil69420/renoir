@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use renoir::ffi::{renoir_lean_close, renoir_lean_open, renoir_lean_publish, renoir_lean_try_read};
 
@@ -82,6 +82,8 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
     let reader = open(&name, 1);
     let stop = Arc::new(AtomicBool::new(false));
     let stop_reader = stop.clone();
+    let seen_generation = Arc::new(AtomicU64::new(u64::MAX));
+    let seen_reader = seen_generation.clone();
     let reader_addr = reader as usize;
     let thread = std::thread::spawn(move || {
         let h = reader_addr as *mut std::ffi::c_void;
@@ -104,6 +106,7 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
             assert!(first > last, "out of order: {first} after {last}");
             last = first;
             generations.insert(first >> 40);
+            seen_reader.store(first >> 40, Ordering::Release);
         }
         (last, generations)
     });
@@ -114,7 +117,11 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
         rng ^= rng << 13;
         rng ^= rng >> 7;
         rng ^= rng << 17;
-        std::thread::sleep(Duration::from_micros(200 + rng % 20_000));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while seen_generation.load(Ordering::Acquire) != generation && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_micros(100));
+        }
+        std::thread::sleep(Duration::from_micros(rng % 5_000));
         child.kill().unwrap();
         child.wait().unwrap();
     }
@@ -129,7 +136,7 @@ fn publisher_killed_repeatedly_never_corrupts_readers() {
     stop.store(true, Ordering::Relaxed);
     let (final_last, generations) = thread.join().unwrap();
     assert!(
-        generations.len() as u64 >= ROUNDS / 2,
+        generations.len() as u64 >= ROUNDS * 9 / 10,
         "reader saw only {} of {ROUNDS} publisher generations",
         generations.len()
     );

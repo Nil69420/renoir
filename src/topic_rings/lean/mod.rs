@@ -1,7 +1,7 @@
 use std::{
     ptr::NonNull,
     sync::{
-        atomic::{fence, AtomicU64, AtomicU8, Ordering},
+        atomic::{fence, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc,
     },
 };
@@ -13,6 +13,7 @@ use super::spsc::SESSION_MARKER_OFFSET;
 
 mod channel;
 mod init;
+mod wait;
 
 pub use channel::LeanChannel;
 
@@ -35,11 +36,14 @@ struct LeanHeader {
     pad_cold: [u8; 24],
     write_idx: AtomicU64,
     pad_write: [u8; 56],
-    pad_tail: [u8; 64],
+    wake: AtomicU32,
+    waiters: AtomicU32,
+    pad_wake: [u8; 56],
 }
 
 const _: () = assert!(std::mem::offset_of!(LeanHeader, session) == SESSION_MARKER_OFFSET);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, write_idx) == 64);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, wake) == 128);
 const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_HEADER_BYTES);
 
 #[derive(Debug)]
@@ -268,6 +272,11 @@ impl LeanRing {
     fn slot_ptr(&self, idx: u64) -> *mut u8 {
         let i = (idx & self.mask) as usize;
         unsafe { self.slots.as_ptr().add(i * self.slot_bytes) }
+    }
+
+    #[inline(always)]
+    fn hdr(&self) -> &LeanHeader {
+        unsafe { self.header.as_ref() }
     }
 
     #[inline(always)]

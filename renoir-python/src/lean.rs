@@ -21,6 +21,18 @@ impl PyLeanChannel {
         self.inner.publish(payload.as_bytes()).map_err(map_err)
     }
 
+    fn publish_notify(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner
+            .publish_notify(payload.as_bytes())
+            .map_err(map_err)
+    }
+
+    #[pyo3(signature = (spin_iterations=2000, timeout_ms=None))]
+    fn wait(&self, py: Python<'_>, spin_iterations: u32, timeout_ms: Option<u64>) -> bool {
+        let timeout = timeout_ms.map(std::time::Duration::from_millis);
+        py.detach(|| self.inner.wait_readable(spin_iterations, timeout))
+    }
+
     fn try_read<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
         let size = self.inner.msg_size();
         let mut out = None;

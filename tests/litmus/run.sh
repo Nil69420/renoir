@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 status=0
-for f in seqlock_*.litmus; do
+for f in *.litmus; do
   case "$f" in
     *_CONTROL.litmus) want="Sometimes" ;;
     *) want="Never" ;;

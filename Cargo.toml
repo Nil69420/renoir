@@ -113,3 +113,7 @@ assets = [
 ]
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(miri)'] }
+
+[[bench]]
+name = "lean_notify_cost"
+harness = false

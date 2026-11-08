@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     error::{RenoirError, Result},
@@ -56,6 +56,16 @@ impl LeanChannel {
     #[inline]
     pub fn publish(&mut self, data: &[u8]) -> Result<()> {
         self.publisher.publish(data)
+    }
+
+    #[inline]
+    pub fn publish_notify(&mut self, data: &[u8]) -> Result<()> {
+        self.publisher.publish_notify(data)
+    }
+
+    pub fn wait_readable(&self, spin_iterations: u32, timeout: Option<Duration>) -> bool {
+        self.ring
+            .wait_readable(&self.cursor, spin_iterations, timeout)
     }
 
     #[inline]

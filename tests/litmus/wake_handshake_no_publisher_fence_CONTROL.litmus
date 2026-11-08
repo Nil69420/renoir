@@ -1,0 +1,11 @@
+AArch64 wake_handshake_no_publisher_fence_CONTROL
+{
+0:X1=widx; 0:X3=waiters; 0:X2=1;
+1:X1=widx; 1:X3=waiters; 1:X2=1;
+widx=0; waiters=0;
+}
+ P0                | P1               ;
+ STLR W2,[X1]      | STLR W2,[X3]     ;
+ NOP                | LDAR W4,[X1]     ;
+ LDR W5,[X3]       |                  ;
+exists (0:X5=0 /\ 1:X4=0)

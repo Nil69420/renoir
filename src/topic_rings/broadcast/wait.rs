@@ -17,7 +17,7 @@ impl BroadcastTopicRing {
     }
 
     pub fn wait_readable(&self, cursor: &BroadcastCursor, timeout: Option<Duration>) -> bool {
-        let deadline = timeout.map(|t| Instant::now() + t);
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
         let h = self.hdr();
         loop {
             if cursor.next <= self.write_idx().load(Ordering::Acquire) {

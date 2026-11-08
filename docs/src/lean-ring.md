@@ -59,3 +59,14 @@ Unit tests, loom model of the publish and read protocol, Miri (default and Tree
 Borrows), ThreadSanitizer, AddressSanitizer, a corrupt-memory fuzz target, a counting
 allocator test that proves zero allocation per publish and read, and an aarch64 run
 under QEMU. See `.github/workflows/verify.yml`.
+
+## Blocking consumers
+
+`publish` never issues a fence or a syscall beyond the seqlock stores, so a spinning consumer sees data in about the cache-line transfer time. A consumer that cannot afford to spin can block instead:
+
+- Publisher: call `publish_notify` (`renoir_lean_publish_notify`, `publishNotify`, `publish_notify`). It publishes, issues one sequentially consistent fence (about 3 ns on x86 when nobody is waiting) and wakes waiters through a futex only when a waiter has registered.
+- Consumer: call `wait` (`renoir_lean_wait`, `wait`). It spins for `spin_iterations` checks, then registers as a waiter and sleeps on the futex until data arrives or the timeout expires. A timeout of `u64::MAX` nanoseconds in C means wait forever.
+
+A publisher that uses plain `publish` does not wake sleeping consumers; a consumer that calls `wait` with a finite timeout and `spin_iterations` large enough for its latency budget still works against either publisher.
+
+The store-buffering handshake between `publish_notify` and `wait` is checked against the AArch64 memory model with `herd7` (`tests/litmus/wake_handshake.litmus`, plus a negative control with the fence removed).

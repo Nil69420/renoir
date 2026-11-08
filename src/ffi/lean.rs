@@ -1,4 +1,7 @@
-use std::ffi::{c_char, c_void, CStr};
+use std::{
+    ffi::{c_char, c_void, CStr},
+    time::Duration,
+};
 
 use crate::topic_rings::{LeanChannel, LeanRead};
 
@@ -53,6 +56,42 @@ pub extern "C" fn renoir_lean_publish(
     match h.publish(src) {
         Ok(()) => RenoirErrorCode::Success,
         Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_publish_notify(
+    h: RenoirLeanHandle,
+    data: *const u8,
+    len: usize,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if data.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let src = unsafe { std::slice::from_raw_parts(data, len) };
+    match h.publish_notify(src) {
+        Ok(()) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_wait(
+    h: RenoirLeanHandle,
+    spin_iterations: u32,
+    timeout_ns: u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let timeout = (timeout_ns != u64::MAX).then(|| Duration::from_nanos(timeout_ns));
+    if h.wait_readable(spin_iterations, timeout) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
     }
 }
 

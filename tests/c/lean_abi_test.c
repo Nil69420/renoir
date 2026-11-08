@@ -55,6 +55,14 @@ int main(void) {
   CHECK(renoir_lean_try_read(sub, out, sizeof out) == RenoirErrorCode_Success);
   CHECK(out[0] == 19);
 
+  CHECK(renoir_lean_wait(sub, 0, 0) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_lean_try_read(sub, out, sizeof out) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_lean_wait(sub, 10, 1000000) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_lean_publish_notify(pub, msg, sizeof msg) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait(sub, 0, 1000000) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait(NULL, 0, 0) == RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_publish_notify(pub, NULL, 24) == RenoirErrorCode_InvalidParameter);
+
   renoir_lean_close(sub);
   renoir_lean_close(pub);
   renoir_lean_close(NULL);

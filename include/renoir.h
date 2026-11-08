@@ -762,6 +762,14 @@ enum RenoirErrorCode renoir_lean_open(const char *name,
 
 enum RenoirErrorCode renoir_lean_publish(RenoirLeanHandle h, const uint8_t *data, uintptr_t len);
 
+enum RenoirErrorCode renoir_lean_publish_notify(RenoirLeanHandle h,
+                                                const uint8_t *data,
+                                                uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_wait(RenoirLeanHandle h,
+                                      uint32_t spin_iterations,
+                                      uint64_t timeout_ns);
+
 enum RenoirErrorCode renoir_lean_try_read(RenoirLeanHandle h,
                                           uint8_t *buffer,
                                           uintptr_t buffer_len);

@@ -45,6 +45,12 @@ int main() {
     }
     CHECK(!sub.tryRead(out));
 
+    CHECK(!sub.wait(10, 1000000));
+    Imu woken{7, {0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 0.0F}, 7};
+    CHECK(pub.publishNotify(&woken, sizeof woken) == RenoirErrorCode::RenoirErrorCode_Success);
+    CHECK(sub.wait(0, 1000000));
+    CHECK(sub.tryRead(out) && out.seq == 7);
+
     renoir::LeanChannel moved(std::move(sub));
     CHECK(!moved.tryRead(out));
     CHECK(pub.publish(&out, 1) != RenoirErrorCode::RenoirErrorCode_Success);
