@@ -27,3 +27,9 @@ The library has the SONAME `librenoir.so.0`. Install it with its symlinks (the D
 
 ## No `/dev/shm` space
 Rings live in RAM. Check `df -h /dev/shm`; set `RENOIR_SHM_DIR` to another tmpfs if needed.
+
+## Opening a ring fails with "Not enough space ... shared-memory filesystem"
+Rings reserve their whole size when they are created, so a full or small `/dev/shm` is reported at open. In Docker the default is 64 MB: start the container with `--shm-size=1g` (or whatever your rings need, see `docs/src/sizing.md`), or point `RENOIR_SHM_DIR` at a larger tmpfs. Rings are never sparse, so the memory is committed from the moment of creation.
+
+## Opening a ring fails with "Existing region is smaller than the requested size"
+Another process created the same ring with a smaller geometry. Message size, slot count and maximum frame size must match between all processes using a ring. The existing ring is left untouched.

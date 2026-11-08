@@ -160,8 +160,12 @@ impl<T> SequencedRingBuffer<T> {
 impl<T> Drop for SequencedRingBuffer<T> {
     fn drop(&mut self) {
         // Deallocate buffers
-        let buffer_layout = std::alloc::Layout::array::<T>(self.capacity).unwrap();
-        let seq_layout = std::alloc::Layout::array::<AtomicUsize>(self.capacity).unwrap();
+        let (Ok(buffer_layout), Ok(seq_layout)) = (
+            std::alloc::Layout::array::<T>(self.capacity),
+            std::alloc::Layout::array::<AtomicUsize>(self.capacity),
+        ) else {
+            return;
+        };
 
         unsafe {
             std::alloc::dealloc(self.buffer.as_ptr() as *mut u8, buffer_layout);

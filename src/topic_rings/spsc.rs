@@ -547,11 +547,12 @@ impl Drop for SPSCTopicRing {
         // Deallocate buffer only if we own it (from_memory borrows)
         if self.owns_memory {
             let total = Self::required_memory_size(self.capacity);
-            let layout =
+            if let Ok(layout) =
                 std::alloc::Layout::from_size_align(total, std::mem::align_of::<SPSCRingHeader>())
-                    .unwrap();
-            unsafe {
-                std::alloc::dealloc(self.header.as_ptr() as *mut u8, layout);
+            {
+                unsafe {
+                    std::alloc::dealloc(self.header.as_ptr() as *mut u8, layout);
+                }
             }
         }
     }

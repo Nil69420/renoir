@@ -50,8 +50,7 @@ impl Default for ControlHeader {
             global_sequence: AtomicU64::new(0),
             created_at: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+                .map_or(0, |d| d.as_secs()),
             last_modified: AtomicU64::new(0),
         }
     }
@@ -224,8 +223,7 @@ impl ControlRegion {
         header.last_modified.store(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+                .map_or(0, |d| d.as_secs()),
             std::sync::atomic::Ordering::SeqCst,
         );
 

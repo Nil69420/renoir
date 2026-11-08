@@ -147,11 +147,8 @@ impl SharedMemoryRegion {
                 .map_err(|e| RenoirError::from_io(e, "Failed to open existing file"))?
         };
 
-        // Set file size if creating
+        // Only the session owner sizes the file; participants never resize a live region.
         let session = if config.create {
-            file.set_len(config.size as u64)
-                .map_err(|e| RenoirError::from_io(e, "Failed to set file size"))?;
-
             // Liveness protocol: advisory flock() locks are tied to the
             // open-file-description and are released by the kernel the moment
             // every fd referencing them closes — including on crash/kill -9.
@@ -174,6 +171,14 @@ impl SharedMemoryRegion {
 
                     if is_ring && marker == SESSION_CLEAN {
                         // Previous holder exited cleanly: preserve content
+                        let current = file
+                            .metadata()
+                            .map_err(|e| RenoirError::from_io(e, "Failed to stat file"))?
+                            .len();
+                        if current < config.size as u64 {
+                            file.set_len(config.size as u64)
+                                .map_err(|e| RenoirError::from_io(e, "Failed to set file size"))?;
+                        }
                     } else {
                         // Fresh file, non-ring region, or crashed session:
                         // zero the content so a fresh attach reinitializes
@@ -183,6 +188,8 @@ impl SharedMemoryRegion {
                         file.set_len(config.size as u64)
                             .map_err(|e| RenoirError::from_io(e, "Failed to set file size"))?;
                     }
+
+                    preallocate(fd, config.size)?;
 
                     // We are the new session owner. Mark DIRTY so a crash
                     // before our own clean close is detected by the next
@@ -198,6 +205,7 @@ impl SharedMemoryRegion {
                 Err(nix::errno::Errno::EWOULDBLOCK) => {
                     // A live process holds the region; keep its content.
                     // We are a participant, never the session owner.
+                    wait_for_size(&file, config.size, std::time::Duration::from_millis(500))?;
                 }
                 Err(e) => {
                     return Err(RenoirError::platform(format!("flock failed: {}", e)));
@@ -205,6 +213,7 @@ impl SharedMemoryRegion {
             }
             session
         } else {
+            wait_for_size(&file, config.size, std::time::Duration::ZERO)?;
             SessionInfo::non_owner()
         };
 
@@ -236,6 +245,7 @@ impl SharedMemoryRegion {
         // Set size using ftruncate
         ftruncate(&owned_fd, config.size as i64)
             .map_err(|e| RenoirError::platform(format!("Failed to set memfd size: {}", e)))?;
+        preallocate(raw_fd, config.size)?;
 
         Ok((None, Some(owned_fd), raw_fd, SessionInfo::non_owner()))
     }
@@ -255,6 +265,7 @@ impl SharedMemoryRegion {
                         .len(size)
                         .map_mut(f)
                         .map_err(|e| RenoirError::from_io(e, "Failed to create memory mapping"))
+                        .map(prefault_for_writing)
                 }
             }
             None => {
@@ -266,6 +277,7 @@ impl SharedMemoryRegion {
                             .len(size)
                             .map_mut(owned_fd)
                             .map_err(|e| RenoirError::from_io(e, "Failed to create memory mapping"))
+                            .map(prefault_for_writing)
                     }
                 } else {
                     Err(RenoirError::platform(
@@ -409,4 +421,48 @@ impl RegionMemoryStats {
     pub fn age_seconds(&self) -> Option<u64> {
         self.created_at.elapsed().ok().map(|d| d.as_secs())
     }
+}
+
+fn preallocate(fd: RawFd, size: usize) -> Result<()> {
+    match nix::fcntl::posix_fallocate(fd, 0, size as i64) {
+        Ok(()) => Ok(()),
+        Err(
+            nix::errno::Errno::EOPNOTSUPP | nix::errno::Errno::ENOSYS | nix::errno::Errno::EINVAL,
+        ) => Ok(()),
+        Err(nix::errno::Errno::ENOSPC) => Err(RenoirError::platform(format!(
+            "Not enough space for a {size} byte region in the shared-memory filesystem; \
+             enlarge /dev/shm (for example docker run --shm-size) or reduce the ring size"
+        ))),
+        Err(e) => Err(RenoirError::platform(format!(
+            "Failed to reserve {size} bytes for the region: {e}"
+        ))),
+    }
+}
+
+fn wait_for_size(file: &File, size: usize, grace: std::time::Duration) -> Result<()> {
+    let deadline = std::time::Instant::now() + grace;
+    loop {
+        let len = file
+            .metadata()
+            .map_err(|e| RenoirError::from_io(e, "Failed to stat file"))?
+            .len();
+        if len >= size as u64 {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(RenoirError::invalid_parameter(
+                "size",
+                "Existing region is smaller than the requested size (different geometry?)",
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+fn prefault_for_writing(map: MmapMut) -> MmapMut {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = map.advise(memmap2::Advice::PopulateWrite);
+    }
+    map
 }

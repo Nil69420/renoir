@@ -10,6 +10,9 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 ## [0.9.0] - 2026-11-08
 
 ### Fixed
+- Opening an existing ring with different (smaller) parameters used to truncate the live ring file before the geometry check rejected it, so the process already using the ring would crash with SIGBUS on its next write. Only the process that wins the region's session lock now resizes a file; everyone else gets an error and the file is untouched.
+- Rings are created with their pages reserved (`posix_fallocate`) and pre-faulted into each process (`MADV_POPULATE_WRITE`, Linux 5.14+). A full or small `/dev/shm` (Docker's default is 64 MB) now fails at open with a message naming the problem, instead of killing a process with SIGBUS later, and the hot path no longer takes first-touch page faults.
+- Removed the last `unwrap`/`expect` calls from library code (buffer layouts in `Drop`, and `SystemTime` before 1970 on boards without a battery-backed clock).
 - Registering a gated consumer could, when two consumers raced for the same free table entry, overwrite the winner's position and process fields; entries are now claimed through an intermediate state, and registration reclaims entries whose process has died.
 - `lean_slot_bytes` no longer wraps on message sizes close to `usize::MAX` (found by Kani): in release builds such a size was accepted as a one-line slot; it is now rejected.
 - Multi-producer rings no longer skip or take over the slot of a producer that is merely slow or suspended: producers register their process id and start time in a 16-entry table (lean header grows from 704 to 1728 bytes, later 3264 with 32 consumer entries), and a claimed slot is skipped only when its owner process is dead or after 10 s.

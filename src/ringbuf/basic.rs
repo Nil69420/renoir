@@ -131,10 +131,11 @@ impl<T> Drop for RingBuffer<T> {
         }
 
         // Deallocate buffer
-        let layout = std::alloc::Layout::array::<T>(self.capacity).unwrap();
-        // SAFETY: Buffer was allocated with the same layout in `new` and all elements have been dropped above.
-        unsafe {
-            std::alloc::dealloc(self.buffer.as_ptr() as *mut u8, layout);
+        if let Ok(layout) = std::alloc::Layout::array::<T>(self.capacity) {
+            // SAFETY: Buffer was allocated with the same layout in `new` and all elements have been dropped above.
+            unsafe {
+                std::alloc::dealloc(self.buffer.as_ptr() as *mut u8, layout);
+            }
         }
     }
 }

@@ -34,3 +34,5 @@ Use `BroadcastTopicRing::slot_stride(payload)` and `required_memory_size(ring_by
 ## Request-response
 
 Request ring: lean multi-producer ring with `16 + max_payload` byte messages and `request_slots` slots. Each client adds a response ring of 16 slots of the same message size. With `max_payload` 64 (80-byte messages, 128-byte slots) and 64 request slots, the request ring is 3264 + 64 x 128 = 11456 bytes and each client costs 3264 + 16 x 128 = 5312 bytes.
+
+Rings reserve their full size when created (the pages are backed immediately and mapped into every process that opens the ring), so a ring never fails later for lack of space and never takes a page fault on its first publish. Size them for what you need and for the filesystem that holds them (`/dev/shm` by default).

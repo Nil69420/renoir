@@ -157,8 +157,9 @@ impl<T: Copy> Drop for SWMRRing<T> {
                 }
             }
 
-            let layout = std::alloc::Layout::array::<SWMRSlot<T>>(self.capacity).unwrap();
-            std::alloc::dealloc(self.slots.as_ptr() as *mut u8, layout);
+            if let Ok(layout) = std::alloc::Layout::array::<SWMRSlot<T>>(self.capacity) {
+                std::alloc::dealloc(self.slots.as_ptr() as *mut u8, layout);
+            }
         }
     }
 }
