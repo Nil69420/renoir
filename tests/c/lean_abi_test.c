@@ -128,6 +128,20 @@ int main(void) {
     CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_GATED, &g_pub) == RenoirErrorCode_Success);
     CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER, &g_sub) ==
           RenoirErrorCode_Success);
+    CHECK(renoir_lean_consumer_id(g_pub) == -1);
+    CHECK(renoir_lean_consumer_id(g_sub) >= 0);
+    CHECK(renoir_lean_set_upstream(g_sub, (uint32_t)renoir_lean_consumer_id(g_sub)) ==
+          RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_set_upstream(g_pub, 0) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_set_upstream(NULL, 0) == RenoirErrorCode_InvalidParameter);
+    {
+      RenoirLeanHandle g_down = NULL;
+      CHECK(renoir_lean_open(g_name, 24, 4, RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER, &g_down) ==
+            RenoirErrorCode_Success);
+      CHECK(renoir_lean_set_upstream(g_down, (uint32_t)renoir_lean_consumer_id(g_sub)) ==
+            RenoirErrorCode_Success);
+      renoir_lean_close(g_down);
+    }
     memset(msg, 0x5A, sizeof msg);
     for (int i = 0; i < 4; ++i) {
       CHECK(renoir_lean_publish(g_pub, msg, sizeof msg) == RenoirErrorCode_Success);
