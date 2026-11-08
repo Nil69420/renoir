@@ -219,3 +219,44 @@ def test_lean_channel_rejects_bad_sizes(tmp_path, monkeypatch):
     pub = renoir.LeanChannel("py_lean_bad2", 16, 8)
     with pytest.raises(renoir.RenoirError):
         pub.publish(b"short")
+
+
+def test_rpc_round_trip_and_timeout(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    server = renoir.RpcServer("py_rpc", 32)
+    client = renoir.RpcClient("py_rpc", 32)
+    stop = threading.Event()
+
+    def serve():
+        while not stop.is_set():
+            req = server.poll()
+            if req is None:
+                server.wait(5)
+                continue
+            client_id, sequence, payload = req
+            server.reply(client_id, sequence, payload[::-1])
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    try:
+        assert client.call(b"hello", 2000) == b"olleh"
+        assert client.call(b"abc", 2000) == b"cba"
+    finally:
+        stop.set()
+        thread.join()
+    lonely = renoir.RpcClient("py_rpc_nobody", 32)
+    with pytest.raises(renoir.RenoirError):
+        lonely.call(b"x", 30)
+
+
+def test_lean_deadline(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    pub = renoir.LeanChannel("py_lean_dl", 16, 8)
+    sub = renoir.LeanChannel("py_lean_dl", 16, 8)
+    sub.set_deadline(20)
+    assert sub.wait_deadline(10) is False
+    assert sub.deadline_misses() == 1
+    pub.publish(b"d" * 16)
+    assert sub.wait_deadline(10) is True

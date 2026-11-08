@@ -22,9 +22,8 @@ impl PyLeanChannel {
         consumer: bool,
     ) -> PyResult<Self> {
         let mode = LeanMode::new(multi_producer, gated);
-        let mut inner =
-            LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
-                .map_err(map_err)?;
+        let mut inner = LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
+            .map_err(map_err)?;
         if consumer {
             inner.register_consumer(from_oldest).map_err(map_err)?;
         }
@@ -67,6 +66,24 @@ impl PyLeanChannel {
         })?;
         let count = result.map_err(map_err)?;
         Ok(PyBytes::new(py, &bytes.as_bytes()[..count * size]))
+    }
+
+    #[pyo3(signature = (deadline_ms=None))]
+    fn set_deadline(&mut self, deadline_ms: Option<u64>) {
+        self.inner
+            .set_deadline(deadline_ms.map(std::time::Duration::from_millis));
+    }
+
+    #[pyo3(signature = (spin_iterations=2000))]
+    fn wait_deadline(&mut self, py: Python<'_>, spin_iterations: u32) -> bool {
+        let inner = &mut self.inner;
+        py.detach(|| {
+            inner.wait_deadline(spin_iterations) == ::renoir::topic_rings::DeadlineWait::Ready
+        })
+    }
+
+    fn deadline_misses(&self) -> u64 {
+        self.inner.deadline_misses()
     }
 
     fn try_read<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {

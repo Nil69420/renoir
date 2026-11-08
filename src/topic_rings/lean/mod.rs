@@ -16,11 +16,13 @@ mod channel;
 mod gate;
 mod init;
 mod multi;
+mod qos;
 mod types;
 mod wait;
 
 pub use channel::LeanChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
+pub use qos::{DeadlineWait, LeanQos, LeanReliability};
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;

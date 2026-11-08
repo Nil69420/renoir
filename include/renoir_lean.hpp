@@ -16,6 +16,8 @@ enum class LeanFlags : uint32_t {
     MultiProducer = RENOIR_LEAN_MULTI_PRODUCER,
     Gated = RENOIR_LEAN_GATED,
     Consumer = RENOIR_LEAN_CONSUMER,
+    ReliablePublisher = RENOIR_LEAN_RELIABLE_PUBLISHER,
+    ReliableSubscriber = RENOIR_LEAN_RELIABLE_SUBSCRIBER,
 };
 
 constexpr LeanFlags operator|(LeanFlags a, LeanFlags b) noexcept {
@@ -78,6 +80,15 @@ public:
     RenoirErrorCode readBatch(void* out, size_t len, size_t& count) noexcept {
         return renoir_lean_read_batch(handle_, static_cast<uint8_t*>(out), len, &count);
     }
+
+    void setDeadline(uint64_t deadlineNs) noexcept { renoir_lean_set_deadline(handle_, deadlineNs); }
+
+    bool waitDeadline(uint32_t spinIterations = 2000) noexcept {
+        return renoir_lean_wait_deadline(handle_, spinIterations) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    uint64_t deadlineMisses() const noexcept { return renoir_lean_deadline_misses(handle_); }
 
     bool wait(uint32_t spinIterations = 2000, uint64_t timeoutNs = UINT64_MAX) noexcept {
         return renoir_lean_wait(handle_, spinIterations, timeoutNs) ==

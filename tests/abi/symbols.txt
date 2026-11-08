@@ -29,6 +29,7 @@ renoir_image_frame_validate
 renoir_imu_sample_init
 renoir_imu_sample_validate
 renoir_lean_close
+renoir_lean_deadline_misses
 renoir_lean_lost
 renoir_lean_open
 renoir_lean_pending
@@ -36,9 +37,11 @@ renoir_lean_publish
 renoir_lean_publish_batch
 renoir_lean_publish_notify
 renoir_lean_read_batch
+renoir_lean_set_deadline
 renoir_lean_skip_to_latest
 renoir_lean_try_read
 renoir_lean_wait
+renoir_lean_wait_deadline
 renoir_manager_clear_all
 renoir_manager_create
 renoir_manager_create_with_control
@@ -80,6 +83,14 @@ renoir_ring_consumer_pop
 renoir_ring_consumer_try_pop
 renoir_ring_producer_push
 renoir_ring_producer_try_push
+renoir_rpc_call
+renoir_rpc_client_close
+renoir_rpc_client_open
+renoir_rpc_poll
+renoir_rpc_reply
+renoir_rpc_server_close
+renoir_rpc_server_open
+renoir_rpc_wait_request
 renoir_subscribe_drain
 renoir_subscribe_peek
 renoir_subscriber_create

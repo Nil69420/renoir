@@ -11,4 +11,5 @@
   - [From eCAL](migration/ecal.md)
   - [From Zenoh](migration/zenoh.md)
 - [Lean ring](lean-ring.md)
+- [Request-response and QoS](rpc-qos.md)
 - [Performance](performance.md)

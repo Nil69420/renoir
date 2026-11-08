@@ -45,6 +45,7 @@ pub mod error;
 pub mod memory;
 pub mod metadata_modules;
 pub mod ringbuf;
+pub mod rpc;
 pub mod sensor;
 pub mod shared_pools;
 pub mod topic;

@@ -9,3 +9,7 @@ cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize
   -I"$root/include" "$root/tests/c/lean_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/lean_abi"
 LD_LIBRARY_PATH="$root/target/$profile" "$out/lean_abi"
 LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/lean_abi"
+cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize=undefined -pthread \
+  -I"$root/include" "$root/tests/c/rpc_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/rpc_abi"
+LD_LIBRARY_PATH="$root/target/$profile" "$out/rpc_abi"
+LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/rpc_abi"

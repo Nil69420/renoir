@@ -57,6 +57,7 @@ criterion = "0.5"
 tempfile = "3.0"
 loom = "0.7"
 shuttle = "0.8"
+iceoryx2 = "0.10"
 
 [features]
 default = ["file-backed", "memfd", "c-api"]
@@ -116,4 +117,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(miri)'] }
 
 [[bench]]
 name = "lean_notify_cost"
+harness = false
+
+[[bench]]
+name = "vs_iceoryx2"
+harness = false
+
+[[bench]]
+name = "rpc_latency"
 harness = false

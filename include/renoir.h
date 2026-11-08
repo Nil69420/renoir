@@ -17,6 +17,10 @@
 #include <unistd.h>
 #include <poll.h>
 
+#define RPC_HEADER_BYTES 16
+
+#define RPC_MAX_PAYLOAD (504 - RPC_HEADER_BYTES)
+
 #define RENOIR_IMAGE_FRAME_MAGIC 1196247378
 
 #define RENOIR_IMAGE_FRAME_VERSION 1
@@ -168,6 +172,10 @@
 #define RENOIR_LEAN_GATED 4
 
 #define RENOIR_LEAN_CONSUMER 8
+
+#define RENOIR_LEAN_RELIABLE_PUBLISHER RENOIR_LEAN_GATED
+
+#define RENOIR_LEAN_RELIABLE_SUBSCRIBER (RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER)
 
 /**
  * Topic registration flag: discard messages left by a previous clean session
@@ -343,6 +351,8 @@ typedef struct RenoirRegionStats {
   uintptr_t topic_count;
   uint64_t allocation_count;
 } RenoirRegionStats;
+
+typedef void *RenoirRpcHandle;
 
 typedef struct RenoirImageFrameHeader {
   uint32_t magic;
@@ -784,6 +794,12 @@ enum RenoirErrorCode renoir_lean_read_batch(RenoirLeanHandle h,
                                             uintptr_t buffer_len,
                                             uintptr_t *count);
 
+enum RenoirErrorCode renoir_lean_set_deadline(RenoirLeanHandle h, uint64_t deadline_ns);
+
+enum RenoirErrorCode renoir_lean_wait_deadline(RenoirLeanHandle h, uint32_t spin_iterations);
+
+uint64_t renoir_lean_deadline_misses(RenoirLeanHandle h);
+
 enum RenoirErrorCode renoir_lean_wait(RenoirLeanHandle h,
                                       uint32_t spin_iterations,
                                       uint64_t timeout_ns);
@@ -894,6 +910,45 @@ enum RenoirErrorCode renoir_manager_flush_all(RenoirManagerHandle manager);
  * Clear all regions from manager
  */
 enum RenoirErrorCode renoir_manager_clear_all(RenoirManagerHandle manager);
+
+enum RenoirErrorCode renoir_rpc_client_open(const char *service,
+                                            uint32_t max_payload,
+                                            uint32_t request_slots,
+                                            RenoirRpcHandle *out);
+
+enum RenoirErrorCode renoir_rpc_call(RenoirRpcHandle client,
+                                     const uint8_t *request,
+                                     uintptr_t request_len,
+                                     uint8_t *response,
+                                     uintptr_t response_cap,
+                                     uint64_t timeout_ns,
+                                     uintptr_t *response_len);
+
+void renoir_rpc_client_close(RenoirRpcHandle client);
+
+enum RenoirErrorCode renoir_rpc_server_open(const char *service,
+                                            uint32_t max_payload,
+                                            uint32_t request_slots,
+                                            RenoirRpcHandle *out);
+
+enum RenoirErrorCode renoir_rpc_poll(RenoirRpcHandle server,
+                                     uint8_t *buffer,
+                                     uintptr_t buffer_cap,
+                                     uint32_t *client_id,
+                                     uint64_t *sequence,
+                                     uintptr_t *len);
+
+enum RenoirErrorCode renoir_rpc_wait_request(RenoirRpcHandle server,
+                                             uint32_t spin_iterations,
+                                             uint64_t timeout_ns);
+
+enum RenoirErrorCode renoir_rpc_reply(RenoirRpcHandle server,
+                                      uint32_t client_id,
+                                      uint64_t sequence,
+                                      const uint8_t *data,
+                                      uintptr_t len);
+
+void renoir_rpc_server_close(RenoirRpcHandle server);
 
 /**
  * Total payload bytes for an image frame (header plus pixels); 0 if the

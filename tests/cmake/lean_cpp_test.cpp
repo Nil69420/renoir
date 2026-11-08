@@ -1,4 +1,5 @@
 #include "renoir_lean.hpp"
+#include "renoir_rpc.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -67,6 +68,23 @@ int main() {
         size_t count = 0;
         CHECK(bs.readBatch(got, sizeof got, count) == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(count == 5 && got[4].seq == 4);
+    }
+
+    {
+        const std::string rpcName = "rpc_" + name;
+        renoir::RpcServer server(rpcName, 32, 16);
+        renoir::RpcClient client(rpcName, 32, 16);
+        const char ping[] = "ping";
+        char reply[32] = {};
+        size_t replyLen = 0;
+        CHECK(client.call(ping, sizeof ping, reply, sizeof reply, replyLen, 1000000ULL) ==
+              RenoirErrorCode::RenoirErrorCode_BufferEmpty);
+        renoir::RpcRequestInfo info;
+        char buffer[32] = {};
+        CHECK(server.poll(buffer, sizeof buffer, info));
+        CHECK(info.length == sizeof ping && std::string(buffer) == "ping");
+        CHECK(server.reply(info, "pong", 5) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(!server.poll(buffer, sizeof buffer, info));
     }
 
     renoir::LeanChannel moved(std::move(sub));

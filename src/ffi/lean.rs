@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use crate::topic_rings::{LeanChannel, LeanMode, LeanRead};
+use crate::topic_rings::{DeadlineWait, LeanChannel, LeanMode, LeanRead};
 
 use super::types::RenoirErrorCode;
 
@@ -13,6 +13,8 @@ pub const RENOIR_LEAN_FROM_OLDEST: u32 = 1;
 pub const RENOIR_LEAN_MULTI_PRODUCER: u32 = 2;
 pub const RENOIR_LEAN_GATED: u32 = 4;
 pub const RENOIR_LEAN_CONSUMER: u32 = 8;
+pub const RENOIR_LEAN_RELIABLE_PUBLISHER: u32 = RENOIR_LEAN_GATED;
+pub const RENOIR_LEAN_RELIABLE_SUBSCRIBER: u32 = RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER;
 
 #[inline(always)]
 fn handle<'a>(h: RenoirLeanHandle) -> Option<&'a mut LeanChannel> {
@@ -140,6 +142,37 @@ pub extern "C" fn renoir_lean_read_batch(
         }
         Err(e) => e.into(),
     }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_set_deadline(
+    h: RenoirLeanHandle,
+    deadline_ns: u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    h.set_deadline((deadline_ns != 0).then(|| Duration::from_nanos(deadline_ns)));
+    RenoirErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_wait_deadline(
+    h: RenoirLeanHandle,
+    spin_iterations: u32,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    match h.wait_deadline(spin_iterations) {
+        DeadlineWait::Ready => RenoirErrorCode::Success,
+        DeadlineWait::Missed => RenoirErrorCode::BufferEmpty,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_deadline_misses(h: RenoirLeanHandle) -> u64 {
+    handle(h).map_or(0, |h| h.deadline_misses())
 }
 
 #[no_mangle]

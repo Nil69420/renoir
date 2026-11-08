@@ -14,6 +14,8 @@ pub struct LeanChannel {
     publisher: LeanPublisher,
     cursor: LeanCursor,
     gated: Option<LeanGatedCursor>,
+    pub(super) deadline: Option<Duration>,
+    pub(super) deadline_misses: u64,
     _region: SharedMemoryRegion,
 }
 
@@ -70,6 +72,8 @@ impl LeanChannel {
             publisher,
             cursor,
             gated: None,
+            deadline: None,
+            deadline_misses: 0,
             _region: region,
         })
     }
