@@ -180,7 +180,12 @@ impl ControlRegion {
         }
 
         // Deserialize registry
-        bincode::deserialize(registry_slice)
+        use bincode::Options;
+        bincode::options()
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .with_limit(registry_slice.len() as u64)
+            .deserialize(registry_slice)
             .map_err(|e| RenoirError::serialization(format!("Failed to load registry: {}", e)))
     }
 
