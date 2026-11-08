@@ -54,10 +54,17 @@ For fixed messages up to 504 bytes, `renoir_lean_open` / `renoir_lean_publish` /
 lock or syscall on the hot path (about 6.7x faster than iceoryx2 at 56 bytes on the same
 machine; method and caveats in `docs/src/benchmarks.md`). The same ring offers
 blocking waits (`renoir_lean_wait`), multiple producers, gated lossless delivery with consumer
-eviction, batching, QoS profiles with deadlines, and request-response (`renoir_rpc_*`, about
-250 ns round trip). Large frames use the broadcast topics with an in-place, validated view
-(`renoir_subscribe_view`). See `docs/src/lean-ring.md`, `docs/src/rpc-qos.md`,
-`docs/src/sizing.md` and `docs/src/troubleshooting.md`.
+eviction, batching, QoS profiles with deadlines, consumer dependencies (a downstream stage only
+sees what its upstream has consumed), and request-response (`renoir_rpc_*`, about 250 ns round
+trip, up to four servers per service with client failover).
+
+Large and variable-size messages use frame rings (`renoir_frame_*`, `renoir_frame.hpp`,
+`renoir.FrameChannel`): frames of 1 byte to 64 MiB are written in place by the producer and read in
+place by consumers, with no copy, owned until released and lossless, at about 95-137 ns one-way
+for any size (iceoryx2 zero-copy measured at 383-447 ns on the same machine). `renoir-monitor`
+lists and cleans up rings without a daemon. See `docs/src/lean-ring.md`, `docs/src/frames.md`,
+`docs/src/rpc-qos.md`, `docs/src/discovery.md`, `docs/src/sizing.md`,
+`docs/src/troubleshooting.md` and `docs/src/production-readiness.md`.
 
 ### Shared Memory Regions
 

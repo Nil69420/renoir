@@ -19,6 +19,8 @@ and tighten permissions where needed.
   memory and are bounds-checked before use; a hostile process can stall or evict consumers
   and spoof request client ids (the server caps cached response rings at 64) but cannot make
   readers read out of bounds.
+- Frame rings hand out owned in-place views: a consumer holding a view keeps the producer from reusing that slot, and a holder is only evicted when its process is dead (process id and start time). This assumes every process sharing a ring shares a pid namespace; across namespaces a live holder could be judged dead and its frame reused. Frame lengths are read from shared memory and bounds-checked before use (fuzzed by `frame_corrupt_ring`).
+- Liveness decisions (multi-producer hole skipping, slot takeover, gated eviction, RPC failover, `renoir-monitor sweep`) use process ids read from shared memory. A hostile writer to the region can forge them to keep a dead entry alive or to get a live entry reclaimed; this is the same trust boundary as write access to the region. `sweep` deletes a ring file only when no readable process maps it and, by default, refuses when a process whose mappings it cannot read could hold it.
 - The in-place frame view (`renoir_subscribe_view`) hands out a pointer into memory the
   producer may rewrite. Treat the bytes as untrusted until `renoir_subscribe_view_release`
   reports they were not overwritten, and never use them as lengths or offsets before then.

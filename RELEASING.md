@@ -2,9 +2,10 @@
 
 1. Start from a clean `main` and a branch `release/x.y.z`.
 2. Bump the version in `Cargo.toml` and `renoir-python/Cargo.toml`, move the `Unreleased` section of `CHANGELOG.md` under the new version, and follow `SEMVER.md` for the bump size (a wire-format or C ABI break needs a major bump).
-3. Run the gate:
+3. Run the gate (`scripts/ci_local.sh` runs all of the first block in one go, including Miri, both sanitizers, the TLA+ models and Kani when installed; run it before every push):
    - `cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings`
-   - `cargo test --release`
+   - `cargo test --profile testing` (no LTO, fast to build; the shipped `release` profile is unchanged)
+   - formal models: `formal/run.sh` (TLC, needs Java) and `cargo kani --lib`
    - Miri: `MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test` on the ring suites, then again with `-Zmiri-tree-borrows -Zmiri-symbolic-alignment-check`
    - sanitizers: `RUSTFLAGS=-Zsanitizer=thread` and `address` with `-Zbuild-std --target x86_64-unknown-linux-gnu`
    - loom: `RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test --release --test lean_loom`

@@ -18,3 +18,4 @@
 - [Performance](performance.md)
 - [Discovery and monitoring](discovery.md)
 - [Frame rings: dynamic-size, zero-copy, owned](frames.md)
+- [Production readiness](production-readiness.md)
