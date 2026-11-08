@@ -104,6 +104,8 @@ renoir_subscriber_pending_count
 renoir_subscriber_skip_to_latest
 renoir_subscriber_stats
 renoir_subscriber_topic_name
+renoir_subscribe_view
+renoir_subscribe_view_release
 renoir_subscribe_wait
 renoir_topic_count
 renoir_topic_list
