@@ -110,6 +110,9 @@ topic management."""
 assets = [
     ["target/release/librenoir.so", "usr/lib/librenoir.so.0", "644"],
     ["include/renoir.h", "usr/include/", "644"],
+    ["include/renoir.hpp", "usr/include/", "644"],
+    ["include/renoir_lean.hpp", "usr/include/", "644"],
+    ["include/renoir_rpc.hpp", "usr/include/", "644"],
     ["target/release/renoir-cli", "usr/bin/", "755"],
 ]
 [lints.rust]
