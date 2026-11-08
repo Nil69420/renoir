@@ -9,6 +9,8 @@
  * runtime checks fail.
  */
 
+#undef NDEBUG
+
 #include "renoir.hpp"
 
 #include <cassert>

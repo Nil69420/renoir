@@ -9,4 +9,5 @@ rustup target add "$TARGET"
 cargo build --release --target "$TARGET" --features c-api
 cargo test --release --target "$TARGET" --features c-api \
     --test broadcast_ring_tests --test broadcast_topic_tests \
-    --test cross_process_tests --test ffi_basic_tests
+    --test cross_process_tests --test ffi_basic_tests \
+    --test lean_ring_tests --test lean_zero_alloc

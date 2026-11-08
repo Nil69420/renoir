@@ -19,3 +19,11 @@ if(ENABLE_ASAN)
 endif()
 
 add_test(NAME wrapper_drift_guard COMMAND wrapper_drift_guard)
+
+add_executable(lean_cpp_test lean_cpp_test.cpp)
+target_link_libraries(lean_cpp_test PRIVATE renoir::cpp)
+target_compile_features(lean_cpp_test PRIVATE cxx_std_17)
+target_compile_options(lean_cpp_test PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Werror -fstack-protector-strong>
+)
+add_test(NAME lean_cpp_test COMMAND lean_cpp_test)

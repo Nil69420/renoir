@@ -14,7 +14,7 @@ OUT=dist/$NAME
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include" "$OUT/bin"
 cp target/$TARGET/release/librenoir.so "$OUT/lib/"
-cp include/renoir.h include/renoir.hpp "$OUT/include/"
+cp include/renoir.h include/renoir.hpp include/renoir_lean.hpp "$OUT/include/"
 cp target/$TARGET/release/renoir-cli "$OUT/bin/"
 cp scripts/jetson_soak.sh tools/soak/renoir_soak.c "$OUT/"
 cat > "$OUT/README.txt" <<'EOT'

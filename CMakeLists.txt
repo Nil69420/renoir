@@ -166,7 +166,7 @@ include(GNUInstallDirs)
 
 # Install headers
 install(
-    FILES include/renoir.h include/renoir.hpp
+    FILES include/renoir.h include/renoir.hpp include/renoir_lean.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 

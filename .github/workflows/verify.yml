@@ -1,0 +1,126 @@
+name: Verification
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 3 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  miri:
+    name: Miri (default and tree borrows)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: miri
+    - name: Miri default
+      env:
+        MIRIFLAGS: -Zmiri-disable-isolation
+      run: cargo miri test --test lean_ring_tests --test broadcast_ring_tests
+    - name: Miri tree borrows
+      env:
+        MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-tree-borrows -Zmiri-symbolic-alignment-check
+      run: cargo miri test --test lean_ring_tests --test broadcast_ring_tests
+
+  sanitizers:
+    name: ${{ matrix.sanitizer }} sanitizer
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sanitizer: [thread, address]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rust-src
+    - name: Test under sanitizer
+      env:
+        RUSTFLAGS: -Zsanitizer=${{ matrix.sanitizer }}
+      run: >
+        cargo test -Zbuild-std --target x86_64-unknown-linux-gnu
+        --test lean_ring_tests --test lean_zero_alloc --test broadcast_ring_tests
+
+  loom:
+    name: Loom model
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Run loom
+      env:
+        RUSTFLAGS: --cfg loom
+        LOOM_MAX_PREEMPTIONS: 3
+      run: cargo test --release --test lean_loom
+
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@nightly
+    - run: cargo install cargo-fuzz --locked
+    - name: Run targets
+      working-directory: fuzz
+      run: |
+        for t in lean_corrupt_ring broadcast_corrupt_ring control_info sensor_validators; do
+          cargo fuzz run "$t" -- -max_total_time=60 -timeout=5
+        done
+
+  c-abi:
+    name: C and C++ ABI tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - run: sudo apt-get update && sudo apt-get install -y valgrind cmake cppcheck
+    - name: C ABI test with UBSan and valgrind
+      run: tests/c/run.sh
+    - name: cppcheck
+      run: cppcheck --enable=all --inconclusive --error-exitcode=1 --suppress=missingIncludeSystem -Iinclude tests/c/lean_abi_test.c
+    - name: C++ wrapper tests
+      run: |
+        cmake -S . -B build -DBUILD_EXAMPLES=OFF -DBUILD_BENCHMARKS=OFF
+        cmake --build build -j
+        ctest --test-dir build --output-on-failure
+
+  supply-chain:
+    name: Audit and deny
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - run: cargo install cargo-audit cargo-deny --locked
+    - run: cargo audit
+    - run: cargo deny check
+
+  cross-aarch64:
+    name: Build for aarch64 (Jetson)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-unknown-linux-gnu
+    - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+    - name: Build
+      env:
+        CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+      run: cargo build --release --target aarch64-unknown-linux-gnu --lib
+
+  latency:
+    name: Latency smoke (non-gating numbers)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - run: cargo bench --bench latency_pingpong -- 0 1
