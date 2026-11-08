@@ -64,6 +64,37 @@ int main(void) {
   CHECK(renoir_lean_publish_notify(pub, NULL, 24) == RenoirErrorCode_InvalidParameter);
 
   {
+    RenoirLeanHandle b_pub = NULL;
+    RenoirLeanHandle b_sub = NULL;
+    char b_name[64];
+    uint8_t batch[24 * 6];
+    uint8_t batch_out[24 * 4];
+    size_t n = 0;
+    (void)snprintf(b_name, sizeof b_name, "lean_abi_batch_%d", (int)getpid());
+    CHECK(renoir_lean_open(b_name, 24, 64, 0, &b_pub) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_open(b_name, 24, 64, RENOIR_LEAN_FROM_OLDEST, &b_sub) ==
+          RenoirErrorCode_Success);
+    for (size_t i = 0; i < 6; ++i) {
+      memset(batch + i * 24, (int)(i + 1), 24);
+    }
+    CHECK(renoir_lean_publish_batch(b_pub, batch, sizeof batch, &n) == RenoirErrorCode_Success);
+    CHECK(n == 6);
+    CHECK(renoir_lean_publish_batch(b_pub, batch, 25, &n) != RenoirErrorCode_Success);
+    CHECK(renoir_lean_publish_batch(b_pub, NULL, 24, &n) == RenoirErrorCode_InvalidParameter);
+    CHECK(renoir_lean_read_batch(b_sub, batch_out, sizeof batch_out, &n) ==
+          RenoirErrorCode_Success);
+    CHECK(n == 4 && batch_out[0] == 1 && batch_out[24 * 3] == 4);
+    CHECK(renoir_lean_read_batch(b_sub, batch_out, sizeof batch_out, &n) ==
+          RenoirErrorCode_Success);
+    CHECK(n == 2 && batch_out[24] == 6);
+    CHECK(renoir_lean_read_batch(b_sub, batch_out, sizeof batch_out, &n) ==
+          RenoirErrorCode_Success);
+    CHECK(n == 0);
+    renoir_lean_close(b_sub);
+    renoir_lean_close(b_pub);
+  }
+
+  {
     RenoirLeanHandle mp_a = NULL;
     RenoirLeanHandle mp_b = NULL;
     RenoirLeanHandle wrong = NULL;

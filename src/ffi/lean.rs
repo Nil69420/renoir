@@ -97,6 +97,52 @@ pub extern "C" fn renoir_lean_publish_notify(
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_lean_publish_batch(
+    h: RenoirLeanHandle,
+    data: *const u8,
+    len: usize,
+    published: *mut usize,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if data.is_null() || published.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let src = unsafe { std::slice::from_raw_parts(data, len) };
+    match h.publish_batch(src) {
+        Ok(n) => {
+            unsafe { *published = n };
+            RenoirErrorCode::Success
+        }
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_read_batch(
+    h: RenoirLeanHandle,
+    buffer: *mut u8,
+    buffer_len: usize,
+    count: *mut usize,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if buffer.is_null() || count.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let out = unsafe { std::slice::from_raw_parts_mut(buffer, buffer_len) };
+    match h.read_batch(out) {
+        Ok(n) => {
+            unsafe { *count = n };
+            RenoirErrorCode::Success
+        }
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_lean_wait(
     h: RenoirLeanHandle,
     spin_iterations: u32,

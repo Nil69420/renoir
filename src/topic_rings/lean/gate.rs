@@ -83,14 +83,14 @@ impl LeanRing {
     pub fn try_read_gated(&self, cursor: &mut LeanGatedCursor, out: &mut [u8]) -> Result<LeanRead> {
         let read = self.try_read(&mut cursor.cursor, out);
         if matches!(read, Ok(LeanRead::Message)) {
-            self.gate_sync(cursor);
+            self.sync_gate(cursor);
         }
         read
     }
 
     pub fn skip_to_latest_gated(&self, cursor: &mut LeanGatedCursor, keep: u64) -> u64 {
         let skipped = self.skip_to_latest(&mut cursor.cursor, keep);
-        self.gate_sync(cursor);
+        self.sync_gate(cursor);
         skipped
     }
 
@@ -129,7 +129,7 @@ impl LeanRing {
     }
 
     #[inline]
-    fn gate_sync(&self, cursor: &mut LeanGatedCursor) {
+    pub(super) fn sync_gate(&self, cursor: &mut LeanGatedCursor) {
         let Some(handle) = cursor.handle else {
             return;
         };

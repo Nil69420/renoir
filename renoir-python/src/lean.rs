@@ -47,6 +47,28 @@ impl PyLeanChannel {
         py.detach(|| self.inner.wait_readable(spin_iterations, timeout))
     }
 
+    fn publish_batch(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<usize> {
+        self.inner
+            .publish_batch(payload.as_bytes())
+            .map_err(map_err)
+    }
+
+    fn read_batch<'py>(
+        &mut self,
+        py: Python<'py>,
+        max_messages: usize,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let size = self.inner.msg_size();
+        let mut result = Ok(0usize);
+        let inner = &mut self.inner;
+        let bytes = PyBytes::new_with(py, size * max_messages, |buf| {
+            result = inner.read_batch(buf);
+            Ok(())
+        })?;
+        let count = result.map_err(map_err)?;
+        Ok(PyBytes::new(py, &bytes.as_bytes()[..count * size]))
+    }
+
     fn try_read<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
         let size = self.inner.msg_size();
         let mut out = None;

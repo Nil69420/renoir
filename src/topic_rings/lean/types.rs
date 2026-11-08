@@ -24,10 +24,12 @@ impl LeanCursor {
         }
     }
 
+    #[must_use]
     pub fn lost(&self) -> u64 {
         self.lost
     }
 
+    #[must_use]
     pub fn next_index(&self) -> u64 {
         self.next
     }
@@ -40,14 +42,17 @@ pub struct LeanGatedCursor {
 }
 
 impl LeanGatedCursor {
+    #[must_use]
     pub fn lost(&self) -> u64 {
         self.cursor.lost
     }
 
+    #[must_use]
     pub fn next_index(&self) -> u64 {
         self.cursor.next
     }
 
+    #[must_use]
     pub fn is_registered(&self) -> bool {
         self.handle.is_some()
     }
@@ -62,6 +67,7 @@ pub enum LeanMode {
 }
 
 impl LeanMode {
+    #[must_use]
     pub const fn new(multi_producer: bool, gated: bool) -> Self {
         match (multi_producer, gated) {
             (false, false) => Self::SingleProducer,
@@ -71,10 +77,12 @@ impl LeanMode {
         }
     }
 
+    #[must_use]
     pub const fn is_multi_producer(self) -> bool {
         self as u32 & 1 != 0
     }
 
+    #[must_use]
     pub const fn is_gated(self) -> bool {
         self as u32 & 2 != 0
     }

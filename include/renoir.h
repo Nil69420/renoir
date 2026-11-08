@@ -774,6 +774,16 @@ enum RenoirErrorCode renoir_lean_publish_notify(RenoirLeanHandle h,
                                                 const uint8_t *data,
                                                 uintptr_t len);
 
+enum RenoirErrorCode renoir_lean_publish_batch(RenoirLeanHandle h,
+                                               const uint8_t *data,
+                                               uintptr_t len,
+                                               uintptr_t *published);
+
+enum RenoirErrorCode renoir_lean_read_batch(RenoirLeanHandle h,
+                                            uint8_t *buffer,
+                                            uintptr_t buffer_len,
+                                            uintptr_t *count);
+
 enum RenoirErrorCode renoir_lean_wait(RenoirLeanHandle h,
                                       uint32_t spin_iterations,
                                       uint64_t timeout_ns);

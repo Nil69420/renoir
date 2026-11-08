@@ -11,6 +11,7 @@ use crate::error::{RenoirError, Result};
 use super::atomic_bytes::{atomic_load_bytes, atomic_store_bytes};
 use super::spsc::SESSION_MARKER_OFFSET;
 
+mod batch;
 mod channel;
 mod gate;
 mod init;

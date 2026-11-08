@@ -34,6 +34,27 @@ fn publish_cost(c: &mut Criterion) {
     group.bench_function("publish_multi_producer_uncontended", |b| {
         b.iter(|| mp_publisher.publish(black_box(&data)).unwrap())
     });
+    let batch = [7u8; 32 * 8];
+    group.bench_function("eight_singles", |b| {
+        b.iter(|| {
+            for chunk in batch.chunks_exact(32) {
+                publisher.publish(black_box(chunk)).unwrap();
+            }
+        })
+    });
+    group.bench_function("batch_of_eight", |b| {
+        b.iter(|| publisher.publish_batch(black_box(&batch)).unwrap())
+    });
+    group.bench_function("eight_singles_multi_producer", |b| {
+        b.iter(|| {
+            for chunk in batch.chunks_exact(32) {
+                mp_publisher.publish(black_box(chunk)).unwrap();
+            }
+        })
+    });
+    group.bench_function("batch_of_eight_multi_producer", |b| {
+        b.iter(|| mp_publisher.publish_batch(black_box(&batch)).unwrap())
+    });
     group.finish();
 }
 

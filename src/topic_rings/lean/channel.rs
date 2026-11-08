@@ -103,6 +103,18 @@ impl LeanChannel {
         self.publisher.publish_notify(data)
     }
 
+    #[inline]
+    pub fn publish_batch(&mut self, data: &[u8]) -> Result<usize> {
+        self.publisher.publish_batch(data)
+    }
+
+    pub fn read_batch(&mut self, out: &mut [u8]) -> Result<usize> {
+        match self.gated.as_mut() {
+            Some(gated) => self.ring.read_batch_gated(gated, out),
+            None => self.ring.read_batch(&mut self.cursor, out),
+        }
+    }
+
     pub fn wait_readable(&self, spin_iterations: u32, timeout: Option<Duration>) -> bool {
         self.ring
             .wait_readable(self.active_cursor(), spin_iterations, timeout)

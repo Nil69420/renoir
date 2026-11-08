@@ -51,6 +51,24 @@ int main() {
     CHECK(sub.wait(0, 1000000));
     CHECK(sub.tryRead(out) && out.seq == 7);
 
+    {
+        const std::string batchName = name + "_batch";
+        renoir::LeanChannel bp(batchName, sizeof(Imu), 64);
+        renoir::LeanChannel bs(batchName, sizeof(Imu), 64, true);
+        Imu in[5] = {};
+        for (uint32_t i = 0; i < 5; ++i) {
+            in[i].seq = i;
+        }
+        size_t published = 0;
+        CHECK(bp.publishBatch(in, sizeof in, published) ==
+              RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(published == 5);
+        Imu got[8] = {};
+        size_t count = 0;
+        CHECK(bs.readBatch(got, sizeof got, count) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(count == 5 && got[4].seq == 4);
+    }
+
     renoir::LeanChannel moved(std::move(sub));
     CHECK(!moved.tryRead(out));
     CHECK(pub.publish(&out, 1) != RenoirErrorCode::RenoirErrorCode_Success);

@@ -199,6 +199,19 @@ def test_lean_channel_gated_is_lossless(tmp_path, monkeypatch):
     assert sub.lost() == 0
 
 
+def test_lean_channel_batches(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    pub = renoir.LeanChannel("py_lean_batch", 16, 64)
+    sub = renoir.LeanChannel("py_lean_batch", 16, 64, True)
+    payload = b"".join(bytes([i]) * 16 for i in range(5))
+    assert pub.publish_batch(payload) == 5
+    assert sub.read_batch(3) == payload[: 3 * 16]
+    assert sub.read_batch(8) == payload[3 * 16 :]
+    assert sub.read_batch(8) == b""
+    with pytest.raises(renoir.RenoirError):
+        pub.publish_batch(b"x" * 17)
+
+
 def test_lean_channel_rejects_bad_sizes(tmp_path, monkeypatch):
     monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
     with pytest.raises(renoir.RenoirError):

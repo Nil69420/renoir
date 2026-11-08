@@ -93,3 +93,9 @@ A dead or stuck consumer must not stop the producers forever. If the slowest reg
 On a gated multi-producer ring (`MultiProducerGated`) producers claim indices with a compare-and-swap that checks the gate first, so the ring never claims a slot it cannot publish.
 
 Read cost: one extra release store per read for registered consumers; unregistered readers pay nothing.
+
+## Batching
+
+`publish_batch` (`renoir_lean_publish_batch`, `publishBatch`, `publish_batch`) writes several messages given as one contiguous buffer whose length is a multiple of the message size, and `read_batch` (`renoir_lean_read_batch`, `readBatch`, `read_batch`) reads up to as many as fit in the output buffer. Every message keeps its own sequence word, so readers still see messages one by one and in order; a batch is not atomic.
+
+Savings measured on x86 for eight 32-byte messages: 28.6 ns as one batch against 51.8 ns as eight publishes on a single-producer ring, and 170 ns against 212 ns on a multi-producer ring, where the batch claims all eight indices with one atomic add. A gated ring publishes as many messages of the batch as fit and reports the count; if none fit, `publish_batch` returns `BufferFull`. `read_batch` returns zero when nothing is available and `renoir_lean_read_batch` reports that with `RenoirErrorCode_Success` and a count of zero. On a gated ring a batch read updates the consumer position once per batch.

@@ -70,6 +70,15 @@ public:
         return renoir_lean_publish_notify(handle_, static_cast<const uint8_t*>(data), len);
     }
 
+    RenoirErrorCode publishBatch(const void* data, size_t len, size_t& published) noexcept {
+        return renoir_lean_publish_batch(handle_, static_cast<const uint8_t*>(data), len,
+                                         &published);
+    }
+
+    RenoirErrorCode readBatch(void* out, size_t len, size_t& count) noexcept {
+        return renoir_lean_read_batch(handle_, static_cast<uint8_t*>(out), len, &count);
+    }
+
     bool wait(uint32_t spinIterations = 2000, uint64_t timeoutNs = UINT64_MAX) noexcept {
         return renoir_lean_wait(handle_, spinIterations, timeoutNs) ==
                RenoirErrorCode::RenoirErrorCode_Success;

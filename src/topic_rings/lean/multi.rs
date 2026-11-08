@@ -41,7 +41,7 @@ impl LeanRing {
 }
 
 impl LeanPublisher {
-    fn claim_index(&mut self) -> Result<u64> {
+    pub(super) fn claim_index(&mut self) -> Result<u64> {
         if !self.ring.gated {
             return Ok(self.ring.hdr().claim.fetch_add(1, Ordering::AcqRel) + 1);
         }
@@ -63,25 +63,33 @@ impl LeanPublisher {
 
     pub(super) fn publish_multi(&mut self, data: &[u8]) -> Result<()> {
         let idx = self.claim_index()?;
-        let ring = &*self.ring;
-        let slot = ring.slot_ptr(idx);
-        let seq = unsafe { &*(slot as *const AtomicU64) };
-        let previous = idx.saturating_sub(ring.mask + 1) * 2;
-        let writing = 2 * idx - 1;
-        acquire_slot(seq, previous, writing)?;
-        fence(Ordering::Release);
-        unsafe { atomic_store_bytes(slot.add(SEQ_BYTES), data.as_ptr(), data.len()) };
-        if seq
-            .compare_exchange(writing, 2 * idx, Ordering::Release, Ordering::Relaxed)
-            .is_err()
-        {
-            return Err(RenoirError::concurrency(
-                "Lean slot was taken over by another producer",
-            ));
-        }
-        ring.write_idx().fetch_max(idx, Ordering::Release);
+        fill_slot_multi(&self.ring, idx, data)?;
+        self.ring.write_idx().fetch_max(idx, Ordering::Release);
         Ok(())
     }
+
+    pub(super) fn claim_range(&mut self, count: u64) -> u64 {
+        self.ring.hdr().claim.fetch_add(count, Ordering::AcqRel) + 1
+    }
+}
+
+pub(super) fn fill_slot_multi(ring: &LeanRing, idx: u64, data: &[u8]) -> Result<()> {
+    let slot = ring.slot_ptr(idx);
+    let seq = unsafe { &*(slot as *const AtomicU64) };
+    let previous = idx.saturating_sub(ring.mask + 1) * 2;
+    let writing = 2 * idx - 1;
+    acquire_slot(seq, previous, writing)?;
+    fence(Ordering::Release);
+    unsafe { atomic_store_bytes(slot.add(SEQ_BYTES), data.as_ptr(), data.len()) };
+    if seq
+        .compare_exchange(writing, 2 * idx, Ordering::Release, Ordering::Relaxed)
+        .is_err()
+    {
+        return Err(RenoirError::concurrency(
+            "Lean slot was taken over by another producer",
+        ));
+    }
+    Ok(())
 }
 
 fn acquire_slot(seq: &AtomicU64, previous: u64, writing: u64) -> Result<()> {
