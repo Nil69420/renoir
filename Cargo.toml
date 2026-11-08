@@ -134,7 +134,7 @@ assets = [
     ["target/release/renoir-monitor", "usr/bin/", "755"],
 ]
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(miri)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(miri)', 'cfg(kani)'] }
 
 [[bench]]
 name = "lean_notify_cost"
