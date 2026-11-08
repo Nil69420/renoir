@@ -10,4 +10,5 @@
   - [From iceoryx2](migration/iceoryx2.md)
   - [From eCAL](migration/ecal.md)
   - [From Zenoh](migration/zenoh.md)
+- [Lean ring](lean-ring.md)
 - [Performance](performance.md)

@@ -47,6 +47,12 @@ renoir_subscriber_destroy(sub);
 renoir_topic_manager_destroy(mgr);
 ```
 
+### Lean ring (sub-100 ns small messages)
+
+For fixed messages up to 504 bytes, `renoir_lean_open` / `renoir_lean_publish` /
+`renoir_lean_try_read` give about 70 ns one-way between pinned cores with no allocation,
+lock or syscall on the hot path. See `docs/src/lean-ring.md`.
+
 ### Shared Memory Regions
 
 ```c
