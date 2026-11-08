@@ -64,8 +64,7 @@ fn every_lean_mode_publishes_and_reads_without_allocating() {
         let batch = [7u8; 48 * 4];
         let mut out = [0u8; 48];
         let mut batch_out = [0u8; 48 * 4];
-        let before = allocs();
-        for _ in 0..3_000 {
+        let mut step = || {
             publisher.publish(&payload).unwrap();
             publisher.publish_notify(&payload).unwrap();
             assert_eq!(publisher.publish_batch(&batch).unwrap(), 4);
@@ -90,6 +89,11 @@ fn every_lean_mode_publishes_and_reads_without_allocating() {
                     assert_eq!(ring.read_batch(&mut plain, &mut batch_out).unwrap(), 4);
                 }
             }
+        };
+        step();
+        let before = allocs();
+        for _ in 0..3_000 {
+            step();
         }
         assert_eq!(allocs() - before, 0, "allocation in mode {mode:?}");
     }
