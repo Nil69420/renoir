@@ -837,6 +837,8 @@ uint64_t renoir_lean_lost(RenoirLeanHandle h);
 
 uintptr_t renoir_lean_pending(RenoirLeanHandle h);
 
+uintptr_t renoir_lean_live_publishers(RenoirLeanHandle h);
+
 void renoir_lean_close(RenoirLeanHandle h);
 
 /**

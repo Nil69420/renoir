@@ -210,11 +210,7 @@ impl LeanRing {
             next: self.published() + 1,
             gate_cache: 0,
             blocked: None,
-            producer: if self.multi {
-                self.register_producer()
-            } else {
-                None
-            },
+            producer: self.register_producer(),
         }
     }
 

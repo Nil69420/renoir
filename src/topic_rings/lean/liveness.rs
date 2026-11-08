@@ -137,6 +137,20 @@ impl LeanRing {
         );
     }
 
+    #[must_use]
+    pub fn live_publishers(&self) -> usize {
+        (0..LEAN_MAX_PRODUCERS)
+            .filter(|&i| {
+                let entry = self.producer_entry(i);
+                entry.owner.load(Ordering::Acquire) & STATE_MASK == ACTIVE
+                    && process_alive(
+                        entry.pid.load(Ordering::Acquire),
+                        entry.start.load(Ordering::Acquire),
+                    )
+            })
+            .count()
+    }
+
     pub(super) fn owner_liveness(&self, idx: u64) -> Liveness {
         let mut found = Liveness::Unknown;
         for i in 0..LEAN_MAX_PRODUCERS {

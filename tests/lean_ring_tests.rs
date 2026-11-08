@@ -292,3 +292,25 @@ fn test_concurrent_readers_never_see_torn_messages() {
         assert_eq!(got + lost, total);
     }
 }
+
+#[test]
+fn live_publishers_counts_registered_publishers_and_drops_on_release() {
+    use renoir::topic_rings::LeanMode;
+    for mode in [LeanMode::SingleProducer, LeanMode::MultiProducer] {
+        let ring_bytes = lean_slot_bytes(16).unwrap() * 8;
+        let total = LeanRing::required_memory_size(ring_bytes, 16);
+        let mut mem = vec![0u64; total / 8 + 1];
+        let ptr = std::ptr::NonNull::new(mem.as_mut_ptr().cast::<u8>()).unwrap();
+        let ring = std::sync::Arc::new(unsafe {
+            LeanRing::from_memory_mode(ptr, mem.len() * 8, ring_bytes, 16, mode).unwrap()
+        });
+        assert_eq!(ring.live_publishers(), 0);
+        let first = ring.publisher();
+        let second = ring.publisher();
+        assert_eq!(ring.live_publishers(), 2);
+        drop(first);
+        assert_eq!(ring.live_publishers(), 1);
+        drop(second);
+        assert_eq!(ring.live_publishers(), 0);
+    }
+}

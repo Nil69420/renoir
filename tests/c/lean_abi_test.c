@@ -39,6 +39,7 @@ int main(void) {
   }
   CHECK(renoir_lean_publish(pub, msg, 5) != RenoirErrorCode_Success);
   CHECK(renoir_lean_pending(sub) == 10);
+  CHECK(renoir_lean_live_publishers(pub) >= 1);
   for (uint8_t i = 0; i < 10; ++i) {
     CHECK(renoir_lean_try_read(sub, out, sizeof out) == RenoirErrorCode_Success);
     CHECK(out[0] == i && out[23] == i);

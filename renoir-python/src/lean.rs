@@ -127,6 +127,10 @@ impl PyLeanChannel {
         self.inner.pending()
     }
 
+    fn live_publishers(&self) -> usize {
+        self.inner.live_publishers()
+    }
+
     #[getter]
     fn msg_size(&self) -> usize {
         self.inner.msg_size()

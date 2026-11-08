@@ -167,6 +167,10 @@ impl LeanChannel {
         self.ring.pending(self.active_cursor())
     }
 
+    pub fn live_publishers(&self) -> usize {
+        self.ring.live_publishers()
+    }
+
     pub fn msg_size(&self) -> usize {
         self.ring.msg_size()
     }

@@ -125,6 +125,7 @@ public:
 
     uint64_t lost() const noexcept { return renoir_lean_lost(handle_); }
     size_t pending() const noexcept { return renoir_lean_pending(handle_); }
+    size_t livePublishers() const noexcept { return renoir_lean_live_publishers(handle_); }
     uint32_t messageSize() const noexcept { return messageSize_; }
 
 private:

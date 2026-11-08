@@ -264,6 +264,11 @@ pub extern "C" fn renoir_lean_pending(h: RenoirLeanHandle) -> usize {
 }
 
 #[no_mangle]
+pub extern "C" fn renoir_lean_live_publishers(h: RenoirLeanHandle) -> usize {
+    handle(h).map_or(0, |h| h.live_publishers())
+}
+
+#[no_mangle]
 pub extern "C" fn renoir_lean_close(h: RenoirLeanHandle) {
     if !h.is_null() {
         drop(unsafe { Box::from_raw(h as *mut LeanChannel) });

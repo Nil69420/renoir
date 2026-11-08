@@ -22,6 +22,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - `librenoir.so` now has SONAME `librenoir.so.0`; the Debian package installs it as `librenoir.so.0` and the Jetson package ships the matching symlinks. `tests/abi/abidiff.sh` compares the built library against a checked-in libabigail baseline in CI.
 
 ### Added
+- Liveliness: `live_publishers()` on the lean ring (`renoir_lean_live_publishers`, C++ `livePublishers`, Python `live_publishers`) counts registered publisher processes that are still alive, so a consumer can tell a crashed publisher from a quiet one.
 - Lean ring: single-writer broadcast ring with one cache line per message of up to 56 bytes (up to 504 bytes across 8 lines), exposed in C as `renoir_lean_*`. Measured about 65-76 ns one-way between pinned cores on x86, against about 250 ns for the broadcast topic ring. Handles are direct pointers with no global registry lock.
 - `renoir::LeanChannel` C++ wrapper (`include/renoir_lean.hpp`), Python `renoir.LeanChannel`, and a safe Rust `LeanChannel` type.
 - Lean ring blocking consumers: `publish_notify` and `wait` (`renoir_lean_publish_notify`, `renoir_lean_wait`, C++ `publishNotify`/`wait`, Python `publish_notify`/`wait`) using a futex handshake with spin-then-sleep. Plain `publish` is unchanged.
