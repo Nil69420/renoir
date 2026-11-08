@@ -8,6 +8,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 ## [Unreleased]
 
 ### Added
+- Lean ring: single-writer broadcast ring with one cache line per message of up to 56 bytes (up to 504 bytes across 8 lines), exposed in C as `renoir_lean_*`. Measured about 65-76 ns one-way between pinned cores on x86, against about 250 ns for the broadcast topic ring. Handles are direct pointers with no global registry lock.
 - `TopicPattern::SPMC` is now a true broadcast topic: one publisher,
   any number of subscribers, each receiving every message. Slow
   subscribers are overrun (oldest messages skipped, counted via
