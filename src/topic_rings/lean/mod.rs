@@ -15,6 +15,7 @@ mod batch;
 mod channel;
 mod cursor;
 mod frame;
+mod frame_channel;
 #[cfg(test)]
 mod frame_tests;
 mod gate;
@@ -30,6 +31,7 @@ mod wait;
 
 pub use channel::LeanChannel;
 pub use frame::{frame_slot_bytes, FrameLoan, FrameView, LEAN_MAX_FRAME_BYTES};
+pub use frame_channel::FrameChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
 pub use inspect::{inspect as inspect_lean_header, LeanInfo};
 pub use liveness::LEAN_MAX_PRODUCERS;

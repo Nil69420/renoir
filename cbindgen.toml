@@ -30,6 +30,7 @@ include = [
     "RenoirSubscriberHandle",
     "RenoirLeanHandle",
     "RenoirRpcHandle",
+    "RenoirFrameHandle",
     "RenoirRingInfo",
     "RenoirMessageHandle",
     "RenoirReservedBufferHandle",

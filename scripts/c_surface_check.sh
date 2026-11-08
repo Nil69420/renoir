@@ -9,7 +9,7 @@ for f in misra.py cppcheckdata.py misra_9.py; do
   [ -f "$ADDONS/$f" ] || curl -sfL -o "$ADDONS/$f" "https://raw.githubusercontent.com/danmar/cppcheck/$TAG/addons/$f"
 done
 printf '{"script":"%s/misra.py","args":[]}\n' "$ADDONS" > "$ADDONS/misra.json"
-FILES="tests/c/lean_abi_test.c tests/c/rpc_abi_test.c"
+FILES="tests/c/lean_abi_test.c tests/c/rpc_abi_test.c tests/c/frame_abi_test.c"
 echo "== cppcheck MISRA C:2012 addon (rule numbers only, proprietary texts not used)"
 cppcheck --addon="$ADDONS/misra.json" --enable=style --suppress=missingIncludeSystem -Iinclude $FILES 2>&1 \
   | grep -E "misra" | sed 's/.*\[\(.*\)\]$/\1/' | sort | uniq -c | sort -rn

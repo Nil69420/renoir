@@ -85,6 +85,8 @@
 
 #define LEAN_MAX_SLOT_LINES 8
 
+#define LEAN_MAX_FRAME_BYTES (64 << 20)
+
 #define LEAN_MAX_CONSUMERS 8
 
 #define LEAN_MAX_PRODUCERS 16
@@ -356,6 +358,8 @@ typedef struct RenoirRingInfo {
   uint32_t mapped_by_count;
   uint32_t reserved;
 } RenoirRingInfo;
+
+typedef void *RenoirFrameHandle;
 
 typedef void *RenoirLeanHandle;
 
@@ -824,6 +828,42 @@ enum RenoirErrorCode renoir_discover(struct RenoirRingInfo *out,
                                      uintptr_t *total);
 
 enum RenoirErrorCode renoir_discover_sweep(uint32_t flags, uintptr_t *removed);
+
+enum RenoirErrorCode renoir_frame_open(const char *name,
+                                       uintptr_t max_frame,
+                                       uint32_t slot_count,
+                                       uint32_t flags,
+                                       RenoirFrameHandle *out);
+
+enum RenoirErrorCode renoir_frame_loan(RenoirFrameHandle h, uintptr_t len, uint8_t **out_data);
+
+enum RenoirErrorCode renoir_frame_commit(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_commit_notify(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_abort(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_view(RenoirFrameHandle h,
+                                       const uint8_t **out_data,
+                                       uintptr_t *out_len);
+
+enum RenoirErrorCode renoir_frame_release(RenoirFrameHandle h);
+
+bool renoir_frame_view_intact(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_wait(RenoirFrameHandle h,
+                                       uint32_t spin_iterations,
+                                       uint64_t timeout_ns);
+
+int32_t renoir_frame_consumer_id(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_set_upstream(RenoirFrameHandle h, uint32_t upstream);
+
+uintptr_t renoir_frame_live_publishers(RenoirFrameHandle h);
+
+uintptr_t renoir_frame_max_frame(RenoirFrameHandle h);
+
+void renoir_frame_close(RenoirFrameHandle h);
 
 enum RenoirErrorCode renoir_lean_open(const char *name,
                                       uint32_t msg_size,

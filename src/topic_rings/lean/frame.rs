@@ -88,10 +88,7 @@ impl LeanRing {
         unsafe { self.slot_ptr(idx).add(SEQ_BYTES).cast::<u32>() }
     }
 
-    pub fn view_frame<'a>(
-        &'a self,
-        cursor: &'a mut LeanGatedCursor,
-    ) -> Result<Option<FrameView<'a>>> {
+    pub fn peek_frame(&self, cursor: &mut LeanGatedCursor) -> Result<Option<(u64, usize)>> {
         loop {
             if cursor.upstream.is_some() && self.upstream_limit(cursor) <= cursor.cursor.next {
                 return Ok(None);
@@ -113,12 +110,7 @@ impl LeanRing {
                     self.sync_gate(cursor);
                     return Err(RenoirError::serialization("Corrupt frame length skipped"));
                 }
-                return Ok(Some(FrameView {
-                    ring: self,
-                    cursor,
-                    idx,
-                    len: len as usize,
-                }));
+                return Ok(Some((idx, len as usize)));
             }
             if seen < want {
                 if self.multi && self.hole_expired(&mut cursor.cursor) {
@@ -133,6 +125,36 @@ impl LeanRing {
                 "Frame slot was overwritten before it could be viewed",
             ));
         }
+    }
+
+    pub fn release_frame(&self, cursor: &mut LeanGatedCursor, idx: u64) {
+        cursor.cursor.next = idx + 1;
+        self.sync_gate(cursor);
+    }
+
+    pub fn frame_ptr(&self, idx: u64) -> *const u8 {
+        self.frame_data(idx)
+    }
+
+    pub fn frame_intact(&self, cursor: &LeanGatedCursor, idx: u64) -> bool {
+        let still_registered = cursor.handle.is_some_and(|h| {
+            let entry = self.gate_entry(h.entry);
+            entry.owner.load(Ordering::Acquire) == (h.token << 2) | 1
+        });
+        let seq = unsafe { &*(self.slot_ptr(idx) as *const AtomicU64) };
+        still_registered && seq.load(Ordering::Acquire) == 2 * idx
+    }
+
+    pub fn view_frame<'a>(
+        &'a self,
+        cursor: &'a mut LeanGatedCursor,
+    ) -> Result<Option<FrameView<'a>>> {
+        Ok(self.peek_frame(cursor)?.map(|(idx, len)| FrameView {
+            ring: self,
+            cursor,
+            idx,
+            len,
+        }))
     }
 }
 
@@ -166,12 +188,7 @@ impl FrameView<'_> {
 
     #[must_use]
     pub fn is_intact(&self) -> bool {
-        let still_registered = self.cursor.handle.is_some_and(|h| {
-            let entry = self.ring.gate_entry(h.entry);
-            entry.owner.load(Ordering::Acquire) == (h.token << 2) | 1
-        });
-        let seq = unsafe { &*(self.ring.slot_ptr(self.idx) as *const AtomicU64) };
-        still_registered && seq.load(Ordering::Acquire) == 2 * self.idx
+        self.ring.frame_intact(self.cursor, self.idx)
     }
 
     pub fn release(self) {
@@ -181,8 +198,7 @@ impl FrameView<'_> {
 
 impl Drop for FrameView<'_> {
     fn drop(&mut self) {
-        self.cursor.cursor.next = self.idx + 1;
-        self.ring.sync_gate(self.cursor);
+        self.ring.release_frame(self.cursor, self.idx);
     }
 }
 
@@ -194,7 +210,7 @@ pub struct FrameLoan<'a> {
 }
 
 impl LeanPublisher {
-    pub fn loan_frame(&mut self, len: usize) -> Result<FrameLoan<'_>> {
+    pub fn begin_frame(&mut self, len: usize) -> Result<u64> {
         if len == 0 || len > self.ring.max_frame() {
             return Err(RenoirError::invalid_parameter(
                 "len",
@@ -207,22 +223,54 @@ impl LeanPublisher {
                 "Frames need a gated ring",
             ));
         }
-        let idx = if self.ring.multi {
+        if self.ring.multi {
             self.announce();
             let idx = self.claim_index()?;
             if let Err(e) = begin_slot_multi(&self.ring, idx) {
                 self.end_claim();
                 return Err(e);
             }
-            idx
+            Ok(idx)
         } else {
             self.gate_admits(self.next)?;
             let idx = self.next;
             let seq = unsafe { &*(self.ring.slot_ptr(idx) as *const AtomicU64) };
             seq.store(2 * idx - 1, Ordering::Relaxed);
             fence(Ordering::Release);
-            idx
-        };
+            Ok(idx)
+        }
+    }
+
+    pub fn frame_buffer(&self, idx: u64) -> *mut u8 {
+        self.ring.frame_data(idx)
+    }
+
+    pub fn end_frame(&mut self, idx: u64, len: Option<usize>) -> Result<()> {
+        let ring = self.ring.clone();
+        let stored = len.map_or(TOMBSTONE, |l| l as u32);
+        if ring.multi || len.is_some() {
+            unsafe { ring.frame_len_ptr(idx).write(stored) };
+        }
+        if ring.multi {
+            let committed = commit_slot_multi(&ring, idx);
+            self.end_claim();
+            committed?;
+            ring.write_idx().fetch_max(idx, Ordering::Release);
+        } else if len.is_none() {
+            let seq = unsafe { &*(ring.slot_ptr(idx) as *const AtomicU64) };
+            let previous = idx.saturating_sub(ring.mask + 1) * 2;
+            seq.store(previous, Ordering::Release);
+        } else {
+            let seq = unsafe { &*(ring.slot_ptr(idx) as *const AtomicU64) };
+            seq.store(2 * idx, Ordering::Release);
+            ring.write_idx().store(idx, Ordering::Release);
+            self.next = idx + 1;
+        }
+        Ok(())
+    }
+
+    pub fn loan_frame(&mut self, len: usize) -> Result<FrameLoan<'_>> {
+        let idx = self.begin_frame(len)?;
         Ok(FrameLoan {
             publisher: self,
             idx,
@@ -234,17 +282,17 @@ impl LeanPublisher {
 
 impl FrameLoan<'_> {
     pub fn bytes_mut(&mut self) -> &mut [u8] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.publisher.ring.frame_data(self.idx), self.len)
-        }
+        unsafe { std::slice::from_raw_parts_mut(self.publisher.frame_buffer(self.idx), self.len) }
     }
 
     pub fn commit(mut self) -> Result<()> {
-        self.finish(self.len as u32)
+        self.done = true;
+        self.publisher.end_frame(self.idx, Some(self.len))
     }
 
     pub fn commit_notify(mut self) -> Result<()> {
-        let result = self.finish(self.len as u32);
+        self.done = true;
+        let result = self.publisher.end_frame(self.idx, Some(self.len));
         if result.is_ok() {
             self.publisher.ring.notify();
         }
@@ -252,38 +300,15 @@ impl FrameLoan<'_> {
     }
 
     pub fn abort(mut self) {
-        let _ = self.finish(TOMBSTONE);
-    }
-
-    fn finish(&mut self, len: u32) -> Result<()> {
         self.done = true;
-        let ring = self.publisher.ring.clone();
-        if ring.multi || len != TOMBSTONE {
-            unsafe { ring.frame_len_ptr(self.idx).write(len) };
-        }
-        if ring.multi {
-            let committed = commit_slot_multi(&ring, self.idx);
-            self.publisher.end_claim();
-            committed?;
-            ring.write_idx().fetch_max(self.idx, Ordering::Release);
-        } else if len == TOMBSTONE {
-            let seq = unsafe { &*(ring.slot_ptr(self.idx) as *const AtomicU64) };
-            let previous = self.idx.saturating_sub(ring.mask + 1) * 2;
-            seq.store(previous, Ordering::Release);
-        } else {
-            let seq = unsafe { &*(ring.slot_ptr(self.idx) as *const AtomicU64) };
-            seq.store(2 * self.idx, Ordering::Release);
-            ring.write_idx().store(self.idx, Ordering::Release);
-            self.publisher.next = self.idx + 1;
-        }
-        Ok(())
+        let _ = self.publisher.end_frame(self.idx, None);
     }
 }
 
 impl Drop for FrameLoan<'_> {
     fn drop(&mut self) {
         if !self.done {
-            let _ = self.finish(TOMBSTONE);
+            let _ = self.publisher.end_frame(self.idx, None);
         }
     }
 }
