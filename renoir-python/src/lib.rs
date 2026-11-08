@@ -4,6 +4,7 @@
 //! reimplemented here; every call forwards to `::renoir::*`.
 
 mod discover;
+mod frame;
 mod lean;
 mod rpc;
 
@@ -143,6 +144,7 @@ fn renoir_python(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("Publisher", m.py().get_type::<PyPublisher>())?;
     m.add("Subscriber", m.py().get_type::<PySubscriber>())?;
     m.add("LeanChannel", m.py().get_type::<lean::PyLeanChannel>())?;
+    m.add("FrameChannel", m.py().get_type::<frame::PyFrameChannel>())?;
     m.add_function(wrap_pyfunction!(lean::lean_memory_required, m)?)?;
     m.add_function(wrap_pyfunction!(discover::discover, m)?)?;
     m.add_function(wrap_pyfunction!(discover::sweep, m)?)?;

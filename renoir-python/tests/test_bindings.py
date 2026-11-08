@@ -295,3 +295,28 @@ def test_discover_lists_rings_and_sweep_keeps_open_ones(tmp_path, monkeypatch):
     renoir.sweep(dry_run=True, ignore_unreadable=True)
     assert name in {r["name"] for r in renoir.discover()}
     assert ch.live_publishers() >= 1
+
+
+def test_frame_channel_dynamic_sizes_and_back_pressure(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    name = "py_frame_%d" % time.monotonic_ns()
+    pub = renoir.FrameChannel(name, 100_000, 4)
+    sub = renoir.FrameChannel(name, 100_000, 4, consumer=True)
+    assert sub.max_frame == 100_000
+    assert sub.read() is None
+    sizes = [1, 700, 100_000, 31]
+    for i, size in enumerate(sizes):
+        pub.publish(bytes([i]) * size)
+    with pytest.raises(renoir.RenoirError):
+        pub.publish(b"x" * 10)
+    for i, size in enumerate(sizes):
+        frame = sub.read()
+        assert frame == bytes([i]) * size
+    assert sub.read() is None
+    pub.publish(b"after")
+    assert sub.wait(spin_iterations=10, timeout_ms=100) is True
+    assert sub.read() == b"after"
+    assert sub.consumer_id() is not None
+    assert pub.consumer_id() is None
+    with pytest.raises(renoir.RenoirError):
+        pub.publish(b"")

@@ -1,4 +1,5 @@
 #include "renoir_discovery.hpp"
+#include "renoir_frame.hpp"
 #include "renoir_lean.hpp"
 #include "renoir_rpc.hpp"
 
@@ -135,6 +136,41 @@ int main() {
         }
     }
     CHECK(listed);
+
+    {
+        const std::string fname = "frame_cpp_" + std::to_string(getpid());
+        renoir::FrameChannel fpub(fname, 2048, 4, renoir::FrameFlags::None);
+        renoir::FrameChannel fsub(fname, 2048, 4, renoir::FrameFlags::Consumer);
+        CHECK(fsub.consumerId() >= 0);
+        CHECK(!fsub.tryView().has_value());
+        for (uint8_t i = 0; i < 4; ++i) {
+            auto loan = fpub.tryLoan(100 + i);
+            CHECK(loan.has_value());
+            CHECK(loan->size() == 100U + i);
+            for (size_t k = 0; k < loan->size(); ++k) {
+                loan->data()[k] = i;
+            }
+            loan->commit();
+        }
+        CHECK(!fpub.tryLoan(10).has_value());
+        {
+            auto view = fsub.tryView();
+            CHECK(view.has_value());
+            CHECK(view->size() == 100U);
+            CHECK(view->data()[0] == 0 && view->intact());
+            CHECK(!fpub.tryLoan(10).has_value());
+        }
+        {
+            auto loan = fpub.tryLoan(10);
+            CHECK(loan.has_value());
+        }
+        for (uint8_t i = 1; i < 4; ++i) {
+            auto view = fsub.tryView();
+            CHECK(view.has_value() && view->size() == 100U + i && view->data()[0] == i);
+        }
+        CHECK(!fsub.tryView().has_value());
+        unlink((std::string(dir) + "/renoir_" + fname).c_str());
+    }
 
     const std::string path = std::string(dir) + "/renoir_" + name;
     unlink(path.c_str());

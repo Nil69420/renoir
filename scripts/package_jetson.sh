@@ -15,7 +15,7 @@ rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include" "$OUT/bin"
 cp target/$TARGET/release/librenoir.so "$OUT/lib/librenoir.so.0"
 ln -s librenoir.so.0 "$OUT/lib/librenoir.so"
-cp include/renoir.h include/renoir.hpp include/renoir_lean.hpp include/renoir_rpc.hpp include/renoir_discovery.hpp "$OUT/include/"
+cp include/renoir.h include/renoir.hpp include/renoir_lean.hpp include/renoir_rpc.hpp include/renoir_discovery.hpp include/renoir_frame.hpp "$OUT/include/"
 cp target/$TARGET/release/renoir-cli "$OUT/bin/"
 cp scripts/jetson_soak.sh tools/soak/renoir_soak.c "$OUT/"
 cat > "$OUT/README.txt" <<'EOT'

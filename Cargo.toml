@@ -129,6 +129,7 @@ assets = [
     ["include/renoir_lean.hpp", "usr/include/", "644"],
     ["include/renoir_rpc.hpp", "usr/include/", "644"],
     ["include/renoir_discovery.hpp", "usr/include/", "644"],
+    ["include/renoir_frame.hpp", "usr/include/", "644"],
     ["target/release/renoir-cli", "usr/bin/", "755"],
     ["target/release/renoir-monitor", "usr/bin/", "755"],
 ]
