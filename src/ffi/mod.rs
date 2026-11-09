@@ -10,6 +10,7 @@ pub mod buffers;
 pub mod discover;
 pub mod frame;
 pub mod lean;
+pub mod lean_ext;
 pub mod memory;
 pub mod rpc;
 pub mod sensor;
