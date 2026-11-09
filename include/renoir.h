@@ -201,6 +201,16 @@
 
 #define RENOIR_LEAN_CONSUMER 8
 
+#define RENOIR_LEAN_STAMP_NS 16
+
+#define RENOIR_LEAN_STAMP_TICKS 32
+
+#define RENOIR_LEAN_CLOCK_NONE 0
+
+#define RENOIR_LEAN_CLOCK_NS 1
+
+#define RENOIR_LEAN_CLOCK_TICKS 2
+
 #define RENOIR_LEAN_RELIABLE_PUBLISHER RENOIR_LEAN_GATED
 
 #define RENOIR_LEAN_RELIABLE_SUBSCRIBER (RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER)
@@ -959,6 +969,28 @@ int32_t renoir_lean_consumer_id(RenoirLeanHandle h);
 enum RenoirErrorCode renoir_lean_set_upstream(RenoirLeanHandle h, uint32_t upstream);
 
 void renoir_lean_close(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_publish_at(RenoirLeanHandle h,
+                                            uint64_t stamp,
+                                            const uint8_t *data,
+                                            uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_publish_now(RenoirLeanHandle h,
+                                             const uint8_t *data,
+                                             uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped(RenoirLeanHandle h,
+                                                  uint8_t *buffer,
+                                                  uintptr_t buffer_len,
+                                                  uint64_t *out_stamp);
+
+uint32_t renoir_lean_clock_kind(RenoirLeanHandle h);
+
+uint64_t renoir_lean_tick_hz(RenoirLeanHandle h);
+
+uint64_t renoir_lean_stamp_now(RenoirLeanHandle h);
+
+uint64_t renoir_lean_stamp_to_ns(RenoirLeanHandle h, uint64_t stamp);
 
 /**
  * Create a shared memory manager with control region
