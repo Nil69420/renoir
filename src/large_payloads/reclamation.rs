@@ -323,7 +323,8 @@ impl EpochReclaimer {
             descriptor.pool_id,
             descriptor.buffer_handle,
             descriptor.total_size as u32,
-        );
+        )
+        .with_owner(self.pool_manager.owner_id());
 
         self.pool_manager.return_buffer(&message_desc)
     }

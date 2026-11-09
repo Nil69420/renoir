@@ -817,6 +817,7 @@ pub extern "C" fn renoir_subscribe_read_next(
             let buffer_registry = manager_id.and_then(|id| registry.get_buffer_registry(id));
 
             let mut descriptor_buffer_id: Option<usize> = None;
+            let mut unresolved = false;
 
             unsafe {
                 match &msg.payload {
@@ -844,11 +845,13 @@ pub extern "C" fn renoir_subscribe_read_next(
                                 Err(_) => {
                                     (*message).payload_ptr = std::ptr::null();
                                     (*message).payload_len = 0;
+                                    unresolved = true;
                                 }
                             }
                         } else {
                             (*message).payload_ptr = std::ptr::null();
                             (*message).payload_len = 0;
+                            unresolved = true;
                         }
                     }
                 }
@@ -858,6 +861,10 @@ pub extern "C" fn renoir_subscribe_read_next(
                 (*message).metadata.source_id = msg.header.topic_id;
                 (*message).metadata.message_type = 0;
                 (*message).metadata.flags = 0;
+            }
+
+            if unresolved {
+                return RenoirErrorCode::UnresolvedPayload;
             }
 
             let msg_id = registry.store_message(msg);
@@ -912,6 +919,7 @@ pub extern "C" fn renoir_subscribe_peek(
             let buffer_registry = manager_id.and_then(|id| registry.get_buffer_registry(id));
 
             let mut descriptor_buffer_id: Option<usize> = None;
+            let mut unresolved = false;
 
             unsafe {
                 match &msg.payload {
@@ -939,11 +947,13 @@ pub extern "C" fn renoir_subscribe_peek(
                                 Err(_) => {
                                     (*message).payload_ptr = std::ptr::null();
                                     (*message).payload_len = 0;
+                                    unresolved = true;
                                 }
                             }
                         } else {
                             (*message).payload_ptr = std::ptr::null();
                             (*message).payload_len = 0;
+                            unresolved = true;
                         }
                     }
                 }
@@ -953,6 +963,10 @@ pub extern "C" fn renoir_subscribe_peek(
                 (*message).metadata.source_id = msg.header.topic_id;
                 (*message).metadata.message_type = 0;
                 (*message).metadata.flags = 0;
+            }
+
+            if unresolved {
+                return RenoirErrorCode::UnresolvedPayload;
             }
 
             let msg_id = registry.store_message(msg);

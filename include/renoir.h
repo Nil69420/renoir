@@ -243,6 +243,7 @@ typedef enum RenoirErrorCode {
   RenoirErrorCode_AlignmentError = 11,
   RenoirErrorCode_VersionMismatch = 12,
   RenoirErrorCode_PlatformError = 13,
+  RenoirErrorCode_UnresolvedPayload = 14,
   RenoirErrorCode_UnknownError = 99,
 } RenoirErrorCode;
 

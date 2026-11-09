@@ -23,9 +23,18 @@ use super::stats::SharedPoolStats;
 /// Unique identifier for buffer pools
 pub type PoolId = u32;
 
+static NEXT_OWNER_SEQ: AtomicU32 = AtomicU32::new(1);
+
+fn new_owner_id() -> u64 {
+    (u64::from(std::process::id()) << 32)
+        | u64::from(NEXT_OWNER_SEQ.fetch_add(1, Ordering::Relaxed))
+}
+
 /// Shared buffer pool manager for large message payloads
 #[derive(Debug)]
 pub struct SharedBufferPoolManager {
+    /// Identity stamped on every descriptor this manager hands out
+    owner_id: u64,
     /// Map of pool ID to buffer pools
     pools: RwLock<HashMap<PoolId, Arc<SharedBufferPool>>>,
     /// Next available pool ID
@@ -38,6 +47,7 @@ impl SharedBufferPoolManager {
     /// Create a new shared buffer pool manager
     pub fn new() -> Self {
         Self {
+            owner_id: new_owner_id(),
             pools: RwLock::new(HashMap::new()),
             next_pool_id: AtomicU32::new(1),
             stats: SharedPoolStats::default(),
@@ -81,11 +91,28 @@ impl SharedBufferPoolManager {
             .get(&pool_id)
             .ok_or_else(|| RenoirError::invalid_parameter("pool_id", "Pool not found"))?;
 
-        pool.get_buffer()
+        pool.get_buffer().map(|d| d.with_owner(self.owner_id))
+    }
+
+    /// Identity this manager stamps on the descriptors it issues
+    pub fn owner_id(&self) -> u64 {
+        self.owner_id
+    }
+
+    fn check_owner(&self, descriptor: &MessageDescriptor) -> Result<()> {
+        if descriptor.owner_id == self.owner_id {
+            Ok(())
+        } else {
+            Err(RenoirError::invalid_parameter(
+                "descriptor",
+                "Descriptor belongs to a pool manager in another process or instance",
+            ))
+        }
     }
 
     /// Return a buffer to its pool
     pub fn return_buffer(&self, descriptor: &MessageDescriptor) -> Result<()> {
+        self.check_owner(descriptor)?;
         let pools = self.pools.read();
         let pool = pools
             .get(&descriptor.pool_id)
@@ -96,6 +123,7 @@ impl SharedBufferPoolManager {
 
     /// Get buffer data for reading/writing
     pub fn get_buffer_data(&self, descriptor: &MessageDescriptor) -> Result<Arc<Buffer>> {
+        self.check_owner(descriptor)?;
         let pools = self.pools.read();
         let pool = pools
             .get(&descriptor.pool_id)
