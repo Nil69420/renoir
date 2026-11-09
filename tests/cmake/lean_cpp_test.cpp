@@ -74,6 +74,26 @@ int main() {
         }
         CHECK(!ss.waitPhased(100000ULL, 500000ULL, 3000000ULL));
     }
+    {
+        renoir::DiscoveryWatch watch(20);
+        CHECK(watch.valid() && watch.fd() >= 0);
+        const std::string watched = "lean_cpp_watch_" + std::to_string(getpid());
+        bool appeared = false;
+        {
+            renoir::LeanChannel w(watched, sizeof(Imu), 32);
+            for (int i = 0; i < 100 && !appeared; ++i) {
+                for (const renoir::DiscoveryEvent& e : watch.poll(50)) {
+                    if (e.kind == renoir::DiscoveryEventKind::Appeared && e.ring.name == watched) {
+                        appeared = e.ring.kind == renoir::RingKind::Lean &&
+                                   e.ring.msgSize == sizeof(Imu);
+                    }
+                }
+            }
+        }
+        CHECK(appeared);
+        renoir::DiscoveryWatch moved(std::move(watch));
+        CHECK(moved.valid() && !watch.valid());
+    }
     Imu out{};
     CHECK(!sub.tryRead(out));
     for (uint32_t i = 0; i < 50; ++i) {
