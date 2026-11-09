@@ -223,6 +223,20 @@ impl LeanChannel {
             .wait_readable(self.active_cursor(), spin_iterations, timeout)
     }
 
+    pub fn wait_with(&self, strategy: super::LeanWaitStrategy, timeout: Option<Duration>) -> bool {
+        self.ring.wait_with(self.active_cursor(), strategy, timeout)
+    }
+
+    pub fn wait_phased(
+        &self,
+        spin_for: Duration,
+        yield_for: Duration,
+        timeout: Option<Duration>,
+    ) -> bool {
+        self.ring
+            .wait_phased(self.active_cursor(), spin_for, yield_for, timeout)
+    }
+
     #[inline]
     pub fn try_read(&mut self, out: &mut [u8]) -> Result<LeanRead> {
         match self.gated.as_mut() {

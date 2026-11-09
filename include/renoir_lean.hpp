@@ -18,6 +18,16 @@ enum class LeanFlags : uint32_t {
     Consumer = RENOIR_LEAN_CONSUMER,
     ReliablePublisher = RENOIR_LEAN_RELIABLE_PUBLISHER,
     ReliableSubscriber = RENOIR_LEAN_RELIABLE_SUBSCRIBER,
+    StampNanoseconds = RENOIR_LEAN_STAMP_NS,
+    StampTicks = RENOIR_LEAN_STAMP_TICKS,
+};
+
+enum class WaitStrategy : uint32_t {
+    BusySpin = RENOIR_LEAN_WAIT_BUSY_SPIN,
+    Yielding = RENOIR_LEAN_WAIT_YIELDING,
+    Sleeping = RENOIR_LEAN_WAIT_SLEEPING,
+    Blocking = RENOIR_LEAN_WAIT_BLOCKING,
+    PhasedBackoff = RENOIR_LEAN_WAIT_PHASED_BACKOFF,
 };
 
 constexpr LeanFlags operator|(LeanFlags a, LeanFlags b) noexcept {
@@ -117,6 +127,65 @@ public:
         static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
         static_assert(sizeof(T) <= kMaxMessageBytes, "T exceeds the lean message limit");
         return tryRead(&value, sizeof(T));
+    }
+
+    bool waitWith(WaitStrategy strategy, uint64_t timeoutNs = UINT64_MAX) noexcept {
+        return renoir_lean_wait_strategy(handle_, static_cast<uint32_t>(strategy), timeoutNs) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    bool waitPhased(uint64_t spinNs, uint64_t yieldNs, uint64_t timeoutNs = UINT64_MAX) noexcept {
+        return renoir_lean_wait_phased(handle_, spinNs, yieldNs, timeoutNs) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    RenoirErrorCode publishAt(uint64_t stamp, const void* data, size_t len) noexcept {
+        return renoir_lean_publish_at(handle_, stamp, static_cast<const uint8_t*>(data), len);
+    }
+
+    RenoirErrorCode publishNow(const void* data, size_t len) noexcept {
+        return renoir_lean_publish_now(handle_, static_cast<const uint8_t*>(data), len);
+    }
+
+    template <typename T>
+    RenoirErrorCode publishAt(uint64_t stamp, const T& value) noexcept {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
+        return publishAt(stamp, &value, sizeof(T));
+    }
+
+    template <typename T>
+    RenoirErrorCode publishNow(const T& value) noexcept {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
+        return publishNow(&value, sizeof(T));
+    }
+
+    bool tryReadStamped(void* out, size_t len, uint64_t& stamp) noexcept {
+        return renoir_lean_try_read_stamped(handle_, static_cast<uint8_t*>(out), len, &stamp) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    template <typename T>
+    bool tryReadStamped(T& value, uint64_t& stamp) noexcept {
+        static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
+        return tryReadStamped(&value, sizeof(T), stamp);
+    }
+
+    bool tryReadLagged(void* out, size_t len, uint64_t& missed) noexcept {
+        return renoir_lean_try_read_lagged(handle_, static_cast<uint8_t*>(out), len, &missed) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    bool tryReadStampedLagged(void* out, size_t len, uint64_t& stamp, uint64_t& missed) noexcept {
+        return renoir_lean_try_read_stamped_lagged(handle_, static_cast<uint8_t*>(out), len, &stamp,
+                                                   &missed) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    uint32_t clockKind() const noexcept { return renoir_lean_clock_kind(handle_); }
+    uint64_t tickHz() const noexcept { return renoir_lean_tick_hz(handle_); }
+    uint64_t stampNow() const noexcept { return renoir_lean_stamp_now(handle_); }
+    uint64_t stampToNs(uint64_t stamp) const noexcept {
+        return renoir_lean_stamp_to_ns(handle_, stamp);
     }
 
     uint64_t skipToLatest(uint64_t keep = 1) noexcept {

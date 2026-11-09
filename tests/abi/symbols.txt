@@ -79,6 +79,8 @@ renoir_lean_try_read_stamped_lagged
 renoir_lean_wait
 renoir_lean_wait_adaptive
 renoir_lean_wait_deadline
+renoir_lean_wait_phased
+renoir_lean_wait_strategy
 renoir_manager_clear_all
 renoir_manager_create
 renoir_manager_create_with_control

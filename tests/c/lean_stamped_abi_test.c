@@ -110,6 +110,34 @@ static int lagged(void) {
   return 0;
 }
 
+static int waits(void) {
+  char name[64];
+  (void)snprintf(name, sizeof name, "c_waits_%d", (int)getpid());
+  RenoirLeanHandle pub = NULL;
+  RenoirLeanHandle sub = NULL;
+  CHECK(renoir_lean_open(name, 16, 16, 0, &pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_open(name, 16, 16, 0, &sub) == RenoirErrorCode_Success);
+  uint8_t buf[16] = {0};
+  const uint32_t strategies[] = {RENOIR_LEAN_WAIT_BUSY_SPIN, RENOIR_LEAN_WAIT_YIELDING,
+                                 RENOIR_LEAN_WAIT_SLEEPING, RENOIR_LEAN_WAIT_BLOCKING,
+                                 RENOIR_LEAN_WAIT_PHASED_BACKOFF};
+  for (size_t i = 0; i < sizeof strategies / sizeof strategies[0]; ++i) {
+    CHECK(renoir_lean_wait_strategy(sub, strategies[i], 2000000ULL) == RenoirErrorCode_BufferEmpty);
+    CHECK(renoir_lean_publish_notify(pub, buf, sizeof buf) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_wait_strategy(sub, strategies[i], 1000000000ULL) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_try_read(sub, buf, sizeof buf) == RenoirErrorCode_Success);
+  }
+  CHECK(renoir_lean_wait_strategy(sub, 99, 1000000ULL) == RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_wait_strategy(NULL, RENOIR_LEAN_WAIT_BUSY_SPIN, 0) == RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_wait_phased(sub, 100000ULL, 500000ULL, 5000000ULL) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_lean_publish_notify(pub, buf, sizeof buf) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait_phased(sub, 100000ULL, 500000ULL, 1000000000ULL) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait_phased(NULL, 0, 0, 0) == RenoirErrorCode_InvalidParameter);
+  renoir_lean_close(sub);
+  renoir_lean_close(pub);
+  return 0;
+}
+
 int main(void) {
   size_t plain_bytes = 0;
   size_t stamped_bytes = 0;
@@ -135,6 +163,7 @@ int main(void) {
   CHECK(renoir_lean_try_read_stamped(plain, buf, sizeof buf, &stamp) != RenoirErrorCode_Success);
   renoir_lean_close(plain);
   CHECK(lagged() == 0);
+  CHECK(waits() == 0);
   puts("lean stamped ABI ok");
   return 0;
 }

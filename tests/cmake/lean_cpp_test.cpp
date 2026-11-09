@@ -35,6 +35,45 @@ int main() {
     renoir::LeanChannel sub(name, sizeof(Imu), 128, true);
     CHECK(sub.messageSize() == sizeof(Imu));
 
+
+    {
+        const std::string stampedName = "lean_cpp_stamped_" + std::to_string(getpid());
+        renoir::LeanChannel sp(stampedName, sizeof(Imu), 64, renoir::LeanFlags::StampNanoseconds);
+        renoir::LeanChannel ss(stampedName, sizeof(Imu), 64,
+                               renoir::LeanFlags::StampNanoseconds | renoir::LeanFlags::FromOldest);
+        CHECK(sp.clockKind() == RENOIR_LEAN_CLOCK_NS);
+        Imu in{};
+        in.seq = 77;
+        Imu got{};
+        uint64_t stamp = 0;
+        uint64_t missed = 0;
+        CHECK(!ss.tryReadStamped(got, stamp));
+        CHECK(sp.publishAt(555, in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.tryReadStamped(got, stamp) && stamp == 555 && got.seq == 77);
+        const uint64_t before = sp.stampNow();
+        CHECK(sp.publishNow(in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.tryReadStamped(got, stamp) && stamp >= before && stamp <= sp.stampNow());
+        for (int i = 0; i < 200; ++i) {
+            CHECK(sp.publishAt(static_cast<uint64_t>(i + 1), in) ==
+                  RenoirErrorCode::RenoirErrorCode_Success);
+        }
+        uint64_t reads = 0;
+        uint64_t totalMissed = 0;
+        while (ss.tryReadStampedLagged(&got, sizeof got, stamp, missed)) {
+            ++reads;
+            totalMissed += missed;
+        }
+        CHECK(totalMissed > 0 && reads + totalMissed == 200);
+
+        const renoir::WaitStrategy all[] = {
+            renoir::WaitStrategy::BusySpin, renoir::WaitStrategy::Yielding,
+            renoir::WaitStrategy::Sleeping, renoir::WaitStrategy::Blocking,
+            renoir::WaitStrategy::PhasedBackoff};
+        for (const renoir::WaitStrategy strategy : all) {
+            CHECK(!ss.waitWith(strategy, 2000000ULL));
+        }
+        CHECK(!ss.waitPhased(100000ULL, 500000ULL, 3000000ULL));
+    }
     Imu out{};
     CHECK(!sub.tryRead(out));
     for (uint32_t i = 0; i < 50; ++i) {

@@ -21,8 +21,8 @@ pub use lean::{
     frame_slot_bytes, inspect_lean_header, lean_slot_bytes, monotonic_ns, tick_hz, DeadlineWait,
     FrameChannel, FrameLoan, FrameView, LeanChannel, LeanClock, LeanCursor, LeanGatedCursor,
     LeanInfo, LeanMode, LeanPublisher, LeanQos, LeanRead, LeanReliability, LeanRing,
-    LEAN_HEADER_BYTES, LEAN_MAX_CONSUMERS, LEAN_MAX_FRAME_BYTES, LEAN_MAX_SLOT_LINES,
-    LEAN_RING_MAGIC, STAMP_BYTES,
+    LeanWaitStrategy, LEAN_HEADER_BYTES, LEAN_MAX_CONSUMERS, LEAN_MAX_FRAME_BYTES,
+    LEAN_MAX_SLOT_LINES, LEAN_RING_MAGIC, STAMP_BYTES,
 };
 pub use mpmc::{MPMCTopicRing, MPMC_RING_MAGIC};
 pub use spsc::{

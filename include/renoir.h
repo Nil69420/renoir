@@ -211,6 +211,16 @@
 
 #define RENOIR_LEAN_CLOCK_TICKS 2
 
+#define RENOIR_LEAN_WAIT_BUSY_SPIN 0
+
+#define RENOIR_LEAN_WAIT_YIELDING 1
+
+#define RENOIR_LEAN_WAIT_SLEEPING 2
+
+#define RENOIR_LEAN_WAIT_BLOCKING 3
+
+#define RENOIR_LEAN_WAIT_PHASED_BACKOFF 4
+
 #define RENOIR_LEAN_RELIABLE_PUBLISHER RENOIR_LEAN_GATED
 
 #define RENOIR_LEAN_RELIABLE_SUBSCRIBER (RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER)
@@ -1007,6 +1017,15 @@ enum RenoirErrorCode renoir_lean_try_read_stamped_lagged(RenoirLeanHandle h,
                                                          uintptr_t buffer_len,
                                                          uint64_t *out_stamp,
                                                          uint64_t *out_missed);
+
+enum RenoirErrorCode renoir_lean_wait_strategy(RenoirLeanHandle h,
+                                               uint32_t strategy,
+                                               uint64_t timeout_ns);
+
+enum RenoirErrorCode renoir_lean_wait_phased(RenoirLeanHandle h,
+                                             uint64_t spin_ns,
+                                             uint64_t yield_ns,
+                                             uint64_t timeout_ns);
 
 /**
  * Create a shared memory manager with control region

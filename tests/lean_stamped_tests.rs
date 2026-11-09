@@ -3,6 +3,16 @@ use std::sync::Arc;
 
 use renoir::topic_rings::{LeanClock, LeanMode, LeanRing, STAMP_BYTES};
 
+fn shm_dir() -> &'static std::path::Path {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("RENOIR_SHM_DIR", dir.path());
+        dir
+    })
+    .path()
+}
+
 fn ring(mode: LeanMode, data: usize, clock: LeanClock) -> (Arc<LeanRing>, Vec<u64>) {
     let msg = data + STAMP_BYTES;
     let ring_bytes = renoir::topic_rings::lean_slot_bytes(msg).unwrap() * 64;
@@ -159,8 +169,7 @@ fn concurrent_reader_never_sees_a_stamp_from_another_message() {
 #[test]
 fn lag_is_reported_on_the_read_that_observes_it() {
     use renoir::topic_rings::{LeanChannel, LeanRead};
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("RENOIR_SHM_DIR", dir.path());
+    shm_dir();
     let name = format!("lag_{}", std::process::id());
     let mut writer = LeanChannel::open(&name, 16, 16, true).unwrap();
     let mut reader = LeanChannel::open(&name, 16, 16, true).unwrap();
@@ -192,4 +201,82 @@ fn lag_is_reported_on_the_read_that_observes_it() {
     assert!(missed > 0, "a 16-slot ring that took 200 messages must lag");
     assert_eq!(read + missed, published);
     assert_eq!(missed, reader.lost());
+}
+
+#[test]
+fn every_wait_strategy_wakes_on_publish_and_times_out() {
+    use renoir::topic_rings::{LeanChannel, LeanWaitStrategy};
+    use std::time::{Duration, Instant};
+    shm_dir();
+    for (i, strategy) in [
+        LeanWaitStrategy::BusySpin,
+        LeanWaitStrategy::Yielding,
+        LeanWaitStrategy::Sleeping,
+        LeanWaitStrategy::Blocking,
+        LeanWaitStrategy::PhasedBackoff,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let name = format!("wait_{}_{i}", std::process::id());
+        let mut writer = LeanChannel::open(&name, 16, 16, false).unwrap();
+        let reader = LeanChannel::open(&name, 16, 16, false).unwrap();
+
+        let started = Instant::now();
+        assert!(!reader.wait_with(strategy, Some(Duration::from_millis(30))));
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(25) && waited < Duration::from_millis(500),
+            "{strategy:?} timed out after {waited:?}"
+        );
+
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            writer.publish_notify(&[1u8; 16]).unwrap();
+            writer
+        });
+        let started = Instant::now();
+        assert!(reader.wait_with(strategy, Some(Duration::from_secs(5))));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{strategy:?} woke late"
+        );
+        drop(handle.join().unwrap());
+    }
+}
+
+#[test]
+fn unknown_wait_strategy_values_are_rejected() {
+    assert!(renoir::topic_rings::LeanWaitStrategy::from_raw(5).is_none());
+    assert!(renoir::topic_rings::LeanWaitStrategy::from_raw(u32::MAX).is_none());
+}
+
+#[test]
+fn phased_backoff_reaches_the_blocking_phase_and_still_wakes() {
+    use renoir::topic_rings::LeanChannel;
+    use std::time::{Duration, Instant};
+    shm_dir();
+    let name = format!("phased_{}", std::process::id());
+    let mut writer = LeanChannel::open(&name, 16, 16, false).unwrap();
+    let reader = LeanChannel::open(&name, 16, 16, false).unwrap();
+    let started = Instant::now();
+    assert!(!reader.wait_phased(
+        Duration::from_millis(1),
+        Duration::from_millis(2),
+        Some(Duration::from_millis(60))
+    ));
+    assert!(started.elapsed() >= Duration::from_millis(55));
+    let handle = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(80));
+        writer.publish_notify(&[3u8; 16]).unwrap();
+        writer
+    });
+    let started = Instant::now();
+    assert!(reader.wait_phased(
+        Duration::from_millis(1),
+        Duration::from_millis(2),
+        Some(Duration::from_secs(5))
+    ));
+    assert!(started.elapsed() < Duration::from_secs(2));
+    drop(handle.join().unwrap());
 }

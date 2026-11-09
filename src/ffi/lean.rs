@@ -3,7 +3,9 @@ use std::{
     time::Duration,
 };
 
-use crate::topic_rings::{DeadlineWait, LeanChannel, LeanClock, LeanMode, LeanRead};
+use crate::topic_rings::{
+    DeadlineWait, LeanChannel, LeanClock, LeanMode, LeanRead, LeanWaitStrategy,
+};
 
 use super::types::RenoirErrorCode;
 
@@ -18,6 +20,11 @@ pub const RENOIR_LEAN_STAMP_TICKS: u32 = 32;
 pub const RENOIR_LEAN_CLOCK_NONE: u32 = 0;
 pub const RENOIR_LEAN_CLOCK_NS: u32 = 1;
 pub const RENOIR_LEAN_CLOCK_TICKS: u32 = 2;
+pub const RENOIR_LEAN_WAIT_BUSY_SPIN: u32 = 0;
+pub const RENOIR_LEAN_WAIT_YIELDING: u32 = 1;
+pub const RENOIR_LEAN_WAIT_SLEEPING: u32 = 2;
+pub const RENOIR_LEAN_WAIT_BLOCKING: u32 = 3;
+pub const RENOIR_LEAN_WAIT_PHASED_BACKOFF: u32 = 4;
 pub const RENOIR_LEAN_RELIABLE_PUBLISHER: u32 = RENOIR_LEAN_GATED;
 pub const RENOIR_LEAN_RELIABLE_SUBSCRIBER: u32 = RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER;
 
@@ -474,5 +481,47 @@ pub extern "C" fn renoir_lean_try_read_stamped_lagged(
             }
         }
         Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_wait_strategy(
+    h: RenoirLeanHandle,
+    strategy: u32,
+    timeout_ns: u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let Some(strategy) = LeanWaitStrategy::from_raw(strategy) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let timeout = (timeout_ns != u64::MAX).then(|| Duration::from_nanos(timeout_ns));
+    if h.wait_with(strategy, timeout) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_wait_phased(
+    h: RenoirLeanHandle,
+    spin_ns: u64,
+    yield_ns: u64,
+    timeout_ns: u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let timeout = (timeout_ns != u64::MAX).then(|| Duration::from_nanos(timeout_ns));
+    if h.wait_phased(
+        Duration::from_nanos(spin_ns),
+        Duration::from_nanos(yield_ns),
+        timeout,
+    ) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
     }
 }

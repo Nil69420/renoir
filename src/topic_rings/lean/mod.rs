@@ -43,6 +43,7 @@ pub use liveness::LEAN_MAX_PRODUCERS;
 pub use qos::{DeadlineWait, LeanQos, LeanReliability};
 pub use stamped::STAMP_BYTES;
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
+pub use wait::{LeanWaitStrategy, PHASED_SPIN, PHASED_YIELD};
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;
 const LEAN_FIXED_HEADER_BYTES: usize = 192;

@@ -140,6 +140,22 @@ Savings measured on x86 for eight 32-byte messages: 28.6 ns as one batch against
 
 `wait_adaptive` (`renoir_lean_wait_adaptive`, `waitAdaptive`, `wait_adaptive`) tunes the spin budget itself. It starts at 1000 iterations, doubles the budget (up to 100,000) each time data arrives while still spinning, and halves it (down to 32) each time it has to fall through to the futex. Frequent messages therefore keep consumers on the polling path with no syscall, and sparse streams stop burning CPU. Use `wait` with an explicit spin count when you need a fixed budget.
 
+
+## Wait strategies
+
+A consumer that has nothing to read has to wait somehow, and the right choice trades latency against CPU. `renoir_lean_wait_strategy(handle, strategy, timeout_ns)` (Rust: `LeanChannel::wait_with`) offers the set the LMAX Disruptor uses; every one takes a timeout (`UINT64_MAX` for none), which also gives the Disruptor's timeout variants.
+
+| Strategy | Behaviour | Latency, CPU | Publisher must call |
+|---|---|---|---|
+| `RENOIR_LEAN_WAIT_BUSY_SPIN` | poll with a pause instruction | lowest latency, one core at 100% | `publish` |
+| `RENOIR_LEAN_WAIT_YIELDING` | poll and `sched_yield` between polls | low latency, core shared with other runnable threads | `publish` |
+| `RENOIR_LEAN_WAIT_SLEEPING` | poll, then sleep 50 us per step | latency up to about 50 us plus the scheduler's timer slack, almost no CPU | `publish` |
+| `RENOIR_LEAN_WAIT_BLOCKING` | futex wait, no polling | a wake-up through the kernel (microseconds), no CPU while idle | `publish_notify` |
+| `RENOIR_LEAN_WAIT_PHASED_BACKOFF` | spin for 50 us, yield for 1 ms, then block | spin latency for dense streams, no CPU for sparse ones | `publish_notify` |
+| `renoir_lean_wait_phased(handle, spin_ns, yield_ns, timeout_ns)` | the same with your own phase lengths | | `publish_notify` |
+
+`renoir_lean_wait_adaptive` (below) is a seventh option that tunes its own spin budget. The blocking phases only wake if the publisher uses `publish_notify`, which skips the wake-up system call when no consumer is blocked (the Disruptor's "lite" blocking optimisation); the polling strategies need no notification. These strategies are tested for correct timeout and wake-up, not benchmarked for latency here, so measure on your own hardware, particularly the sleeping and yielding ones, whose behaviour depends on the kernel's scheduler.
+
 ## Crash recovery
 
 - A publisher killed mid-publish leaves an odd sequence word in one slot. Readers see that slot as empty; the next publisher (single-producer) resumes at the published index and rewrites it, so the ring heals without intervention.
