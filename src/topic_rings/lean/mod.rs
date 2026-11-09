@@ -53,6 +53,7 @@ pub const LEAN_MAX_SLOT_LINES: usize = 8;
 const LINE: usize = 64;
 const SEQ_BYTES: usize = 8;
 const MAX_READ_ATTEMPTS: u32 = 64;
+pub(super) const LEAN_MAX_INDEX: u64 = 1 << 62;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -287,7 +288,7 @@ impl LeanRing {
     }
 
     pub fn published(&self) -> u64 {
-        self.write_idx().load(Ordering::Acquire)
+        self.write_idx().load(Ordering::Acquire).min(LEAN_MAX_INDEX)
     }
 
     pub fn publisher(self: &Arc<Self>) -> LeanPublisher {

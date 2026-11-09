@@ -42,6 +42,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "lean_hostile_header"
+path = "fuzz_targets/lean_hostile_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "frame_corrupt_ring"
 path = "fuzz_targets/frame_corrupt_ring.rs"
 test = false

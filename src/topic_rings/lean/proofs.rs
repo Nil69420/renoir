@@ -4,7 +4,7 @@ use super::{
     inspect::inspect,
     lean_slot_bytes,
     stamped::{stamped_geometry, STAMP_BYTES},
-    LeanClock, LeanRing, LEAN_HEADER_BYTES, LEAN_MAX_SLOT_LINES, LINE, SEQ_BYTES,
+    LeanClock, LeanRing, LEAN_HEADER_BYTES, LEAN_MAX_INDEX, LEAN_MAX_SLOT_LINES, LINE, SEQ_BYTES,
 };
 
 #[kani::proof]
@@ -153,4 +153,17 @@ fn sequence_numbers_keep_their_parity_and_order_below_the_overflow_horizon() {
     assert!(writing < published);
     let next = idx + 1;
     assert!(2 * next - 1 == published + 1);
+}
+
+#[kani::proof]
+fn a_clamped_index_never_overflows_the_sequence_arithmetic() {
+    let raw: u64 = kani::any();
+    let published = raw.min(LEAN_MAX_INDEX);
+    let next = published + 1;
+    let writing = 2 * next - 1;
+    let done = 2 * next;
+    assert!(writing < done);
+    assert!(next + 1 > next);
+    let after_batch = next + (LEAN_MAX_SLOT_LINES as u64);
+    assert!(2 * after_batch > 2 * next);
 }

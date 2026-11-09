@@ -74,7 +74,7 @@ impl LeanPublisher {
 
     fn batch_multi(&mut self, data: &[u8], count: usize) -> Result<usize> {
         let msg = self.ring.msg_size;
-        let first = self.claim_range(count as u64);
+        let first = self.claim_range(count as u64)?;
         for (i, chunk) in data.chunks_exact(msg).take(count).enumerate() {
             if let Err(e) = fill_slot_multi(&self.ring, first + i as u64, chunk) {
                 self.end_claim();
