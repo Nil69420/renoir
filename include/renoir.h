@@ -187,6 +187,12 @@
 
 #define RENOIR_RING_MODE_NONE UINT32_MAX
 
+#define RENOIR_DISCOVERY_APPEARED 0
+
+#define RENOIR_DISCOVERY_DISAPPEARED 1
+
+#define RENOIR_DISCOVERY_CHANGED 2
+
 #define RENOIR_LEAN_FROM_OLDEST 1
 
 #define RENOIR_LEAN_MULTI_PRODUCER 2
@@ -361,6 +367,16 @@ typedef struct RenoirRingInfo {
   uint32_t mapped_by_count;
   uint32_t reserved;
 } RenoirRingInfo;
+
+typedef void *RenoirDiscoveryWatchHandle;
+
+typedef struct RenoirDiscoveryEvent {
+  uint32_t kind;
+  uint32_t previous_live_publishers;
+  uint32_t previous_registered_consumers;
+  uint32_t reserved;
+  struct RenoirRingInfo ring;
+} RenoirDiscoveryEvent;
 
 typedef void *RenoirFrameHandle;
 
@@ -831,6 +847,19 @@ enum RenoirErrorCode renoir_discover(struct RenoirRingInfo *out,
                                      uintptr_t *total);
 
 enum RenoirErrorCode renoir_discover_sweep(uint32_t flags, uintptr_t *removed);
+
+enum RenoirErrorCode renoir_discover_watch_open(uint32_t interval_ms,
+                                                RenoirDiscoveryWatchHandle *out);
+
+int32_t renoir_discover_watch_fd(RenoirDiscoveryWatchHandle handle);
+
+enum RenoirErrorCode renoir_discover_watch_poll(RenoirDiscoveryWatchHandle handle,
+                                                uint32_t timeout_ms,
+                                                struct RenoirDiscoveryEvent *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *count);
+
+void renoir_discover_watch_close(RenoirDiscoveryWatchHandle handle);
 
 enum RenoirErrorCode renoir_frame_open(const char *name,
                                        uintptr_t max_frame,

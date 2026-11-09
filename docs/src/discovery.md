@@ -13,6 +13,10 @@ Nothing in the data path registers with anything, so discovery costs nothing at 
 - C++: `renoir::discover()` and `renoir::sweep()` in `renoir_discovery.hpp`.
 - Python: `renoir.discover()` and `renoir.sweep()`.
 
+## Watching for changes
+
+`DiscoveryWatcher` (Rust) and `renoir_discover_watch_open/fd/poll/close` (C) report ring `Appeared`, `Changed` and `Disappeared` events instead of making you rescan. The watcher puts an inotify watch on the shared-memory directory, so a ring file being created or deleted wakes `poll` immediately (it also exposes the inotify descriptor for `poll(2)` or an event loop). Changes inside a ring, such as a publisher or consumer registering, or a publisher process dying, are memory writes that raise no file event; the watcher finds them with a periodic rescan that reads only the ring headers (no `/proc` scan), at the interval you pass (a few tens of milliseconds is cheap). A ring file that exists but is not yet initialised is rescanned every 5 ms for up to two seconds, so appearance is reported within a few milliseconds of initialisation. A `Changed` event carries the previous and the current description, so the previous publisher and consumer counts are visible. `renoir-monitor events` prints the stream. Measured in the test suite: appearance and removal are reported in under 500 ms (typically within a few milliseconds), and a watcher with a 30 s interval is woken within a second by a new ring.
+
 ## The renoir-monitor tool
 
 ```
