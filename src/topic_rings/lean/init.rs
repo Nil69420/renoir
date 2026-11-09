@@ -60,6 +60,10 @@ pub(super) unsafe fn attach_header(
             (*header).wake.store(0, Ordering::Relaxed);
             (*header).waiters.store(0, Ordering::Relaxed);
             (*header).claim.store(0, Ordering::Relaxed);
+            (*header).qos_offer.store(0, Ordering::Relaxed);
+            (*header).offered_deadline_ns.store(0, Ordering::Relaxed);
+            (*header).offered_lifespan_ns.store(0, Ordering::Relaxed);
+            (*header).offered_lease_ns.store(0, Ordering::Relaxed);
             for i in 0..LEAN_MAX_CONSUMERS {
                 let entry = &*(header as *const u8)
                     .add(LEAN_FIXED_HEADER_BYTES)

@@ -22,6 +22,7 @@ mod frame_tests;
 mod gate;
 mod init;
 mod inspect;
+mod liveliness;
 mod liveness;
 #[cfg(test)]
 mod liveness_tests;
@@ -29,6 +30,7 @@ mod multi;
 #[cfg(kani)]
 mod proofs;
 mod qos;
+mod qos_offer;
 mod stamped;
 mod types;
 mod wait;
@@ -39,8 +41,12 @@ pub use frame::{frame_slot_bytes, FrameLoan, FrameView, LEAN_MAX_FRAME_BYTES};
 pub use frame_channel::FrameChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
 pub use inspect::{inspect as inspect_lean_header, LeanInfo};
+pub use liveliness::LivelinessStatus;
 pub use liveness::LEAN_MAX_PRODUCERS;
-pub use qos::{DeadlineWait, LeanQos, LeanReliability};
+pub use qos::{
+    DeadlineWait, LeanDurability, LeanHistory, LeanLiveliness, LeanLivelinessKind, LeanOwnership,
+    LeanQos, LeanReliability,
+};
 pub use stamped::STAMP_BYTES;
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
 pub use wait::{LeanWaitStrategy, PHASED_SPIN, PHASED_YIELD};
@@ -67,13 +73,16 @@ struct LeanHeader {
     mode: u32,
     clock: u32,
     tick_hz: u64,
-    pad_cold: [u8; 8],
+    qos_offer: AtomicU64,
     write_idx: AtomicU64,
     pad_write: [u8; 56],
     wake: AtomicU32,
     waiters: AtomicU32,
     claim: AtomicU64,
-    pad_wake: [u8; 48],
+    offered_deadline_ns: AtomicU64,
+    offered_lifespan_ns: AtomicU64,
+    offered_lease_ns: AtomicU64,
+    pad_qos: [u8; 24],
 }
 
 const _: () = assert!(std::mem::offset_of!(LeanHeader, session) == SESSION_MARKER_OFFSET);
@@ -81,6 +90,10 @@ const _: () = assert!(std::mem::offset_of!(LeanHeader, write_idx) == 64);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, mode) == 40);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, clock) == 44);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, tick_hz) == 48);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, qos_offer) == 56);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, offered_deadline_ns) == 144);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, offered_lifespan_ns) == 152);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, offered_lease_ns) == 160);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, wake) == 128);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, claim) == 136);
 const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_FIXED_HEADER_BYTES);

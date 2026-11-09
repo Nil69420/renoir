@@ -16,13 +16,15 @@ const SPIN_MAX: u32 = 100_000;
 
 pub struct LeanChannel {
     ring: Arc<LeanRing>,
-    publisher: LeanPublisher,
+    pub(super) publisher: LeanPublisher,
     cursor: LeanCursor,
     gated: Option<LeanGatedCursor>,
     pub(super) deadline: Option<Duration>,
     pub(super) deadline_misses: u64,
     spin_budget: u32,
-    announced: bool,
+    pub(super) announced: bool,
+    pub(super) fast: bool,
+    pub(super) qos: super::liveliness::QosState,
     _region: SharedMemoryRegion,
 }
 
@@ -71,7 +73,7 @@ impl LeanChannel {
         Self::open_clocked(name, data_size, slot_count, from_oldest, mode, clock)
     }
 
-    fn open_clocked(
+    pub(super) fn open_clocked(
         name: &str,
         msg_size: usize,
         slot_count: usize,
@@ -136,6 +138,8 @@ impl LeanChannel {
             deadline_misses: 0,
             spin_budget: SPIN_START,
             announced: false,
+            fast: false,
+            qos: super::liveliness::QosState::default(),
             _region: region,
         })
     }
@@ -161,31 +165,31 @@ impl LeanChannel {
 
     #[inline]
     pub fn publish(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish(data)
     }
 
     #[inline]
     pub fn publish_at(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_at(stamp, data)
     }
 
     #[inline]
     pub fn publish_now(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_now(data)
     }
 
     #[inline]
     pub fn publish_at_notify(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_at_notify(stamp, data)
     }
 
     #[inline]
     pub fn publish_now_notify(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_now_notify(data)
     }
 
@@ -199,13 +203,13 @@ impl LeanChannel {
 
     #[inline]
     pub fn publish_notify(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_notify(data)
     }
 
     #[inline]
     pub fn publish_batch(&mut self, data: &[u8]) -> Result<usize> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_batch(data)
     }
 
@@ -286,11 +290,12 @@ impl LeanChannel {
         self.ring.pending(self.active_cursor())
     }
 
-    #[inline]
-    fn announce(&mut self) {
-        if !self.announced {
-            self.announced = true;
-            self.publisher.announce();
+    #[inline(always)]
+    fn announce(&mut self) -> Result<()> {
+        if self.fast {
+            Ok(())
+        } else {
+            self.announce_slow()
         }
     }
 
