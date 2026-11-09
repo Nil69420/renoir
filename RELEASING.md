@@ -15,6 +15,9 @@
    - supply chain: `cargo deny check` and `cargo audit`
 4. Reproducibility and SBOM: `scripts/repro_build.sh` must print `REPRODUCIBLE`; `scripts/sbom.sh` writes `dist/renoir.cdx.json`.
 5. Build artifacts: `scripts/package_jetson.sh` (aarch64 tarball), `cargo deb` (x86_64 package), the Python wheel with `maturin build --release`.
-6. Write `dist/SHA256SUMS` for every artifact and sign it with the project key (`minisign -S -m dist/SHA256SUMS`); publish the public key in the repository.
+6. Signing is done by the `Release` workflow when the tag `vx.y.z` is pushed (step 8): it rebuilds the artifacts, checks the tag against the crate version and the reproducibility script, writes `SHA256SUMS`, attaches a Sigstore build-provenance attestation to every artifact and the checksum file, attests the SBOM, signs `SHA256SUMS` with cosign (keyless, bound to the workflow identity, so there is no private key to store or lose) and opens a draft GitHub release for review. Consumers verify with:
+   - `gh attestation verify <artifact> --repo Nil69420/renoir`
+   - `cosign verify-blob --certificate SHA256SUMS.pem --signature SHA256SUMS.sig --certificate-identity-regexp 'https://github.com/Nil69420/renoir/.github/workflows/release.yml@refs/tags/v.*' --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS`, then `sha256sum -c SHA256SUMS`
+   The workflow has not run yet; the first release candidate tag is its first test.
 7. Soak: the Jetson soak (`scripts/jetson_soak.sh`) for at least 24 hours with no loss on gated topics and no growth in `lost` beyond the documented budget.
 8. Open a pull request from the release branch, get it reviewed, merge, then tag `vx.y.z` on the merge commit. Never force-push a tag.

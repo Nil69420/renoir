@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross toolchain and cosign
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Check the tag matches the crate version
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          test "v$version" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} does not match version $version"; exit 1; }
+
+      - name: Reproducibility check
+        run: scripts/repro_build.sh | tee repro.log && grep -q REPRODUCIBLE repro.log
+
+      - name: Build artifacts
+        run: |
+          scripts/package_jetson.sh
+          cargo install --locked cargo-deb
+          cargo build --release --features c-api,cli
+          cargo deb --no-build -o dist/
+          scripts/sbom.sh
+
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.deb renoir.cdx.json > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.deb
+            dist/SHA256SUMS
+
+      - name: Attest the SBOM
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/*.tar.gz
+          sbom-path: dist/renoir.cdx.json
+
+      - name: Sign the checksums with cosign (keyless)
+        run: |
+          cosign sign-blob --yes dist/SHA256SUMS \
+            --output-signature dist/SHA256SUMS.sig \
+            --output-certificate dist/SHA256SUMS.pem
+
+      - name: Create a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --draft --verify-tag \
+            --title "${GITHUB_REF_NAME}" --notes-file CHANGELOG.md \
+            dist/*.tar.gz dist/*.deb dist/renoir.cdx.json dist/SHA256SUMS dist/SHA256SUMS.sig dist/SHA256SUMS.pem
