@@ -13,7 +13,7 @@ use super::{
 pub type RenoirFrameHandle = *mut c_void;
 
 #[inline(always)]
-fn handle<'a>(h: RenoirFrameHandle) -> Option<&'a mut FrameChannel> {
+pub(super) fn handle<'a>(h: RenoirFrameHandle) -> Option<&'a mut FrameChannel> {
     unsafe { (h as *mut FrameChannel).as_mut() }
 }
 

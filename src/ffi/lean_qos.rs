@@ -57,7 +57,7 @@ fn optional(ns: u64) -> Option<Duration> {
     (ns != 0).then(|| Duration::from_nanos(ns))
 }
 
-fn convert(q: &RenoirLeanQos) -> Option<LeanQos> {
+pub(super) fn convert(q: &RenoirLeanQos) -> Option<LeanQos> {
     let reliability = match q.reliability {
         RENOIR_QOS_BEST_EFFORT => LeanReliability::BestEffort,
         RENOIR_QOS_RELIABLE => LeanReliability::Reliable,
@@ -185,6 +185,24 @@ pub extern "C" fn renoir_lean_assert_liveliness(h: RenoirLeanHandle) -> RenoirEr
     match h.assert_liveliness() {
         Ok(()) => RenoirErrorCode::Success,
         Err(e) => e.into(),
+    }
+}
+
+pub(super) fn fill_status(
+    status: crate::topic_rings::LivelinessStatus,
+    out: *mut RenoirLivelinessStatus,
+) {
+    if out.is_null() {
+        return;
+    }
+    unsafe {
+        *out = RenoirLivelinessStatus {
+            registered: u32::try_from(status.registered).unwrap_or(u32::MAX),
+            alive: u32::try_from(status.alive).unwrap_or(u32::MAX),
+            lost: u32::from(status.lost),
+            reserved: 0,
+            lost_count: status.lost_count,
+        };
     }
 }
 

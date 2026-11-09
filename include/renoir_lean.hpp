@@ -57,6 +57,26 @@ struct LivelinessStatus {
     uint64_t lostCount;
 };
 
+inline RenoirLeanQos toRawQos(const LeanQosOptions& options) {
+    RenoirLeanQos qos;
+    checkResult(renoir_lean_qos_default(&qos), "lean qos defaults");
+    qos.reliability = options.reliable ? RENOIR_QOS_RELIABLE : RENOIR_QOS_BEST_EFFORT;
+    qos.history = options.keepAll ? RENOIR_QOS_KEEP_ALL : RENOIR_QOS_KEEP_LAST;
+    qos.durability = options.transientLocal ? RENOIR_QOS_TRANSIENT_LOCAL : RENOIR_QOS_VOLATILE;
+    qos.depth = options.depth;
+    qos.deadline_ns = options.deadlineNs;
+    qos.lifespan_ns = options.lifespanNs;
+    qos.min_separation_ns = options.minSeparationNs;
+    qos.liveliness_kind = options.manualLiveliness ? RENOIR_QOS_LIVELINESS_MANUAL
+                                                   : RENOIR_QOS_LIVELINESS_AUTOMATIC;
+    qos.liveliness_lease_ns = options.livelinessLeaseNs;
+    qos.ownership = options.exclusive ? RENOIR_QOS_OWNERSHIP_EXCLUSIVE : RENOIR_QOS_OWNERSHIP_SHARED;
+    qos.ownership_strength = options.ownershipStrength;
+    qos.clock = options.clock;
+    qos.flags = options.requireOffer ? RENOIR_QOS_FLAG_REQUIRE_OFFER : 0U;
+    return qos;
+}
+
 class LeanChannel {
 public:
     static constexpr size_t kMaxMessageBytes = 504;
@@ -79,22 +99,7 @@ public:
 
     LeanChannel(const std::string& name, uint32_t messageSize, const LeanQosOptions& options,
                 bool subscriber = false, bool multiProducer = false) {
-        RenoirLeanQos qos;
-        checkResult(renoir_lean_qos_default(&qos), "lean qos defaults");
-        qos.reliability = options.reliable ? RENOIR_QOS_RELIABLE : RENOIR_QOS_BEST_EFFORT;
-        qos.history = options.keepAll ? RENOIR_QOS_KEEP_ALL : RENOIR_QOS_KEEP_LAST;
-        qos.durability = options.transientLocal ? RENOIR_QOS_TRANSIENT_LOCAL : RENOIR_QOS_VOLATILE;
-        qos.depth = options.depth;
-        qos.deadline_ns = options.deadlineNs;
-        qos.lifespan_ns = options.lifespanNs;
-        qos.min_separation_ns = options.minSeparationNs;
-        qos.liveliness_kind = options.manualLiveliness ? RENOIR_QOS_LIVELINESS_MANUAL
-                                                       : RENOIR_QOS_LIVELINESS_AUTOMATIC;
-        qos.liveliness_lease_ns = options.livelinessLeaseNs;
-        qos.ownership = options.exclusive ? RENOIR_QOS_OWNERSHIP_EXCLUSIVE : RENOIR_QOS_OWNERSHIP_SHARED;
-        qos.ownership_strength = options.ownershipStrength;
-        qos.clock = options.clock;
-        qos.flags = options.requireOffer ? RENOIR_QOS_FLAG_REQUIRE_OFFER : 0U;
+        const RenoirLeanQos qos = toRawQos(options);
         const uint32_t flags = (subscriber ? RENOIR_LEAN_CONSUMER : 0U) |
                                (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
         checkResult(renoir_lean_open_qos(name.c_str(), messageSize, &qos, flags, &handle_),

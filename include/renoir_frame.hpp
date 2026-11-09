@@ -2,6 +2,7 @@
 #define RENOIR_FRAME_HPP
 
 #include "renoir.hpp"
+#include "renoir_lean.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -123,6 +124,15 @@ public:
                     "frame open");
     }
 
+    FrameChannel(const std::string& name, size_t maxFrame, const LeanQosOptions& options,
+                 bool consumer = false, bool multiProducer = false) {
+        const RenoirLeanQos qos = toRawQos(options);
+        const uint32_t flags = (consumer ? RENOIR_LEAN_CONSUMER : 0U) |
+                               (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
+        checkResult(renoir_frame_open_qos(name.c_str(), maxFrame, &qos, flags, &handle_),
+                    "frame open with qos");
+    }
+
     FrameChannel(const FrameChannel&) = delete;
     FrameChannel& operator=(const FrameChannel&) = delete;
     FrameChannel(FrameChannel&&) = delete;
@@ -150,6 +160,47 @@ public:
         checkResult(rc, "frame view");
         return View(this, data, len);
     }
+
+    std::optional<View> tryViewQos() {
+        const uint8_t* data = nullptr;
+        size_t len = 0;
+        const RenoirErrorCode rc = renoir_frame_view_qos(handle_, &data, &len);
+        if (rc == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
+            return std::nullopt;
+        }
+        checkResult(rc, "frame view qos");
+        return View(this, data, len);
+    }
+
+    RenoirErrorCode registerPublisher() noexcept { return renoir_frame_register_publisher(handle_); }
+    RenoirErrorCode assertLiveliness() noexcept { return renoir_frame_assert_liveliness(handle_); }
+
+    LivelinessStatus liveliness() noexcept {
+        RenoirLivelinessStatus raw{};
+        if (renoir_frame_liveliness(handle_, &raw) != RenoirErrorCode::RenoirErrorCode_Success) {
+            return LivelinessStatus{0, 0, true, 0};
+        }
+        return LivelinessStatus{raw.registered, raw.alive, raw.lost != 0, raw.lost_count};
+    }
+
+    bool waitLivelinessChange(uint64_t timeoutNs, LivelinessStatus* status = nullptr) noexcept {
+        RenoirLivelinessStatus raw{};
+        if (renoir_frame_wait_liveliness_change(handle_, timeoutNs, &raw) !=
+            RenoirErrorCode::RenoirErrorCode_Success) {
+            return false;
+        }
+        if (status != nullptr) {
+            *status = LivelinessStatus{raw.registered, raw.alive, raw.lost != 0, raw.lost_count};
+        }
+        return true;
+    }
+
+    bool isOwner() noexcept { return renoir_frame_is_owner(handle_) == 1; }
+    bool waitDeadline(uint32_t spinIterations = 2000) noexcept {
+        return renoir_frame_wait_deadline(handle_, spinIterations) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+    uint64_t deadlineMisses() const noexcept { return renoir_frame_deadline_misses(handle_); }
 
     std::optional<View> tryViewFresh(uint64_t maxAgeNs) {
         const uint8_t* data = nullptr;

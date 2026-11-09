@@ -465,3 +465,46 @@ def test_qos_liveliness_ownership_lifespan_and_filter():
             break
         delivered.append(item[0] // 1_000_000)
     assert delivered == [0, 5, 10, 15, 20] and reader.filtered_out() == 16
+
+
+def test_frame_qos_liveliness_ownership_and_lifespan():
+    tag = "%d" % time.monotonic_ns()
+    name = "py_fqos_" + tag
+    prod = renoir.FrameChannel.with_qos(name, 64, lifespan_ms=40, transient_local=True, lease_ms=80)
+    cons = renoir.FrameChannel.with_qos(name, 64, lifespan_ms=40, transient_local=True, lease_ms=200, consumer=True)
+    assert cons.liveliness()["lost"] is True
+    prod.register_publisher()
+    assert cons.liveliness()["alive"] == 1
+    prod.publish(b"a" * 64)
+    time.sleep(0.12)
+    prod.publish(b"b" * 64)
+    assert cons.read_qos() == b"b" * 64
+    assert cons.stale_dropped() == 1
+    assert cons.read_qos() is None
+    time.sleep(0.35)
+    assert cons.liveliness()["lost"] is True
+    prod.assert_liveliness()
+    assert cons.liveliness()["lost"] is False
+
+    own = "py_fqos_own_" + tag
+    weak = renoir.FrameChannel.with_qos(own, 64, exclusive_strength=1, multi_producer=True)
+    strong = renoir.FrameChannel.with_qos(own, 64, exclusive_strength=5, multi_producer=True)
+    weak.register_publisher()
+    strong.register_publisher()
+    with pytest.raises(Exception):
+        weak.publish(b"w" * 64)
+    strong.publish(b"s" * 64)
+    assert strong.is_owner() and not weak.is_owner()
+
+
+def test_rpc_server_liveliness_and_request_lifespan():
+    service = "py_rpcq_%d" % time.monotonic_ns()
+    client = renoir.RpcClient(service, 16, 16)
+    assert client.servers_alive() == 0
+    assert client.wait_for_server(timeout_ms=20) is False
+    server = renoir.RpcServer(service, 16, 16)
+    server.set_request_lifespan(50)
+    client.set_stamp_requests(True)
+    assert client.wait_for_server(timeout_ms=1000) is True
+    assert client.servers_alive() == 1
+    assert server.stale_requests() == 0
