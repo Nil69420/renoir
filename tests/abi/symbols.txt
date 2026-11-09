@@ -62,9 +62,11 @@ renoir_lean_open
 renoir_lean_pending
 renoir_lean_publish
 renoir_lean_publish_at
+renoir_lean_publish_at_notify
 renoir_lean_publish_batch
 renoir_lean_publish_notify
 renoir_lean_publish_now
+renoir_lean_publish_now_notify
 renoir_lean_read_batch
 renoir_lean_set_deadline
 renoir_lean_set_upstream

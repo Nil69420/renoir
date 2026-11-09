@@ -73,6 +73,12 @@ int main() {
             CHECK(!ss.waitWith(strategy, 2000000ULL));
         }
         CHECK(!ss.waitPhased(100000ULL, 500000ULL, 3000000ULL));
+        CHECK(sp.publishAtNotify(9001, &in, sizeof in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.waitWith(renoir::WaitStrategy::Blocking, 1000000000ULL));
+        CHECK(ss.tryReadStamped(&got, sizeof got, stamp) && stamp == 9001);
+        CHECK(sp.publishNowNotify(&in, sizeof in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.waitWith(renoir::WaitStrategy::PhasedBackoff, 1000000000ULL));
+        CHECK(ss.tryReadStamped(&got, sizeof got, stamp));
     }
     {
         renoir::DiscoveryWatch watch(20);

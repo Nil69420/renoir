@@ -78,7 +78,7 @@ if (renoir_lean_try_read_stamped(sub, (uint8_t *)&out, sizeof out, &stamp) == Re
 }
 ```
 
-`publish_at` takes a stamp you already have, such as the sensor's own hardware time, and costs no clock read at all. Use it when the driver supplies the time of measurement, which is more accurate than the time of publication. The two clock choices differ in cost, not in meaning:
+`publish_at_notify` and `publish_now_notify` do the same and also wake consumers blocked in the Blocking or PhasedBackoff waits (plain `publish_at` and `publish_now` do not, so a blocked consumer would sleep until its timeout). `publish_at` takes a stamp you already have, such as the sensor's own hardware time, and costs no clock read at all. Use it when the driver supplies the time of measurement, which is more accurate than the time of publication. The two clock choices differ in cost, not in meaning:
 
 | Publish (48 B, one core, i7-11800H) | Cost over an unstamped publish |
 |---|---|
@@ -86,7 +86,7 @@ if (renoir_lean_try_read_stamped(sub, (uint8_t *)&out, sizeof out, &stamp) == Re
 | `publish_now`, tick clock | about 4 ns |
 | `publish_now`, nanosecond clock | about 14 ns (a `clock_gettime` call through the vDSO) |
 
-Tick stamps are comparable between processes on one machine because the counter is invariant and shared. Convert them with the ring's tick rate (`renoir_lean_tick_hz`), which is read from CPUID leaf 0x15 or calibrated against `CLOCK_MONOTONIC` when the CPU does not report it; if the CPU has no invariant counter, opening a tick ring fails and you should use the nanosecond clock. On AArch64 the rate is `cntfrq_el0`, typically a coarse clock (31.25 MHz on some Jetson parts is 32 ns per tick); the project has not measured Jetson. The ring remembers its clock in the header, so a process opening it with a different clock mode is rejected, and the unstamped `publish` and `try_read` return an error on a stamped ring instead of misreading the stamp as data.
+Tick stamps are comparable between processes on one machine because the counter is invariant and shared. Convert them with the ring's tick rate (`renoir_lean_tick_hz`), which is read from CPUID leaf 0x15 or calibrated against `CLOCK_MONOTONIC` when the CPU does not report it; if the CPU has no invariant counter, opening a tick ring fails and you should use the nanosecond clock. On AArch64 the rate is `cntfrq_el0`, typically a coarse clock (31.25 MHz on some Jetson parts is 32 ns per tick); the project has not measured Jetson. The ring remembers its clock in the header, so a process opening it with a different clock mode is rejected. The unstamped `publish` and `try_read` are not meant for a stamped ring: they work on the wire format, so a buffer of your data size plus eight bytes is accepted and its first eight bytes are the stamp, and any other size returns an error. Use the stamped calls.
 
 Stamped reads on plain rings take a direct path; gated and multi-producer rings go through a stack buffer and a copy. No path allocates (`tests/zero_alloc_paths.rs`).
 
@@ -150,7 +150,7 @@ A consumer that has nothing to read has to wait somehow, and the right choice tr
 | `RENOIR_LEAN_WAIT_BUSY_SPIN` | poll with a pause instruction | lowest latency, one core at 100% | `publish` |
 | `RENOIR_LEAN_WAIT_YIELDING` | poll and `sched_yield` between polls | low latency, core shared with other runnable threads | `publish` |
 | `RENOIR_LEAN_WAIT_SLEEPING` | poll, then sleep 50 us per step | latency up to about 50 us plus the scheduler's timer slack, almost no CPU | `publish` |
-| `RENOIR_LEAN_WAIT_BLOCKING` | futex wait, no polling | a wake-up through the kernel (microseconds), no CPU while idle | `publish_notify` |
+| `RENOIR_LEAN_WAIT_BLOCKING` | futex wait, no polling | a wake-up through the kernel (microseconds), no CPU while idle | `publish_notify`, or `publish_at_notify` / `publish_now_notify` on a stamped ring |
 | `RENOIR_LEAN_WAIT_PHASED_BACKOFF` | spin for 50 us, yield for 1 ms, then block | spin latency for dense streams, no CPU for sparse ones | `publish_notify` |
 | `renoir_lean_wait_phased(handle, spin_ns, yield_ns, timeout_ns)` | the same with your own phase lengths | | `publish_notify` |
 

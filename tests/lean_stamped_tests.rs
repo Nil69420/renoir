@@ -118,8 +118,9 @@ fn tick_conversion_is_monotonic_and_exact_at_real_counter_rates() {
     assert_eq!(ring.ticks_to_ns(0), 0);
     let mut x = 0x9E37_79B9_7F4A_7C15u64;
     let mut previous = (0u64, 0u64);
-    let mut samples = Vec::with_capacity(100_000);
-    for _ in 0..100_000 {
+    let count = if cfg!(miri) { 300 } else { 100_000 };
+    let mut samples = Vec::with_capacity(count);
+    for _ in 0..count {
         x ^= x << 13;
         x ^= x >> 7;
         x ^= x << 17;
@@ -167,6 +168,7 @@ fn concurrent_reader_never_sees_a_stamp_from_another_message() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn lag_is_reported_on_the_read_that_observes_it() {
     use renoir::topic_rings::{LeanChannel, LeanRead};
     shm_dir();
@@ -204,6 +206,7 @@ fn lag_is_reported_on_the_read_that_observes_it() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn every_wait_strategy_wakes_on_publish_and_times_out() {
     use renoir::topic_rings::{LeanChannel, LeanWaitStrategy};
     use std::time::{Duration, Instant};
@@ -252,6 +255,7 @@ fn unknown_wait_strategy_values_are_rejected() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn phased_backoff_reaches_the_blocking_phase_and_still_wakes() {
     use renoir::topic_rings::LeanChannel;
     use std::time::{Duration, Instant};
@@ -279,4 +283,85 @@ fn phased_backoff_reaches_the_blocking_phase_and_still_wakes() {
     ));
     assert!(started.elapsed() < Duration::from_secs(2));
     drop(handle.join().unwrap());
+}
+
+#[test]
+fn every_wait_strategy_works_on_a_ring_in_memory() {
+    use renoir::topic_rings::LeanWaitStrategy;
+    use std::time::Duration;
+    let strategies = [
+        LeanWaitStrategy::BusySpin,
+        LeanWaitStrategy::Yielding,
+        LeanWaitStrategy::Sleeping,
+        LeanWaitStrategy::Blocking,
+        LeanWaitStrategy::PhasedBackoff,
+    ];
+    let timeout = Duration::from_millis(if cfg!(miri) { 5 } else { 30 });
+    for strategy in strategies {
+        let (ring, _mem) = ring(LeanMode::SingleProducer, 16, LeanClock::Nanoseconds);
+        let cursor = ring.cursor_oldest();
+        assert!(
+            !ring.wait_with(&cursor, strategy, Some(timeout)),
+            "{strategy:?}"
+        );
+        let writer_ring = ring.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(2));
+            let mut p = writer_ring.publisher();
+            p.publish_at_notify(1, &[9u8; 16]).unwrap();
+        });
+        assert!(
+            ring.wait_with(&cursor, strategy, Some(Duration::from_secs(30))),
+            "{strategy:?}"
+        );
+        writer.join().unwrap();
+        assert!(ring.wait_phased(
+            &cursor,
+            Duration::from_micros(10),
+            Duration::from_micros(10),
+            Some(Duration::from_millis(1))
+        ));
+    }
+}
+
+#[test]
+#[cfg(not(miri))]
+fn blocking_waiters_on_a_stamped_ring_wake_on_a_notifying_stamped_publish() {
+    use renoir::topic_rings::{LeanChannel, LeanWaitStrategy};
+    use std::time::{Duration, Instant};
+    shm_dir();
+    for strategy in [LeanWaitStrategy::Blocking, LeanWaitStrategy::PhasedBackoff] {
+        let name = format!("stamped_block_{}_{strategy:?}", std::process::id());
+        let mut writer = LeanChannel::open_stamped(
+            &name,
+            16,
+            16,
+            false,
+            LeanMode::SingleProducer,
+            LeanClock::Nanoseconds,
+        )
+        .unwrap();
+        let reader = LeanChannel::open_stamped(
+            &name,
+            16,
+            16,
+            false,
+            LeanMode::SingleProducer,
+            LeanClock::Nanoseconds,
+        )
+        .unwrap();
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            writer.publish_now_notify(&[1u8; 16]).unwrap();
+            writer
+        });
+        let started = Instant::now();
+        let woke = reader.wait_with(strategy, Some(Duration::from_secs(10)));
+        assert!(woke, "{strategy:?} never woke");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{strategy:?} woke only at its timeout"
+        );
+        drop(handle.join().unwrap());
+    }
 }

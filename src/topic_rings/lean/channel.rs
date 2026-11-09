@@ -178,6 +178,18 @@ impl LeanChannel {
     }
 
     #[inline]
+    pub fn publish_at_notify(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
+        self.announce();
+        self.publisher.publish_at_notify(stamp, data)
+    }
+
+    #[inline]
+    pub fn publish_now_notify(&mut self, data: &[u8]) -> Result<()> {
+        self.announce();
+        self.publisher.publish_now_notify(data)
+    }
+
+    #[inline]
     pub fn try_read_stamped(&mut self, out: &mut [u8]) -> Result<Option<u64>> {
         match self.gated.as_mut() {
             Some(gated) => self.ring.try_read_stamped_gated(gated, out),

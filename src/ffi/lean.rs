@@ -525,3 +525,42 @@ pub extern "C" fn renoir_lean_wait_phased(
         RenoirErrorCode::BufferEmpty
     }
 }
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_publish_at_notify(
+    h: RenoirLeanHandle,
+    stamp: u64,
+    data: *const u8,
+    len: usize,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if data.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let src = unsafe { std::slice::from_raw_parts(data, len) };
+    match h.publish_at_notify(stamp, src) {
+        Ok(()) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_publish_now_notify(
+    h: RenoirLeanHandle,
+    data: *const u8,
+    len: usize,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if data.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let src = unsafe { std::slice::from_raw_parts(data, len) };
+    match h.publish_now_notify(src) {
+        Ok(()) => RenoirErrorCode::Success,
+        Err(e) => e.into(),
+    }
+}

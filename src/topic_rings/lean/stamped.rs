@@ -185,6 +185,19 @@ impl LeanPublisher {
         self.publish_at(stamp, data)
     }
 
+    #[inline]
+    pub fn publish_at_notify(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
+        self.publish_at(stamp, data)?;
+        self.ring.notify();
+        Ok(())
+    }
+
+    #[inline]
+    pub fn publish_now_notify(&mut self, data: &[u8]) -> Result<()> {
+        let stamp = self.ring.stamp_now();
+        self.publish_at_notify(stamp, data)
+    }
+
     #[inline(never)]
     fn publish_stamped_general(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
         if !self.ring.clock.is_stamped() {

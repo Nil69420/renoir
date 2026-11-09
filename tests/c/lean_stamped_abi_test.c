@@ -135,6 +135,23 @@ static int waits(void) {
   CHECK(renoir_lean_wait_phased(NULL, 0, 0, 0) == RenoirErrorCode_InvalidParameter);
   renoir_lean_close(sub);
   renoir_lean_close(pub);
+
+  (void)snprintf(name, sizeof name, "c_waits_stamped_%d", (int)getpid());
+  CHECK(renoir_lean_open(name, 16, 16, RENOIR_LEAN_STAMP_NS, &pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_open(name, 16, 16, RENOIR_LEAN_STAMP_NS, &sub) == RenoirErrorCode_Success);
+  uint64_t stamp = 0;
+  for (size_t i = 0; i < sizeof strategies / sizeof strategies[0]; ++i) {
+    CHECK(renoir_lean_publish_at_notify(pub, 4242, buf, sizeof buf) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_wait_strategy(sub, strategies[i], 1000000000ULL) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_try_read_stamped(sub, buf, sizeof buf, &stamp) == RenoirErrorCode_Success);
+    CHECK(stamp == 4242);
+    CHECK(renoir_lean_publish_now_notify(pub, buf, sizeof buf) == RenoirErrorCode_Success);
+    CHECK(renoir_lean_try_read_stamped(sub, buf, sizeof buf, &stamp) == RenoirErrorCode_Success);
+  }
+  CHECK(renoir_lean_publish_at_notify(pub, 1, NULL, 16) == RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_publish_now_notify(NULL, buf, 16) == RenoirErrorCode_InvalidParameter);
+  renoir_lean_close(sub);
+  renoir_lean_close(pub);
   return 0;
 }
 

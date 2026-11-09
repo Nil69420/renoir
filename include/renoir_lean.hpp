@@ -159,6 +159,14 @@ public:
         return publishNow(&value, sizeof(T));
     }
 
+    RenoirErrorCode publishAtNotify(uint64_t stamp, const void* data, size_t len) noexcept {
+        return renoir_lean_publish_at_notify(handle_, stamp, static_cast<const uint8_t*>(data), len);
+    }
+
+    RenoirErrorCode publishNowNotify(const void* data, size_t len) noexcept {
+        return renoir_lean_publish_now_notify(handle_, static_cast<const uint8_t*>(data), len);
+    }
+
     bool tryReadStamped(void* out, size_t len, uint64_t& stamp) noexcept {
         return renoir_lean_try_read_stamped(handle_, static_cast<uint8_t*>(out), len, &stamp) ==
                RenoirErrorCode::RenoirErrorCode_Success;

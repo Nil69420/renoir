@@ -1027,6 +1027,15 @@ enum RenoirErrorCode renoir_lean_wait_phased(RenoirLeanHandle h,
                                              uint64_t yield_ns,
                                              uint64_t timeout_ns);
 
+enum RenoirErrorCode renoir_lean_publish_at_notify(RenoirLeanHandle h,
+                                                   uint64_t stamp,
+                                                   const uint8_t *data,
+                                                   uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_publish_now_notify(RenoirLeanHandle h,
+                                                    const uint8_t *data,
+                                                    uintptr_t len);
+
 /**
  * Create a shared memory manager with control region
  */
