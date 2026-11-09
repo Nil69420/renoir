@@ -168,7 +168,9 @@ impl LeanChannel {
     }
 
     pub(super) fn announce_slow(&mut self) -> Result<()> {
-        self.register_publisher()?;
+        if !self.announced {
+            self.register_publisher()?;
+        }
         if !self.qos.exclusive {
             self.fast = true;
             return Ok(());

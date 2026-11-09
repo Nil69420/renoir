@@ -225,6 +225,26 @@
 
 #define RENOIR_LEAN_RELIABLE_SUBSCRIBER (RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER)
 
+#define RENOIR_QOS_BEST_EFFORT 0
+
+#define RENOIR_QOS_RELIABLE 1
+
+#define RENOIR_QOS_KEEP_LAST 0
+
+#define RENOIR_QOS_KEEP_ALL 1
+
+#define RENOIR_QOS_VOLATILE 0
+
+#define RENOIR_QOS_TRANSIENT_LOCAL 1
+
+#define RENOIR_QOS_LIVELINESS_AUTOMATIC 0
+
+#define RENOIR_QOS_LIVELINESS_MANUAL 1
+
+#define RENOIR_QOS_OWNERSHIP_SHARED 0
+
+#define RENOIR_QOS_OWNERSHIP_EXCLUSIVE 1
+
 /**
  * Topic registration flag: discard messages left by a previous clean session
  * when no live process holds the topic
@@ -401,6 +421,30 @@ typedef struct RenoirDiscoveryEvent {
 typedef void *RenoirFrameHandle;
 
 typedef void *RenoirLeanHandle;
+
+typedef struct RenoirLeanQos {
+  uint32_t reliability;
+  uint32_t history;
+  uint32_t durability;
+  uint32_t depth;
+  uint64_t deadline_ns;
+  uint64_t lifespan_ns;
+  uint64_t min_separation_ns;
+  uint32_t liveliness_kind;
+  uint32_t ownership;
+  uint64_t liveliness_lease_ns;
+  uint64_t ownership_strength;
+  uint32_t clock;
+  uint32_t reserved;
+} RenoirLeanQos;
+
+typedef struct RenoirLivelinessStatus {
+  uint32_t registered;
+  uint32_t alive;
+  uint32_t lost;
+  uint32_t reserved;
+  uint64_t lost_count;
+} RenoirLivelinessStatus;
 
 typedef void *RenoirRegionHandle;
 
@@ -1035,6 +1079,31 @@ enum RenoirErrorCode renoir_lean_publish_at_notify(RenoirLeanHandle h,
 enum RenoirErrorCode renoir_lean_publish_now_notify(RenoirLeanHandle h,
                                                     const uint8_t *data,
                                                     uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_qos_default(struct RenoirLeanQos *out);
+
+enum RenoirErrorCode renoir_lean_open_qos(const char *name,
+                                          uint32_t msg_size,
+                                          const struct RenoirLeanQos *qos,
+                                          uint32_t flags,
+                                          RenoirLeanHandle *out);
+
+enum RenoirErrorCode renoir_lean_register_publisher(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_assert_liveliness(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_liveliness(RenoirLeanHandle h, struct RenoirLivelinessStatus *out);
+
+int32_t renoir_lean_is_owner(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped_qos(RenoirLeanHandle h,
+                                                      uint8_t *buffer,
+                                                      uintptr_t buffer_len,
+                                                      uint64_t *out_stamp);
+
+uint64_t renoir_lean_stale_dropped(RenoirLeanHandle h);
+
+uint64_t renoir_lean_filtered_out(RenoirLeanHandle h);
 
 /**
  * Create a shared memory manager with control region

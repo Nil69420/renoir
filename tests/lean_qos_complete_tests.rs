@@ -271,3 +271,33 @@ fn ownership_kinds_must_match_between_publisher_and_reader() {
     };
     assert!(err.to_string().contains("Ownership"), "{err}");
 }
+
+#[test]
+fn a_hostile_qos_offer_cannot_hang_or_crash_an_opener() {
+    use std::io::{Seek, SeekFrom, Write};
+    let n = name("hostile");
+    let _keep = LeanChannel::open(&n, 16, 8, false).unwrap();
+    let path = std::env::var("RENOIR_SHM_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap()
+        .join(format!("renoir_{n}"));
+    for word in [8u64, 9, 0xFFFF_FFFF_FFFF_FFFF, 0x7FFF_FFFF_FFFF_FFFF, 1] {
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::Start(56)).unwrap();
+        file.write_all(&word.to_ne_bytes()).unwrap();
+        file.seek(SeekFrom::Start(144)).unwrap();
+        file.write_all(&[0xFF; 24]).unwrap();
+        drop(file);
+        let started = Instant::now();
+        let request = LeanQos::best_effort(8)
+            .with_deadline(ms(5))
+            .with_manual_liveliness(ms(50));
+        let _ = LeanChannel::open_qos(&n, 16, request, false, true);
+        let _ = LeanChannel::open_qos(&n, 16, LeanQos::best_effort(8), false, false);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "opening against offer word {word:#x} took {:?}",
+            started.elapsed()
+        );
+    }
+}

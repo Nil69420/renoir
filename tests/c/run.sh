@@ -25,3 +25,7 @@ cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize
   -I"$root/include" "$root/tests/c/lean_stamped_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/lean_stamped_abi"
 LD_LIBRARY_PATH="$root/target/$profile" "$out/lean_stamped_abi"
 LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/lean_stamped_abi"
+cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize=undefined \
+  -I"$root/include" "$root/tests/c/lean_qos_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/lean_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" "$out/lean_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/lean_qos_abi"
