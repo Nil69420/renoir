@@ -90,6 +90,12 @@ Tick stamps are comparable between processes on one machine because the counter 
 
 Stamped reads on plain rings take a direct path; gated and multi-producer rings go through a stack buffer and a copy. No path allocates (`tests/zero_alloc_paths.rs`).
 
+## Reporting what was missed
+
+A lossy ring overwrites the oldest message when a reader falls behind. `renoir_lean_lost` gives the running total; `renoir_lean_try_read_lagged` and `renoir_lean_try_read_stamped_lagged` (Rust: `try_read_lagged`, `try_read_stamped_lagged`) return the number of messages missed by that call as well, so a consumer can react at the moment the gap appears (for example, reset a filter when a sample is missing instead of integrating across the hole). Messages read plus messages missed always equals messages published since the reader started.
+
+To always work on the newest value, call `renoir_lean_skip_to_latest(handle, 1)` and then read: the skipped messages are counted as lost, and the read returns the latest one.
+
 ## Blocking consumers
 
 `publish` never issues a fence or a syscall beyond the seqlock stores, so a spinning consumer sees data in about the cache-line transfer time. A consumer that cannot afford to spin can block instead:

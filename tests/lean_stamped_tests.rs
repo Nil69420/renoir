@@ -122,3 +122,74 @@ fn tick_conversion_is_monotonic_and_exact_at_real_counter_rates() {
         previous = (t, ns);
     }
 }
+
+#[test]
+fn concurrent_reader_never_sees_a_stamp_from_another_message() {
+    let rounds: u64 = if cfg!(miri) { 200 } else { 300_000 };
+    for data in [8usize, 56, 120] {
+        let (ring, _mem) = ring(LeanMode::SingleProducer, data, LeanClock::Nanoseconds);
+        let writer_ring = ring.clone();
+        let writer = std::thread::spawn(move || {
+            let mut p = writer_ring.publisher();
+            let mut payload = vec![0u8; data];
+            for i in 1..=rounds {
+                payload[..8].copy_from_slice(&i.to_ne_bytes());
+                p.publish_at(i, &payload).unwrap();
+            }
+        });
+        let mut cursor = ring.cursor_oldest();
+        let mut out = vec![0u8; data];
+        let mut seen = 0u64;
+        let mut last = 0u64;
+        while last < rounds {
+            if let Some(stamp) = ring.try_read_stamped(&mut cursor, &mut out).unwrap() {
+                assert_eq!(stamp, u64::from_ne_bytes(out[..8].try_into().unwrap()));
+                assert!(stamp > last);
+                last = stamp;
+                seen += 1;
+            } else {
+                std::hint::spin_loop();
+            }
+        }
+        writer.join().unwrap();
+        assert!(seen > 0);
+    }
+}
+
+#[test]
+fn lag_is_reported_on_the_read_that_observes_it() {
+    use renoir::topic_rings::{LeanChannel, LeanRead};
+    let dir = tempfile::tempdir().unwrap();
+    std::env::set_var("RENOIR_SHM_DIR", dir.path());
+    let name = format!("lag_{}", std::process::id());
+    let mut writer = LeanChannel::open(&name, 16, 16, true).unwrap();
+    let mut reader = LeanChannel::open(&name, 16, 16, true).unwrap();
+    let mut out = [0u8; 16];
+    assert_eq!(
+        reader.try_read_lagged(&mut out).unwrap(),
+        (LeanRead::Empty, 0)
+    );
+    let published = 200u64;
+    for i in 1..=published {
+        let mut payload = [0u8; 16];
+        payload[..8].copy_from_slice(&i.to_ne_bytes());
+        writer.publish(&payload).unwrap();
+    }
+    let mut read = 0u64;
+    let mut missed = 0u64;
+    loop {
+        match reader.try_read_lagged(&mut out).unwrap() {
+            (LeanRead::Message, m) => {
+                read += 1;
+                missed += m;
+            }
+            (LeanRead::Empty, m) => {
+                missed += m;
+                break;
+            }
+        }
+    }
+    assert!(missed > 0, "a 16-slot ring that took 200 messages must lag");
+    assert_eq!(read + missed, published);
+    assert_eq!(missed, reader.lost());
+}

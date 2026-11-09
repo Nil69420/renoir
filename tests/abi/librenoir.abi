@@ -80,7 +80,9 @@
     <elf-symbol name='renoir_lean_stamp_to_ns' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_tick_hz' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_try_read' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_lean_try_read_lagged' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_try_read_stamped' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_lean_try_read_stamped_lagged' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_wait' type='func-type' binding='global-binding' visibility='default-visibility' alias='renoir_rpc_wait_request' is-defined='yes'/>
     <elf-symbol name='renoir_lean_wait_adaptive' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_wait_deadline' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -8329,6 +8331,21 @@
             <parameter type-id='type-id-16' name='slot_count'/>
             <parameter type-id='type-id-16' name='flags'/>
             <parameter type-id='type-id-720' name='out_bytes'/>
+            <return type-id='type-id-1474'/>
+          </function-decl>
+          <function-decl name='renoir_lean_try_read_lagged' mangled-name='renoir_lean_try_read_lagged' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_try_read_lagged'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-174' name='buffer'/>
+            <parameter type-id='type-id-4' name='buffer_len'/>
+            <parameter type-id='type-id-718' name='out_missed'/>
+            <return type-id='type-id-1474'/>
+          </function-decl>
+          <function-decl name='renoir_lean_try_read_stamped_lagged' mangled-name='renoir_lean_try_read_stamped_lagged' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_try_read_stamped_lagged'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-174' name='buffer'/>
+            <parameter type-id='type-id-4' name='buffer_len'/>
+            <parameter type-id='type-id-718' name='out_stamp'/>
+            <parameter type-id='type-id-718' name='out_missed'/>
             <return type-id='type-id-1474'/>
           </function-decl>
         </namespace-decl>

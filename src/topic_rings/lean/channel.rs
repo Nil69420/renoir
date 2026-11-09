@@ -231,6 +231,20 @@ impl LeanChannel {
         }
     }
 
+    #[inline]
+    pub fn try_read_lagged(&mut self, out: &mut [u8]) -> Result<(LeanRead, u64)> {
+        let before = self.lost();
+        let read = self.try_read(out)?;
+        Ok((read, self.lost() - before))
+    }
+
+    #[inline]
+    pub fn try_read_stamped_lagged(&mut self, out: &mut [u8]) -> Result<(Option<u64>, u64)> {
+        let before = self.lost();
+        let stamp = self.try_read_stamped(out)?;
+        Ok((stamp, self.lost() - before))
+    }
+
     pub fn skip_to_latest(&mut self, keep: u64) -> u64 {
         match self.gated.as_mut() {
             Some(gated) => self.ring.skip_to_latest_gated(gated, keep),

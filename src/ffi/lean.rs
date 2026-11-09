@@ -420,3 +420,59 @@ pub extern "C" fn renoir_lean_memory_required_flags(
     };
     renoir_lean_memory_required(wire, slot_count, out_bytes)
 }
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_try_read_lagged(
+    h: RenoirLeanHandle,
+    buffer: *mut u8,
+    buffer_len: usize,
+    out_missed: *mut u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if buffer.is_null() || out_missed.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let dst = unsafe { std::slice::from_raw_parts_mut(buffer, buffer_len) };
+    match h.try_read_lagged(dst) {
+        Ok((read, missed)) => {
+            unsafe { *out_missed = missed };
+            match read {
+                LeanRead::Message => RenoirErrorCode::Success,
+                LeanRead::Empty => RenoirErrorCode::BufferEmpty,
+            }
+        }
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_try_read_stamped_lagged(
+    h: RenoirLeanHandle,
+    buffer: *mut u8,
+    buffer_len: usize,
+    out_stamp: *mut u64,
+    out_missed: *mut u64,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    if buffer.is_null() || out_stamp.is_null() || out_missed.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let dst = unsafe { std::slice::from_raw_parts_mut(buffer, buffer_len) };
+    match h.try_read_stamped_lagged(dst) {
+        Ok((stamp, missed)) => {
+            unsafe { *out_missed = missed };
+            match stamp {
+                Some(stamp) => {
+                    unsafe { *out_stamp = stamp };
+                    RenoirErrorCode::Success
+                }
+                None => RenoirErrorCode::BufferEmpty,
+            }
+        }
+        Err(e) => e.into(),
+    }
+}

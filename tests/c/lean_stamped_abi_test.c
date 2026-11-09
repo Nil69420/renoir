@@ -58,6 +58,58 @@ static int run(uint32_t stamp_flag, uint32_t clock_kind, const char *tag) {
   return 0;
 }
 
+static int lagged(void) {
+  char name[64];
+  (void)snprintf(name, sizeof name, "c_lagged_%d", (int)getpid());
+  RenoirLeanHandle pub = NULL;
+  RenoirLeanHandle sub = NULL;
+  CHECK(renoir_lean_open(name, 16, 16, RENOIR_LEAN_STAMP_NS, &pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_open(name, 16, 16, RENOIR_LEAN_STAMP_NS | RENOIR_LEAN_FROM_OLDEST, &sub) ==
+        RenoirErrorCode_Success);
+  uint8_t buf[16] = {0};
+  uint64_t stamp = 0;
+  uint64_t missed = 99;
+  CHECK(renoir_lean_try_read_stamped_lagged(sub, buf, sizeof buf, &stamp, &missed) ==
+        RenoirErrorCode_BufferEmpty);
+  CHECK(missed == 0);
+  for (uint64_t i = 1; i <= 100; ++i) {
+    CHECK(renoir_lean_publish_at(pub, i, buf, sizeof buf) == RenoirErrorCode_Success);
+  }
+  uint64_t read = 0;
+  uint64_t total_missed = 0;
+  while (renoir_lean_try_read_stamped_lagged(sub, buf, sizeof buf, &stamp, &missed) ==
+         RenoirErrorCode_Success) {
+    read += 1;
+    total_missed += missed;
+  }
+  CHECK(total_missed > 0);
+  CHECK(read + total_missed == 100);
+  CHECK(renoir_lean_try_read_stamped_lagged(sub, buf, sizeof buf, NULL, &missed) ==
+        RenoirErrorCode_InvalidParameter);
+  CHECK(renoir_lean_try_read_lagged(sub, buf, sizeof buf, NULL) == RenoirErrorCode_InvalidParameter);
+  renoir_lean_close(sub);
+  renoir_lean_close(pub);
+
+  RenoirLeanHandle plain_pub = NULL;
+  RenoirLeanHandle plain_sub = NULL;
+  (void)snprintf(name, sizeof name, "c_lagged_plain_%d", (int)getpid());
+  CHECK(renoir_lean_open(name, 16, 16, 0, &plain_pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_open(name, 16, 16, RENOIR_LEAN_FROM_OLDEST, &plain_sub) == RenoirErrorCode_Success);
+  for (int i = 0; i < 100; ++i) {
+    CHECK(renoir_lean_publish(plain_pub, buf, sizeof buf) == RenoirErrorCode_Success);
+  }
+  read = 0;
+  total_missed = 0;
+  while (renoir_lean_try_read_lagged(plain_sub, buf, sizeof buf, &missed) == RenoirErrorCode_Success) {
+    read += 1;
+    total_missed += missed;
+  }
+  CHECK(total_missed > 0 && read + total_missed == 100);
+  renoir_lean_close(plain_sub);
+  renoir_lean_close(plain_pub);
+  return 0;
+}
+
 int main(void) {
   size_t plain_bytes = 0;
   size_t stamped_bytes = 0;
@@ -82,6 +134,7 @@ int main(void) {
   CHECK(renoir_lean_publish_at(plain, 1, buf, sizeof buf) != RenoirErrorCode_Success);
   CHECK(renoir_lean_try_read_stamped(plain, buf, sizeof buf, &stamp) != RenoirErrorCode_Success);
   renoir_lean_close(plain);
+  CHECK(lagged() == 0);
   puts("lean stamped ABI ok");
   return 0;
 }

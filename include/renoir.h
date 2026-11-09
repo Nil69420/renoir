@@ -997,6 +997,17 @@ enum RenoirErrorCode renoir_lean_memory_required_flags(uint32_t msg_size,
                                                        uint32_t flags,
                                                        uintptr_t *out_bytes);
 
+enum RenoirErrorCode renoir_lean_try_read_lagged(RenoirLeanHandle h,
+                                                 uint8_t *buffer,
+                                                 uintptr_t buffer_len,
+                                                 uint64_t *out_missed);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped_lagged(RenoirLeanHandle h,
+                                                         uint8_t *buffer,
+                                                         uintptr_t buffer_len,
+                                                         uint64_t *out_stamp,
+                                                         uint64_t *out_missed);
+
 /**
  * Create a shared memory manager with control region
  */

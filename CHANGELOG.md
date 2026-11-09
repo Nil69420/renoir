@@ -9,6 +9,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ### Added
 - Lean rings can carry a publish timestamp: open with `RENOIR_LEAN_STAMP_NS` or `RENOIR_LEAN_STAMP_TICKS` and use `renoir_lean_publish_at`, `renoir_lean_publish_now` and `renoir_lean_try_read_stamped` (Rust: `LeanChannel::open_stamped`, `publish_at`, `publish_now`, `try_read_stamped`). The stamp is 8 bytes inside the slot and is covered by the same sequence check as the payload; the cost over an unstamped publish is about 2 ns with a caller-supplied stamp, 4 ns with the cycle counter and 14 ns with `CLOCK_MONOTONIC`. `renoir_lean_memory_required_flags` sizes stamped rings.
+- `renoir_lean_try_read_lagged` and `renoir_lean_try_read_stamped_lagged` (Rust `try_read_lagged`, `try_read_stamped_lagged`) report how many messages a read missed.
 - Discovery change notifications: `DiscoveryWatcher` (Rust), `renoir_discover_watch_open/fd/poll/close` (C) and `renoir-monitor events` report rings appearing, changing (publisher or consumer count) and disappearing.
 
 ### Changed
