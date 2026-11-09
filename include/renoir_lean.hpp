@@ -34,6 +34,28 @@ constexpr LeanFlags operator|(LeanFlags a, LeanFlags b) noexcept {
     return static_cast<LeanFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
+struct LeanQosOptions {
+    uint32_t depth = 64;
+    bool reliable = false;
+    bool keepAll = false;
+    bool transientLocal = false;
+    uint64_t deadlineNs = 0;
+    uint64_t lifespanNs = 0;
+    uint64_t minSeparationNs = 0;
+    bool manualLiveliness = false;
+    uint64_t livelinessLeaseNs = 0;
+    bool exclusive = false;
+    uint64_t ownershipStrength = 0;
+    uint32_t clock = 0;
+};
+
+struct LivelinessStatus {
+    uint32_t registered;
+    uint32_t alive;
+    bool lost;
+    uint64_t lostCount;
+};
+
 class LeanChannel {
 public:
     static constexpr size_t kMaxMessageBytes = 504;
@@ -51,6 +73,30 @@ public:
         checkResult(renoir_lean_open(name.c_str(), messageSize, slotCount,
                                      static_cast<uint32_t>(flags), &handle_),
                     "lean open");
+        messageSize_ = messageSize;
+    }
+
+    LeanChannel(const std::string& name, uint32_t messageSize, const LeanQosOptions& options,
+                bool subscriber = false, bool multiProducer = false) {
+        RenoirLeanQos qos;
+        checkResult(renoir_lean_qos_default(&qos), "lean qos defaults");
+        qos.reliability = options.reliable ? RENOIR_QOS_RELIABLE : RENOIR_QOS_BEST_EFFORT;
+        qos.history = options.keepAll ? RENOIR_QOS_KEEP_ALL : RENOIR_QOS_KEEP_LAST;
+        qos.durability = options.transientLocal ? RENOIR_QOS_TRANSIENT_LOCAL : RENOIR_QOS_VOLATILE;
+        qos.depth = options.depth;
+        qos.deadline_ns = options.deadlineNs;
+        qos.lifespan_ns = options.lifespanNs;
+        qos.min_separation_ns = options.minSeparationNs;
+        qos.liveliness_kind = options.manualLiveliness ? RENOIR_QOS_LIVELINESS_MANUAL
+                                                       : RENOIR_QOS_LIVELINESS_AUTOMATIC;
+        qos.liveliness_lease_ns = options.livelinessLeaseNs;
+        qos.ownership = options.exclusive ? RENOIR_QOS_OWNERSHIP_EXCLUSIVE : RENOIR_QOS_OWNERSHIP_SHARED;
+        qos.ownership_strength = options.ownershipStrength;
+        qos.clock = options.clock;
+        const uint32_t flags = (subscriber ? RENOIR_LEAN_CONSUMER : 0U) |
+                               (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
+        checkResult(renoir_lean_open_qos(name.c_str(), messageSize, &qos, flags, &handle_),
+                    "lean open with qos");
         messageSize_ = messageSize;
     }
 
@@ -188,6 +234,27 @@ public:
                                                    &missed) ==
                RenoirErrorCode::RenoirErrorCode_Success;
     }
+
+    RenoirErrorCode registerPublisher() noexcept { return renoir_lean_register_publisher(handle_); }
+    RenoirErrorCode assertLiveliness() noexcept { return renoir_lean_assert_liveliness(handle_); }
+
+    LivelinessStatus liveliness() noexcept {
+        RenoirLivelinessStatus raw{};
+        if (renoir_lean_liveliness(handle_, &raw) != RenoirErrorCode::RenoirErrorCode_Success) {
+            return LivelinessStatus{0, 0, true, 0};
+        }
+        return LivelinessStatus{raw.registered, raw.alive, raw.lost != 0, raw.lost_count};
+    }
+
+    bool isOwner() noexcept { return renoir_lean_is_owner(handle_) == 1; }
+
+    bool tryReadStampedQos(void* out, size_t len, uint64_t& stamp) noexcept {
+        return renoir_lean_try_read_stamped_qos(handle_, static_cast<uint8_t*>(out), len, &stamp) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
+    uint64_t staleDropped() const noexcept { return renoir_lean_stale_dropped(handle_); }
+    uint64_t filteredOut() const noexcept { return renoir_lean_filtered_out(handle_); }
 
     uint32_t clockKind() const noexcept { return renoir_lean_clock_kind(handle_); }
     uint64_t tickHz() const noexcept { return renoir_lean_tick_hz(handle_); }

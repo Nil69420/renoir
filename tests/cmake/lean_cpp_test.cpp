@@ -100,6 +100,47 @@ int main() {
         renoir::DiscoveryWatch moved(std::move(watch));
         CHECK(moved.valid() && !watch.valid());
     }
+    {
+        renoir::LeanQosOptions options;
+        options.depth = 16;
+        options.clock = RENOIR_LEAN_CLOCK_NS;
+        options.minSeparationNs = 5000000;
+        options.manualLiveliness = true;
+        options.livelinessLeaseNs = 500000000;
+        options.transientLocal = true;
+        const std::string qosName = "lean_cpp_qos_" + std::to_string(getpid());
+        renoir::LeanChannel qp(qosName, sizeof(Imu), options, false);
+        renoir::LeanChannel qs(qosName, sizeof(Imu), options, true);
+        CHECK(qs.liveliness().lost);
+        CHECK(qp.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(qp.assertLiveliness() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(!qs.liveliness().lost && qs.liveliness().alive == 1);
+        Imu in{};
+        for (uint64_t i = 0; i < 12; ++i) {
+            CHECK(qp.publishAt(i * 1000000ULL, in) == RenoirErrorCode::RenoirErrorCode_Success);
+        }
+        Imu got{};
+        uint64_t stamp = 0;
+        uint64_t delivered = 0;
+        while (qs.tryReadStampedQos(&got, sizeof got, stamp)) {
+            ++delivered;
+        }
+        CHECK(delivered == 3 && qs.filteredOut() == 9 && qs.staleDropped() == 0);
+
+        renoir::LeanQosOptions strong;
+        strong.exclusive = true;
+        strong.ownershipStrength = 9;
+        renoir::LeanQosOptions weak = strong;
+        weak.ownershipStrength = 2;
+        const std::string ownName = "lean_cpp_own_" + std::to_string(getpid());
+        renoir::LeanChannel wk(ownName, sizeof(Imu), weak, false, true);
+        renoir::LeanChannel st(ownName, sizeof(Imu), strong, false, true);
+        CHECK(wk.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(wk.publish(in) != RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.publish(in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.isOwner() && !wk.isOwner());
+    }
     Imu out{};
     CHECK(!sub.tryRead(out));
     for (uint32_t i = 0; i < 50; ++i) {

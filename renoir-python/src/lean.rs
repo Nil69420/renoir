@@ -1,4 +1,6 @@
-use ::renoir::topic_rings::{LeanChannel, LeanClock, LeanMode, LeanRead, LeanWaitStrategy};
+use ::renoir::topic_rings::{
+    LeanChannel, LeanClock, LeanMode, LeanQos, LeanRead, LeanWaitStrategy,
+};
 use pyo3::{prelude::*, types::PyBytes};
 use std::time::Duration;
 
@@ -45,6 +47,114 @@ impl PyLeanChannel {
             inner.register_consumer(from_oldest).map_err(map_err)?;
         }
         Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (name, msg_size, depth=64, reliable=false, keep_all=false, transient_local=false,
+        deadline_ms=None, lifespan_ms=None, min_separation_ms=None, lease_ms=None,
+        exclusive_strength=None, clock=None, subscriber=false, multi_producer=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn with_qos(
+        name: &str,
+        msg_size: usize,
+        depth: usize,
+        reliable: bool,
+        keep_all: bool,
+        transient_local: bool,
+        deadline_ms: Option<u64>,
+        lifespan_ms: Option<u64>,
+        min_separation_ms: Option<u64>,
+        lease_ms: Option<u64>,
+        exclusive_strength: Option<u64>,
+        clock: Option<&str>,
+        subscriber: bool,
+        multi_producer: bool,
+    ) -> PyResult<Self> {
+        let mut qos = if reliable {
+            LeanQos::reliable(depth)
+        } else {
+            LeanQos::best_effort(depth)
+        };
+        if keep_all {
+            qos = qos.keep_all();
+        }
+        if transient_local {
+            qos = qos.transient_local();
+        }
+        let clock = match clock {
+            None | Some("none") => LeanClock::None,
+            Some("nanoseconds") | Some("ns") => LeanClock::Nanoseconds,
+            Some("ticks") => LeanClock::Ticks,
+            Some(other) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "clock must be None, 'nanoseconds' or 'ticks', not '{other}'"
+                )))
+            }
+        };
+        qos = qos.with_clock(clock);
+        if let Some(v) = deadline_ms {
+            qos = qos.with_deadline(Duration::from_millis(v));
+        }
+        if let Some(v) = lifespan_ms {
+            qos = qos.with_lifespan(Duration::from_millis(v));
+        }
+        if let Some(v) = min_separation_ms {
+            qos = qos.with_min_separation(Duration::from_millis(v));
+        }
+        if let Some(v) = lease_ms {
+            qos = qos.with_manual_liveliness(Duration::from_millis(v));
+        }
+        if let Some(v) = exclusive_strength {
+            qos = qos.exclusive(v);
+        }
+        let inner = LeanChannel::open_qos(name, msg_size, qos, multi_producer, subscriber)
+            .map_err(map_err)?;
+        Ok(Self { inner })
+    }
+
+    fn register_publisher(&mut self) -> PyResult<()> {
+        self.inner.register_publisher().map_err(map_err)
+    }
+
+    fn assert_liveliness(&mut self) -> PyResult<()> {
+        self.inner.assert_liveliness().map_err(map_err)
+    }
+
+    fn liveliness<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let status = self.inner.liveliness();
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("registered", status.registered)?;
+        d.set_item("alive", status.alive)?;
+        d.set_item("lost", status.lost)?;
+        d.set_item("lost_count", status.lost_count)?;
+        Ok(d)
+    }
+
+    fn is_owner(&mut self) -> bool {
+        self.inner.is_owner()
+    }
+
+    fn try_read_stamped_qos<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Option<(u64, Bound<'py, PyBytes>)>> {
+        let mut buffer = vec![0u8; self.inner.ring().data_size()];
+        match self
+            .inner
+            .try_read_stamped_qos(&mut buffer)
+            .map_err(map_err)?
+        {
+            Some(stamp) => Ok(Some((stamp, PyBytes::new(py, &buffer)))),
+            None => Ok(None),
+        }
+    }
+
+    fn stale_dropped(&self) -> u64 {
+        self.inner.stale_dropped()
+    }
+
+    fn filtered_out(&self) -> u64 {
+        self.inner.filtered_out()
     }
 
     fn publish(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {

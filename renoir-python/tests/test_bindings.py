@@ -418,3 +418,50 @@ def test_discovery_watch_reports_appearance_and_disappearance():
     del channel
     renoir.sweep(ignore_unreadable=True)
     wait_for("disappeared")
+
+
+def test_qos_liveliness_ownership_lifespan_and_filter():
+    tag = "%d" % time.monotonic_ns()
+    live = "py_qos_live_" + tag
+    pub = renoir.LeanChannel.with_qos(live, 16, lease_ms=80)
+    sub = renoir.LeanChannel.with_qos(live, 16, lease_ms=200, subscriber=True)
+    assert sub.liveliness()["lost"] is True
+    pub.register_publisher()
+    assert sub.liveliness()["alive"] == 1
+    time.sleep(0.3)
+    status = sub.liveliness()
+    assert status["lost"] and status["registered"] == 1 and status["lost_count"] == 1
+    pub.assert_liveliness()
+    assert sub.liveliness()["alive"] == 1
+
+    with pytest.raises(Exception):
+        renoir.LeanChannel.with_qos(live, 16, lease_ms=40, subscriber=True)
+    with pytest.raises(ValueError):
+        renoir.LeanChannel.with_qos("py_qos_bad_" + tag, 16, clock="furlongs")
+
+    own = "py_qos_own_" + tag
+    weak = renoir.LeanChannel.with_qos(own, 16, exclusive_strength=2, multi_producer=True)
+    strong = renoir.LeanChannel.with_qos(own, 16, exclusive_strength=9, multi_producer=True)
+    weak.register_publisher()
+    strong.register_publisher()
+    with pytest.raises(Exception):
+        weak.publish(b"w" * 16)
+    strong.publish(b"s" * 16)
+    assert strong.is_owner() and not weak.is_owner()
+
+    filt = "py_qos_filter_" + tag
+    writer = renoir.LeanChannel.with_qos(
+        filt, 16, depth=64, clock="nanoseconds", min_separation_ms=5, transient_local=True
+    )
+    reader = renoir.LeanChannel.with_qos(
+        filt, 16, depth=64, clock="nanoseconds", min_separation_ms=5, transient_local=True, subscriber=True
+    )
+    for i in range(21):
+        writer.publish_at(i * 1_000_000, bytes([i]) * 16)
+    delivered = []
+    while True:
+        item = reader.try_read_stamped_qos()
+        if item is None:
+            break
+        delivered.append(item[0] // 1_000_000)
+    assert delivered == [0, 5, 10, 15, 20] and reader.filtered_out() == 16
