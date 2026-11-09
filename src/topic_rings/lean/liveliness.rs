@@ -157,6 +157,8 @@ pub(super) fn wait_change(
     }
 }
 
+#[cold]
+#[inline(never)]
 pub(super) fn gate(
     ring: &LeanRing,
     publisher: &mut LeanPublisher,
@@ -261,6 +263,8 @@ impl LeanChannel {
         is_owner(&ring, &self.publisher, &self.qos)
     }
 
+    #[cold]
+    #[inline(never)]
     pub(super) fn announce_slow(&mut self) -> Result<()> {
         self.announced = true;
         let ring = self.ring().clone();
