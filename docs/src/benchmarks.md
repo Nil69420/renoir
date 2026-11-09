@@ -37,6 +37,20 @@ BENCH_BURST=512 cargo bench --manifest-path benches/comparison/Cargo.toml --benc
 
 Pick two different physical cores that your real-time threads do not use, and record the CPU model, kernel, `nvpmodel` mode and governor next to the numbers. Latency below the burst resolution cannot be claimed from this mode, and a hardware cycle counter (PMU) based timer has not been implemented.
 
+## Against Aeron and Chronicle Queue
+
+Round-trip latency for a 56-byte message between two pinned cores (2 and 4) of the same i7-11800H, measured in one session. Renoir is `cargo bench --bench latency_pingpong -- 2 4`; Aeron is the C media driver with the `cping`/`cpong` samples over `aeron:ipc` (dedicated threading, spin idle strategies, driver on three other cores, built from the 2026-11-08 source); Chronicle Queue 2026.8 is a two-queue ping-pong in `/dev/shm` on Java 11.
+
+| | RTT p50 | p99 | p99.9 |
+|---|---|---|---|
+| Hardware floor (two atomics) | 110 ns | 148 ns | 172 ns |
+| Renoir lean ring, Rust | 127 ns | 173 ns | 178 ns |
+| Renoir lean ring, C ABI | 163 ns | 178 ns | 187 ns |
+| Aeron IPC (3 runs) | 195 to 201 ns | 3.9 to 4.0 us | 5.8 to 5.9 us |
+| Chronicle Queue (1 run) | 560 ns | 3.6 us | 6.5 us |
+
+What this does and does not show. Aeron is lossless with flow control and runs a driver process; the lean ring is lossy by default, so the like-for-like comparison with Aeron is Renoir's gated mode, which was not measured against it. Aeron's samples take a `clock_gettime` per message (about 25 ns of its round trip), Renoir's harness reads the cycle counter. We tuned only Aeron's idle strategies and thread placement, not its term length or CPU isolation. The Chronicle figure is one untuned run on an older JDK; Chronicle stores every message in a persistent, replayable log, which Renoir does not. All numbers are from one machine; none were measured on a Jetson.
+
 ## Frame rings against iceoryx2 zero-copy
 
 One-way p50 latency, owned zero-copy on both sides, cores 2 and 4 of an i7-11800H, single run (`cd benches/comparison && cargo bench --bench frames_vs_iceoryx2`):
