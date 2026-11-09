@@ -26,4 +26,31 @@ The stamp work added six more: the stamped slot always holds sequence, stamp and
 
 ## Weak memory at code level
 
-`examples/genmc_stamped_seqlock.rs` runs the real `LeanRing` stamped publish and read on two threads over a two-slot ring, so the reader is repeatedly lapped, and asserts that an accepted read never mixes the stamp and payload of two messages. Run it with `MIRIFLAGS="-Zmiri-many-seeds=0..400 -Zmiri-preemption-rate=0.5 -Zmiri-disable-isolation" cargo +nightly miri run --example genmc_stamped_seqlock`. Miri emulates weak-memory store buffers and picks random schedules, so this finds bugs but does not prove their absence. With the reader's final sequence re-check removed, seed-sweeps fail with "stamp and payload from different messages"; an earlier, smaller version of the harness (3 messages) did not catch the same mutation, which is why it now uses 12. The file is named for GenMC because it is written to be bounded and syscall-free for that checker, but GenMC itself has not been run on it (see the readiness page).
+`examples/genmc_stamped_seqlock.rs` runs the real `LeanRing` publish and read on two threads over a two-slot ring, so the writer laps the reader, and asserts that an accepted read never mixes data from two messages. Arguments are the number of messages, the number of reader polls, and `0` for the stamped ring or `1` for the plain one (stamp and payload must match, or the two halves of the payload must match).
+
+**GenMC** (the stateless model checker built into Miri) explores every execution the Rust memory model allows, including every thread interleaving and every value an atomic load may return. Measured with Miri master and GenMC at the commit that Miri pins, LLVM 20.1.8:
+
+| Ring | Messages | Reader polls | Executions | Result | Time |
+|---|---|---|---|---|---|
+| stamped | 3 | 1 | 1,142 | no errors | 89 s |
+| stamped | 3 | 2 | 2,516 | no errors | 182 s |
+| stamped | 3 | 5 | 12,238 | no errors | 917 s |
+| plain | 3 | 1 | 1,112 | no errors | 82 s |
+| plain | 3 | 2 | 2,466 | no errors | 184 s |
+
+At 2 messages the writer never laps the reader, so nothing can go wrong and a run proves nothing: all three mutants below also "passed" at that bound, which is why the bound is 3. Three deliberate mutations of the stamped path, each run at 3 messages and 1 poll, are all rejected with "stamp and payload from different messages": removing the writer's release fence, removing the reader's acquire fence, and removing the reader's final sequence re-check. So GenMC does detect ordering bugs in this code, not just the sequential kind.
+
+What this covers and what it does not:
+- It covers the plain-ring and stamped seqlock fast paths in single-producer mode, bounded at 3 messages and up to 5 polls. It is exhaustive for that program, not for all message counts; for those the TLA+ model and the Kani proofs apply.
+- Multi-producer and gated rings are not covered: they register process ids through `/proc` and use timers and futexes, which GenMC cannot model. They are covered by TLA+, loom, shuttle, herd7 and the chaos tests.
+- GenMC support in Miri is upstream work in progress with documented correctness limits, and it runs with borrow tracking off (`-Zmiri-disable-stacked-borrows`), so aliasing is checked separately by the regular Miri runs.
+- The reader does not loop forever on a stuck slot in this harness (polls are bounded), as GenMC requires.
+
+To reproduce, you need Miri built from source with the `genmc` feature. On this Ubuntu 22.04 machine the system compiler was too old (GenMC uses C++20 `std::format`, which needs GCC 13 or newer headers) and no root was available, so the setup used user-level tools: the LLVM 20.1.8 release tarball for LLVM and clang; GCC 14 headers and libstdc++ from conda-forge through micromamba; `rustup-toolchain-install-master` and `./miri toolchain` for the exact rustc; then in the Miri checkout, with `CC` and `CXX` set to the LLVM clang, `CFLAGS` and `CXXFLAGS` containing `--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/11 -nostdinc++ -isystem <gcc14 include/c++> -isystem <gcc14 include/c++/x86_64-conda-linux-gnu>`, `LDFLAGS` and `RUSTFLAGS` linking and rpath-ing the conda `lib`, run `./miri install --features=genmc`. That installs into the `miri` rustup toolchain only. Then:
+
+```sh
+MIRIFLAGS="-Zmiri-genmc -Zmiri-disable-stacked-borrows -Zmiri-genmc-verbose" \
+  cargo +miri miri run --example genmc_stamped_seqlock -- 3 1 0
+```
+
+**Random schedules** (regular Miri, any machine with nightly): `MIRIFLAGS="-Zmiri-many-seeds=0..400 -Zmiri-preemption-rate=0.5 -Zmiri-disable-isolation" cargo +nightly miri run --example genmc_stamped_seqlock -- 12 96 0`. This finds bugs but cannot prove their absence; removing the re-check makes it fail at 12 messages and not at 3.
