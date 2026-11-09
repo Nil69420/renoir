@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use renoir::discovery::{render_table, scan_dir, sweep_dir, RingKind, SweepOptions};
 use renoir::topic_rings::{LeanChannel, LeanMode};
 
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 const ROLE: &str = "RENOIR_DISCOVERY_ROLE";
 const NAME: &str = "RENOIR_DISCOVERY_NAME";
 
@@ -36,6 +38,7 @@ fn discovery_describes_sweeps_and_notices_dead_publishers() {
         publisher_child();
         return;
     }
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let dir = dir();
     std::fs::write(dir.join("renoir_not_a_ring"), vec![7u8; 4096]).unwrap();
     std::fs::write(dir.join("unrelated"), b"x").unwrap();
@@ -118,4 +121,54 @@ fn discovery_describes_sweeps_and_notices_dead_publishers() {
     assert!(scan_dir(dir).is_empty());
     assert!(dir.join("renoir_not_a_ring").exists());
     assert!(dir.join("unrelated").exists());
+}
+
+#[test]
+fn discovery_reports_the_clock_and_data_size_of_a_stamped_ring() {
+    use renoir::topic_rings::LeanClock;
+    if std::env::var(ROLE).is_ok() {
+        return;
+    }
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = dir();
+    let name = format!("disc_stamped_{}", std::process::id());
+    let _plain = LeanChannel::open(&format!("{name}_plain"), 24, 16, false).unwrap();
+    let _stamped = LeanChannel::open_stamped(
+        &format!("{name}_stamped"),
+        24,
+        16,
+        false,
+        LeanMode::SingleProducer,
+        LeanClock::Ticks,
+    )
+    .unwrap();
+    let found = scan_dir(dir);
+    let stamped = found
+        .iter()
+        .find(|r| r.name == format!("{name}_stamped"))
+        .expect("stamped ring listed");
+    let lean = stamped.lean.as_ref().unwrap();
+    assert_eq!(lean.clock, LeanClock::Ticks);
+    assert!(lean.tick_hz > 1_000_000);
+    assert_eq!(lean.msg_size, 24 + 8);
+    let plain = found
+        .iter()
+        .find(|r| r.name == format!("{name}_plain"))
+        .unwrap();
+    assert_eq!(plain.lean.as_ref().unwrap().clock, LeanClock::None);
+
+    let text = render_table(&found, &std::collections::HashMap::new(), Instant::now());
+    let row = text
+        .lines()
+        .find(|l| l.starts_with(&format!("{name}_stamped")))
+        .unwrap();
+    assert!(
+        row.contains("sp+ticks") && row.split_whitespace().any(|c| c == "24"),
+        "{row}"
+    );
+    drop(_plain);
+    drop(_stamped);
+    for suffix in ["plain", "stamped"] {
+        let _ = std::fs::remove_file(dir.join(format!("renoir_{name}_{suffix}")));
+    }
 }

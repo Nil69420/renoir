@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::time::Instant;
 
 use super::scan::{RingInfo, RingKind};
-use crate::topic_rings::LeanMode;
+use crate::topic_rings::{LeanClock, LeanMode, STAMP_BYTES};
 
 fn kind_name(kind: RingKind) -> &'static str {
     match kind {
@@ -11,6 +11,14 @@ fn kind_name(kind: RingKind) -> &'static str {
         RingKind::Broadcast => "broadcast",
         RingKind::Spsc => "spsc",
         RingKind::Mpmc => "mpmc",
+    }
+}
+
+fn clock_suffix(clock: LeanClock) -> &'static str {
+    match clock {
+        LeanClock::None => "",
+        LeanClock::Nanoseconds => "+ns",
+        LeanClock::Ticks => "+ticks",
     }
 }
 
@@ -44,8 +52,12 @@ pub fn render_table(
         let dash = String::from("-");
         let (mode, msg, slots, published, pubs, cons, rate) = match &ring.lean {
             Some(l) => (
-                mode_name(l.mode).to_owned(),
-                l.msg_size.to_string(),
+                format!("{}{}", mode_name(l.mode), clock_suffix(l.clock)),
+                if l.clock.is_stamped() {
+                    l.msg_size.saturating_sub(STAMP_BYTES as u64).to_string()
+                } else {
+                    l.msg_size.to_string()
+                },
                 l.slot_count.to_string(),
                 l.published.to_string(),
                 l.live_publishers.to_string(),

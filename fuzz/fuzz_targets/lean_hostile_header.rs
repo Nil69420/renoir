@@ -1,7 +1,8 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use renoir::topic_rings::{
-    lean_slot_bytes, LeanClock, LeanMode, LeanRead, LeanRing, LEAN_RING_MAGIC, STAMP_BYTES,
+    inspect_lean_header, lean_slot_bytes, LeanClock, LeanMode, LeanRead, LeanRing, LEAN_RING_MAGIC,
+    STAMP_BYTES,
 };
 
 const WORDS: usize = 4096;
@@ -28,6 +29,7 @@ fuzz_target!(|data: &[u8]| {
     }
     bytes[..8].copy_from_slice(&LEAN_RING_MAGIC.to_ne_bytes());
 
+    let _ = inspect_lean_header(bytes);
     let ptr = std::ptr::NonNull::new(memory.as_mut_ptr().cast::<u8>()).unwrap();
     let data_size = size_pick % 497 + 1;
     let wire = if clock.is_stamped() {

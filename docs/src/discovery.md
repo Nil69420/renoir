@@ -26,6 +26,8 @@ renoir-monitor sweep --dry-run show which ring files no process has mapped
 renoir-monitor sweep           delete them
 ```
 
+Rings that carry publish timestamps show their clock after the mode (`sp+ns`, `mp-gated+ticks`), and the message size shown is the size of your data, not the slot's wire size. `LeanInfo` (Rust) exposes the same as `clock` and `tick_hz`.
+
 ## Cleaning up after crashes
 
 A ring file stays on disk after every process using it has died. `sweep` deletes a ring file only when no process maps it. Reading another process's mappings needs permission: if a process whose maps cannot be read could still hold the ring (same user, or the file is group or world writable), sweep keeps the file and reports it as unverifiable. Pass `--ignore-unreadable` (`RENOIR_SWEEP_IGNORE_UNREADABLE`) when you know those processes do not use Renoir.
