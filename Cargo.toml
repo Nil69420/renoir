@@ -149,3 +149,7 @@ harness = false
 [[bench]]
 name = "lean_mp_publish"
 harness = false
+
+[[bench]]
+name = "lean_stamped"
+harness = false

@@ -13,6 +13,7 @@ use super::spsc::SESSION_MARKER_OFFSET;
 
 mod batch;
 mod channel;
+mod clock;
 mod cursor;
 mod frame;
 mod frame_channel;
@@ -28,16 +29,19 @@ mod multi;
 #[cfg(kani)]
 mod proofs;
 mod qos;
+mod stamped;
 mod types;
 mod wait;
 
 pub use channel::LeanChannel;
+pub use clock::{monotonic_ns, tick_hz, ticks, LeanClock};
 pub use frame::{frame_slot_bytes, FrameLoan, FrameView, LEAN_MAX_FRAME_BYTES};
 pub use frame_channel::FrameChannel;
 pub use gate::LEAN_MAX_CONSUMERS;
 pub use inspect::{inspect as inspect_lean_header, LeanInfo};
 pub use liveness::LEAN_MAX_PRODUCERS;
 pub use qos::{DeadlineWait, LeanQos, LeanReliability};
+pub use stamped::STAMP_BYTES;
 pub use types::{LeanCursor, LeanGatedCursor, LeanMode, LeanRead};
 
 pub const LEAN_RING_MAGIC: u64 = 0x4C45_414E_5249_4E47;
@@ -59,7 +63,9 @@ struct LeanHeader {
     slot_bytes: u64,
     msg_size: u64,
     mode: u32,
-    pad_cold: [u8; 20],
+    clock: u32,
+    tick_hz: u64,
+    pad_cold: [u8; 8],
     write_idx: AtomicU64,
     pad_write: [u8; 56],
     wake: AtomicU32,
@@ -71,6 +77,8 @@ struct LeanHeader {
 const _: () = assert!(std::mem::offset_of!(LeanHeader, session) == SESSION_MARKER_OFFSET);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, write_idx) == 64);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, mode) == 40);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, clock) == 44);
+const _: () = assert!(std::mem::offset_of!(LeanHeader, tick_hz) == 48);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, wake) == 128);
 const _: () = assert!(std::mem::offset_of!(LeanHeader, claim) == 136);
 const _: () = assert!(std::mem::size_of::<LeanHeader>() == LEAN_FIXED_HEADER_BYTES);
@@ -87,6 +95,8 @@ pub struct LeanRing {
     plain: bool,
     gate_timeout_ns: AtomicU64,
     gate_only_dead: AtomicBool,
+    clock: LeanClock,
+    tick_hz: u64,
 }
 
 unsafe impl Send for LeanRing {}
@@ -186,6 +196,32 @@ impl LeanRing {
         msg_size: usize,
         mode: LeanMode,
     ) -> Result<Self> {
+        Self::from_geometry_clock(
+            memory,
+            memory_size,
+            slot_bytes,
+            slot_count,
+            msg_size,
+            mode,
+            LeanClock::None,
+            0,
+        )
+    }
+
+    /// # Safety
+    ///
+    /// Same contract as [`LeanRing::from_geometry`].
+    #[allow(clippy::too_many_arguments)]
+    pub(super) unsafe fn from_geometry_clock(
+        memory: NonNull<u8>,
+        memory_size: usize,
+        slot_bytes: usize,
+        slot_count: usize,
+        msg_size: usize,
+        mode: LeanMode,
+        clock: LeanClock,
+        tick_hz: u64,
+    ) -> Result<Self> {
         if slot_count < 2 {
             return Err(RenoirError::invalid_parameter(
                 "ring_capacity",
@@ -209,7 +245,12 @@ impl LeanRing {
             slot_bytes as u64,
             msg_size as u64,
             mode as u32,
+            clock as u32,
+            tick_hz,
         )?;
+        let attached_clock = LeanClock::from_raw(header.as_ref().clock)
+            .ok_or_else(|| RenoirError::invalid_parameter("ring", "Unknown timestamp mode"))?;
+        let attached_hz = header.as_ref().tick_hz;
         Ok(Self {
             header,
             slots: NonNull::new_unchecked(memory.as_ptr().add(LEAN_HEADER_BYTES)),
@@ -221,11 +262,23 @@ impl LeanRing {
             plain: !mode.is_multi_producer() && !mode.is_gated(),
             gate_timeout_ns: AtomicU64::new(gate::DEFAULT_GATE_TIMEOUT.as_nanos() as u64),
             gate_only_dead: AtomicBool::new(false),
+            clock: attached_clock,
+            tick_hz: attached_hz,
         })
     }
 
     pub fn msg_size(&self) -> usize {
         self.msg_size
+    }
+
+    #[must_use]
+    pub fn clock(&self) -> LeanClock {
+        self.clock
+    }
+
+    #[must_use]
+    pub fn tick_hz(&self) -> u64 {
+        self.tick_hz
     }
 
     pub fn slot_count(&self) -> usize {
