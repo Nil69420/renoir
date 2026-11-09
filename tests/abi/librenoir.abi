@@ -64,6 +64,7 @@
     <elf-symbol name='renoir_lean_live_publishers' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_lost' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_memory_required' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_lean_memory_required_flags' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_open' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_pending' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_lean_publish' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -8322,6 +8323,13 @@
             <parameter type-id='type-id-112' name='h'/>
             <parameter type-id='type-id-10' name='stamp'/>
             <return type-id='type-id-10'/>
+          </function-decl>
+          <function-decl name='renoir_lean_memory_required_flags' mangled-name='renoir_lean_memory_required_flags' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_memory_required_flags'>
+            <parameter type-id='type-id-16' name='msg_size'/>
+            <parameter type-id='type-id-16' name='slot_count'/>
+            <parameter type-id='type-id-16' name='flags'/>
+            <parameter type-id='type-id-720' name='out_bytes'/>
+            <return type-id='type-id-1474'/>
           </function-decl>
         </namespace-decl>
         <namespace-decl name='memory'>

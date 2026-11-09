@@ -401,3 +401,22 @@ pub extern "C" fn renoir_lean_stamp_now(h: RenoirLeanHandle) -> u64 {
 pub extern "C" fn renoir_lean_stamp_to_ns(h: RenoirLeanHandle, stamp: u64) -> u64 {
     handle(h).map_or(0, |h| h.ring().ticks_to_ns(stamp))
 }
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_memory_required_flags(
+    msg_size: u32,
+    slot_count: u32,
+    flags: u32,
+    out_bytes: *mut usize,
+) -> RenoirErrorCode {
+    let stamped = flags & (RENOIR_LEAN_STAMP_NS | RENOIR_LEAN_STAMP_TICKS) != 0;
+    let wire = if stamped {
+        let Some(wire) = msg_size.checked_add(crate::topic_rings::STAMP_BYTES as u32) else {
+            return RenoirErrorCode::InvalidParameter;
+        };
+        wire
+    } else {
+        msg_size
+    };
+    renoir_lean_memory_required(wire, slot_count, out_bytes)
+}

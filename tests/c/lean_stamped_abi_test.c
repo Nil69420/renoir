@@ -59,6 +59,13 @@ static int run(uint32_t stamp_flag, uint32_t clock_kind, const char *tag) {
 }
 
 int main(void) {
+  size_t plain_bytes = 0;
+  size_t stamped_bytes = 0;
+  CHECK(renoir_lean_memory_required_flags(56, 64, 0, &plain_bytes) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_memory_required_flags(56, 64, RENOIR_LEAN_STAMP_NS, &stamped_bytes) == RenoirErrorCode_Success);
+  CHECK(stamped_bytes > plain_bytes);
+  CHECK(renoir_lean_memory_required_flags(UINT32_MAX, 64, RENOIR_LEAN_STAMP_NS, &stamped_bytes) ==
+        RenoirErrorCode_InvalidParameter);
   RenoirLeanHandle bad = NULL;
   CHECK(renoir_lean_open("c_stamped_bad", 16, 64, RENOIR_LEAN_STAMP_NS | RENOIR_LEAN_STAMP_TICKS, &bad) ==
         RenoirErrorCode_InvalidParameter);

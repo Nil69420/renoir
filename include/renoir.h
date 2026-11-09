@@ -992,6 +992,11 @@ uint64_t renoir_lean_stamp_now(RenoirLeanHandle h);
 
 uint64_t renoir_lean_stamp_to_ns(RenoirLeanHandle h, uint64_t stamp);
 
+enum RenoirErrorCode renoir_lean_memory_required_flags(uint32_t msg_size,
+                                                       uint32_t slot_count,
+                                                       uint32_t flags,
+                                                       uintptr_t *out_bytes);
+
 /**
  * Create a shared memory manager with control region
  */

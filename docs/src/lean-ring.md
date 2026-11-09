@@ -63,6 +63,33 @@ Borrows), ThreadSanitizer, AddressSanitizer, a corrupt-memory fuzz target, a cou
 allocator test that proves zero allocation per publish and read, and an aarch64 run
 under QEMU. See `.github/workflows/verify.yml`.
 
+## Publish timestamps
+
+A sensor message is only useful for estimation if the consumer knows when it was produced, so a lean ring can carry an 8-byte publish stamp inside each slot, written and read under the same sequence check as the payload. Open the ring with `RENOIR_LEAN_STAMP_NS` (nanoseconds on `CLOCK_MONOTONIC`) or `RENOIR_LEAN_STAMP_TICKS` (the raw cycle counter: `rdtsc` on x86-64, `cntvct_el0` on AArch64). `msg_size` stays the size of your data; the ring adds the stamp, so a one-line slot carries 48 data bytes instead of 56 and the largest stamped message is 496 bytes. Use `renoir_lean_memory_required_flags` to size caller-provided memory.
+
+```c
+renoir_lean_open("imu", sizeof(struct imu), 1024, RENOIR_LEAN_STAMP_TICKS, &pub);
+renoir_lean_publish_now(pub, (const uint8_t *)&sample, sizeof sample);   /* stamp from the ring clock */
+renoir_lean_publish_at(pub, hardware_timestamp, (const uint8_t *)&sample, sizeof sample);
+
+uint64_t stamp;
+if (renoir_lean_try_read_stamped(sub, (uint8_t *)&out, sizeof out, &stamp) == RenoirErrorCode_Success) {
+    uint64_t ns = renoir_lean_stamp_to_ns(sub, stamp);
+}
+```
+
+`publish_at` takes a stamp you already have, such as the sensor's own hardware time, and costs no clock read at all. Use it when the driver supplies the time of measurement, which is more accurate than the time of publication. The two clock choices differ in cost, not in meaning:
+
+| Publish (48 B, one core, i7-11800H) | Cost over an unstamped publish |
+|---|---|
+| `publish_at`, caller-supplied stamp | about 2 ns |
+| `publish_now`, tick clock | about 4 ns |
+| `publish_now`, nanosecond clock | about 14 ns (a `clock_gettime` call through the vDSO) |
+
+Tick stamps are comparable between processes on one machine because the counter is invariant and shared. Convert them with the ring's tick rate (`renoir_lean_tick_hz`), which is read from CPUID leaf 0x15 or calibrated against `CLOCK_MONOTONIC` when the CPU does not report it; if the CPU has no invariant counter, opening a tick ring fails and you should use the nanosecond clock. On AArch64 the rate is `cntfrq_el0`, typically a coarse clock (31.25 MHz on some Jetson parts is 32 ns per tick); the project has not measured Jetson. The ring remembers its clock in the header, so a process opening it with a different clock mode is rejected, and the unstamped `publish` and `try_read` return an error on a stamped ring instead of misreading the stamp as data.
+
+Stamped reads on plain rings take a direct path; gated and multi-producer rings go through a stack buffer and a copy. No path allocates (`tests/zero_alloc_paths.rs`).
+
 ## Blocking consumers
 
 `publish` never issues a fence or a syscall beyond the seqlock stores, so a spinning consumer sees data in about the cache-line transfer time. A consumer that cannot afford to spin can block instead:

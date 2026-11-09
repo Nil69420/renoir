@@ -57,6 +57,7 @@ renoir_lean_deadline_misses
 renoir_lean_live_publishers
 renoir_lean_lost
 renoir_lean_memory_required
+renoir_lean_memory_required_flags
 renoir_lean_open
 renoir_lean_pending
 renoir_lean_publish

@@ -7,7 +7,8 @@ use std::time::Duration;
 use renoir::rpc::{RpcClient, RpcServer};
 use renoir::topic::{MessageHeader, TopicStats, FORMAT_TYPE_INLINE};
 use renoir::topic_rings::{
-    lean_slot_bytes, BroadcastTopicRing, LeanMode, LeanRead, LeanRing, ViewRead,
+    lean_slot_bytes, BroadcastTopicRing, LeanClock, LeanMode, LeanRead, LeanRing, ViewRead,
+    STAMP_BYTES,
 };
 
 struct Counting;
@@ -113,6 +114,52 @@ fn every_lean_mode_publishes_and_reads_without_allocating() {
     }
 }
 
+fn stamped_lean_paths_do_not_allocate() {
+    for mode in [
+        LeanMode::SingleProducer,
+        LeanMode::MultiProducer,
+        LeanMode::SingleProducerGated,
+        LeanMode::MultiProducerGated,
+    ] {
+        for clock in [LeanClock::Nanoseconds, LeanClock::Ticks] {
+            let data = 48;
+            let msg = data + STAMP_BYTES;
+            let ring_bytes = lean_slot_bytes(msg).unwrap() * 64;
+            let total = LeanRing::required_memory_size(ring_bytes, msg);
+            let mut mem = vec![0u64; total / 8 + 1];
+            let ptr = NonNull::new(mem.as_mut_ptr() as *mut u8).unwrap();
+            let ring = Arc::new(unsafe {
+                LeanRing::from_memory_stamped(ptr, mem.len() * 8, ring_bytes, data, mode, clock)
+                    .unwrap()
+            });
+            let mut publisher = ring.publisher();
+            let mut plain = ring.cursor_latest();
+            let mut gated = mode
+                .is_gated()
+                .then(|| ring.register_consumer(false).unwrap());
+            let payload = [9u8; 48];
+            let mut out = [0u8; 48];
+            let mut step = || {
+                publisher.publish_at(5, &payload).unwrap();
+                publisher.publish_now(&payload).unwrap();
+                for _ in 0..2 {
+                    let got = match gated.as_mut() {
+                        Some(g) => ring.try_read_stamped_gated(g, &mut out).unwrap(),
+                        None => ring.try_read_stamped(&mut plain, &mut out).unwrap(),
+                    };
+                    assert!(got.is_some());
+                }
+            };
+            step();
+            let before = allocs();
+            for _ in 0..3_000 {
+                step();
+            }
+            assert_eq!(allocs() - before, 0, "allocation in {mode:?} {clock:?}");
+        }
+    }
+}
+
 fn broadcast_reserve_commit_and_view_do_not_allocate() {
     let payload_cap = 4096;
     let ring_bytes = BroadcastTopicRing::slot_stride(payload_cap) * 16;
@@ -195,6 +242,7 @@ fn rpc_call_and_reply_do_not_allocate_in_steady_state() {
 fn hot_paths_do_not_allocate() {
     track();
     every_lean_mode_publishes_and_reads_without_allocating();
+    stamped_lean_paths_do_not_allocate();
     broadcast_reserve_commit_and_view_do_not_allocate();
     if !cfg!(miri) {
         rpc_call_and_reply_do_not_allocate_in_steady_state();

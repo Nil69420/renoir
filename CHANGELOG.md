@@ -7,6 +7,13 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ## [Unreleased]
 
+### Added
+- Lean rings can carry a publish timestamp: open with `RENOIR_LEAN_STAMP_NS` or `RENOIR_LEAN_STAMP_TICKS` and use `renoir_lean_publish_at`, `renoir_lean_publish_now` and `renoir_lean_try_read_stamped` (Rust: `LeanChannel::open_stamped`, `publish_at`, `publish_now`, `try_read_stamped`). The stamp is 8 bytes inside the slot and is covered by the same sequence check as the payload; the cost over an unstamped publish is about 2 ns with a caller-supplied stamp, 4 ns with the cycle counter and 14 ns with `CLOCK_MONOTONIC`. `renoir_lean_memory_required_flags` sizes stamped rings.
+- Discovery change notifications: `DiscoveryWatcher` (Rust), `renoir_discover_watch_open/fd/poll/close` (C) and `renoir-monitor events` report rings appearing, changing (publisher or consumer count) and disappearing.
+
+### Changed
+- The lean header gained a clock mode and tick rate in space that was padding; the header size and every other offset are unchanged.
+
 ### Fixed
 - A message sent through the shared buffer pool (`use_shared_pool`) was only resolvable inside the process that published it, because the pool lives in an anonymous in-process mapping. A reader in another process got an empty message reported as success, or, if its own pool happened to hand out the same pool and buffer numbers, a buffer belonging to a different message. Descriptors now carry the identity of the pool manager that issued them; a manager refuses descriptors it did not issue, and the C API returns the new `RenoirErrorCode_UnresolvedPayload` (14) instead of an empty message. Payloads that must cross processes belong on a frame ring (`renoir_frame_*`) or an inline topic.
 
