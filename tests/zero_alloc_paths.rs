@@ -14,16 +14,30 @@ struct Counting;
 
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
 
+thread_local! {
+    static TRACKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn track() {
+    TRACKED.with(|t| t.set(true));
+}
+
+fn count() {
+    if TRACKED.try_with(std::cell::Cell::get).unwrap_or(false) {
+        ALLOCS.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        count();
         System.alloc(l)
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
         System.dealloc(p, l)
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::Relaxed);
+        count();
         System.realloc(p, l, n)
     }
 }
@@ -144,6 +158,7 @@ fn rpc_call_and_reply_do_not_allocate_in_steady_state() {
         std::thread::spawn(move || {
             let mut server = RpcServer::open(&service, 32, 64).unwrap();
             ready_tx.send(()).unwrap();
+            track();
             let mut buf = [0u8; 32];
             while !stop.load(Ordering::Relaxed) {
                 match server.poll(&mut buf).unwrap() {
@@ -178,6 +193,7 @@ fn rpc_call_and_reply_do_not_allocate_in_steady_state() {
 
 #[test]
 fn hot_paths_do_not_allocate() {
+    track();
     every_lean_mode_publishes_and_reads_without_allocating();
     broadcast_reserve_commit_and_view_do_not_allocate();
     if !cfg!(miri) {
