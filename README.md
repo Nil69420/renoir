@@ -16,7 +16,7 @@ Numbers are one-way medians between two pinned cores of an i7-11800H. Method, ca
 
 ## What it provides
 
-- **Lean rings** for small fixed-size messages (up to 504 bytes): IMU samples, poses, commands. Lossy by default, optionally gated for lossless delivery with consumer eviction, multi-producer, batched, with QoS deadlines and consumer dependencies. Messages can carry a publish timestamp (caller-supplied, `CLOCK_MONOTONIC` or the raw cycle counter, 2 to 14 ns extra), a read can report how many messages it missed, and consumers choose a wait strategy (busy-spin, yielding, sleeping, blocking, phased back-off).
+- **Lean rings** for small fixed-size messages (up to 504 bytes): IMU samples, poses, commands. Lossy by default, optionally gated for lossless delivery with consumer eviction, multi-producer, batched, with the DDS quality-of-service policy set that applies to one machine (reliability, history, durability, deadline, lifespan, time-based filter, liveliness, exclusive ownership with failover, request/offer checks) and consumer dependencies. Messages can carry a publish timestamp (caller-supplied, `CLOCK_MONOTONIC` or the raw cycle counter, 2 to 14 ns extra), a read can report how many messages it missed, and consumers choose a wait strategy (busy-spin, yielding, sleeping, blocking, phased back-off).
 - **Frame rings** for large and variable-size data (1 byte to 64 MiB): camera images, point clouds. Zero-copy on both sides, owned until released, lossless, with freshness filtering so a slow consumer skips stale frames.
 - **Request / response** (`renoir_rpc_*`): up to four servers per service with client failover.
 - **Topics** with SPSC, SPMC, MPSC and MPMC patterns, for general-purpose pub/sub.

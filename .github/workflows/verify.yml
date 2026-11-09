@@ -54,7 +54,7 @@ jobs:
       run: >
         cargo test -Zbuild-std --target x86_64-unknown-linux-gnu
         --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test broadcast_view_tests --test ring_init_race_tests --test broadcast_ring_tests
-        --test lean_zero_alloc --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests --test lean_chaos_tests
+        --test lean_zero_alloc --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests --test lean_qos_complete_tests --test lean_chaos_tests
         --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test rpc_tests
 
   loom:
@@ -93,7 +93,7 @@ jobs:
     - name: C ABI test with UBSan and valgrind
       run: tests/c/run.sh
     - name: cppcheck
-      run: cppcheck --enable=all --inconclusive --check-level=exhaustive --error-exitcode=1 --suppress=missingIncludeSystem --suppress=checkersReport -Iinclude tests/c/lean_abi_test.c tests/c/rpc_abi_test.c tests/c/frame_abi_test.c tests/c/lean_stamped_abi_test.c tests/c/discovery_watch_abi_test.c
+      run: cppcheck --enable=all --inconclusive --check-level=exhaustive --error-exitcode=1 --suppress=missingIncludeSystem --suppress=checkersReport -Iinclude tests/c/lean_abi_test.c tests/c/rpc_abi_test.c tests/c/frame_abi_test.c tests/c/lean_stamped_abi_test.c tests/c/discovery_watch_abi_test.c tests/c/lean_qos_abi_test.c
     - name: Exported symbol baseline
       run: tests/abi/check.sh
     - name: ABI compatibility (libabigail)
@@ -138,9 +138,9 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
     - name: Lean ring, wait, chaos and cross-process tests, repeated
       run: |
-        cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests --no-run
+        cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests --test lean_qos_complete_tests --no-run
         for i in $(seq 1 50); do
-          cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests
+          cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --test lean_stamped_tests --test lean_stamped_process_tests --test lean_hostile_header_tests --test lean_qos_complete_tests
         done
     - name: Latency
       run: cargo bench --bench latency_pingpong -- 0 1
