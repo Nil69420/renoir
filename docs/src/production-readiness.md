@@ -13,7 +13,7 @@ This page lists the evidence behind Renoir's claims and its known limits, so you
 | Multi-producer protocol | TLA+ model (`formal/LeanMP.tla`): no torn read and no lost message from a live producer under the liveness rule; the old timer rule fails both |
 | Frame ownership | TLA+ model (`formal/FrameGate.tla`): no slot overwritten while a live consumer holds it; evicting live holders by timer fails |
 | Sizing arithmetic | Kani proofs (`src/topic_rings/lean/proofs.rs`); the first run found and fixed a real overflow |
-| Corrupt shared memory cannot crash readers | cargo-fuzz targets for lean, broadcast and frame rings (60-second runs: 0.6 to 3.5 million executions per target, no crash), plus corrupt-header unit tests |
+| Corrupt shared memory cannot crash readers | cargo-fuzz targets for lean rings (corrupt slots, and a ring whose whole header and slots are attacker-controlled, stamped and unstamped), broadcast and frame rings, the control block and the sensor validators; CI runs each for 60 seconds. A 4-minute local run of the hostile-header target (790,000 executions) found that a write index or claim counter of 2^62 or more overflowed `2 * index`; that is fixed and has regression tests. The other targets ran 90 to 240 seconds each (0.08 to 30 million executions) with no crash, plus corrupt-header unit tests |
 | Crash recovery | Chaos tests that SIGKILL publishers, consumers, frame holders, frame loaners and RPC servers while traffic runs |
 | No allocation, lock, syscall or panic on the hot paths | A counting-allocator test (steady state, all lean modes, broadcast view, RPC) and `objdump` review of the publish and read fast paths |
 | Latency | Pinned-core ping-pong benchmarks, published with method and caveats in `docs/src/benchmarks.md` |
