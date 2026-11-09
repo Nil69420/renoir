@@ -34,21 +34,30 @@
     <elf-symbol name='renoir_discover_watch_open' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_discover_watch_poll' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_abort' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_assert_liveliness' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_close' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_commit' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_commit_notify' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_consumer_id' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_deadline_misses' type='func-type' binding='global-binding' visibility='default-visibility' alias='renoir_lean_deadline_misses' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_is_owner' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_live_publishers' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_liveliness' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_loan' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_max_frame' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_open' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_open_qos' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_register_publisher' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_release' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_set_upstream' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_stale_dropped' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_view' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_view_fresh' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_view_intact' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_view_qos' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_frame_wait' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_wait_deadline' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_frame_wait_liveliness_change' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_free_region_entries' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_free_region_names' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_free_string' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -144,10 +153,15 @@
     <elf-symbol name='renoir_rpc_call' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_client_close' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_client_open' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_rpc_client_servers_alive' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_rpc_client_set_stamp' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_rpc_client_wait_for_server' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_poll' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_reply' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_server_close' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_server_open' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_rpc_server_set_lifespan' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
+    <elf-symbol name='renoir_rpc_server_stale_requests' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_rpc_wait_request' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_subscribe_drain' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
     <elf-symbol name='renoir_subscribe_peek' type='func-type' binding='global-binding' visibility='default-visibility' is-defined='yes'/>
@@ -5871,32 +5885,32 @@
             </class-decl>
           </member-type>
         </class-decl>
-        <class-decl name='Result&lt;renoir::rpc::client::RpcClient, renoir::error::RenoirError&gt;' size-in-bits='4800' is-struct='yes' visibility='default' id='type-id-1257'>
+        <class-decl name='Result&lt;renoir::rpc::client::RpcClient, renoir::error::RenoirError&gt;' size-in-bits='4864' is-struct='yes' visibility='default' id='type-id-1257'>
           <member-type access='public'>
-            <class-decl name='Err' size-in-bits='4800' is-struct='yes' visibility='default' id='type-id-1258'>
+            <class-decl name='Err' size-in-bits='4864' is-struct='yes' visibility='default' id='type-id-1258'>
               <data-member access='public' layout-offset-in-bits='64'>
                 <var-decl name='__0' type-id='type-id-1121' visibility='default'/>
               </data-member>
             </class-decl>
           </member-type>
           <member-type access='public'>
-            <class-decl name='Ok' size-in-bits='4800' is-struct='yes' visibility='default' id='type-id-1259'>
+            <class-decl name='Ok' size-in-bits='4864' is-struct='yes' visibility='default' id='type-id-1259'>
               <data-member access='public' layout-offset-in-bits='0'>
                 <var-decl name='__0' type-id='type-id-633' visibility='default'/>
               </data-member>
             </class-decl>
           </member-type>
         </class-decl>
-        <class-decl name='Result&lt;renoir::rpc::server::RpcServer, renoir::error::RenoirError&gt;' size-in-bits='4544' is-struct='yes' visibility='default' id='type-id-1260'>
+        <class-decl name='Result&lt;renoir::rpc::server::RpcServer, renoir::error::RenoirError&gt;' size-in-bits='4736' is-struct='yes' visibility='default' id='type-id-1260'>
           <member-type access='public'>
-            <class-decl name='Err' size-in-bits='4544' is-struct='yes' visibility='default' id='type-id-1261'>
+            <class-decl name='Err' size-in-bits='4736' is-struct='yes' visibility='default' id='type-id-1261'>
               <data-member access='public' layout-offset-in-bits='64'>
                 <var-decl name='__0' type-id='type-id-1121' visibility='default'/>
               </data-member>
             </class-decl>
           </member-type>
           <member-type access='public'>
-            <class-decl name='Ok' size-in-bits='4544' is-struct='yes' visibility='default' id='type-id-1262'>
+            <class-decl name='Ok' size-in-bits='4736' is-struct='yes' visibility='default' id='type-id-1262'>
               <data-member access='public' layout-offset-in-bits='0'>
                 <var-decl name='__0' type-id='type-id-635' visibility='default'/>
               </data-member>
@@ -6143,16 +6157,16 @@
             </class-decl>
           </member-type>
         </class-decl>
-        <class-decl name='Result&lt;renoir::topic_rings::lean::channel::LeanChannel, renoir::error::RenoirError&gt;' size-in-bits='3648' is-struct='yes' visibility='default' id='type-id-1311'>
+        <class-decl name='Result&lt;renoir::topic_rings::lean::channel::LeanChannel, renoir::error::RenoirError&gt;' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1311'>
           <member-type access='public'>
-            <class-decl name='Err' size-in-bits='3648' is-struct='yes' visibility='default' id='type-id-1312'>
+            <class-decl name='Err' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1312'>
               <data-member access='public' layout-offset-in-bits='64'>
                 <var-decl name='__0' type-id='type-id-1121' visibility='default'/>
               </data-member>
             </class-decl>
           </member-type>
           <member-type access='public'>
-            <class-decl name='Ok' size-in-bits='3648' is-struct='yes' visibility='default' id='type-id-1313'>
+            <class-decl name='Ok' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1313'>
               <data-member access='public' layout-offset-in-bits='0'>
                 <var-decl name='__0' type-id='type-id-701' visibility='default'/>
               </data-member>
@@ -6175,16 +6189,16 @@
             </class-decl>
           </member-type>
         </class-decl>
-        <class-decl name='Result&lt;renoir::topic_rings::lean::frame_channel::FrameChannel, renoir::error::RenoirError&gt;' size-in-bits='2688' is-struct='yes' visibility='default' id='type-id-1318'>
+        <class-decl name='Result&lt;renoir::topic_rings::lean::frame_channel::FrameChannel, renoir::error::RenoirError&gt;' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1318'>
           <member-type access='public'>
-            <class-decl name='Err' size-in-bits='2688' is-struct='yes' visibility='default' id='type-id-1319'>
+            <class-decl name='Err' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1319'>
               <data-member access='public' layout-offset-in-bits='64'>
                 <var-decl name='__0' type-id='type-id-1121' visibility='default'/>
               </data-member>
             </class-decl>
           </member-type>
           <member-type access='public'>
-            <class-decl name='Ok' size-in-bits='2688' is-struct='yes' visibility='default' id='type-id-1320'>
+            <class-decl name='Ok' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-1320'>
               <data-member access='public' layout-offset-in-bits='0'>
                 <var-decl name='__0' type-id='type-id-705' visibility='default'/>
               </data-member>
@@ -8212,6 +8226,54 @@
             <return type-id='type-id-457'/>
           </function-decl>
         </namespace-decl>
+        <namespace-decl name='frame_qos'>
+          <function-decl name='renoir_frame_open_qos' mangled-name='renoir_frame_open_qos' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_open_qos'>
+            <parameter type-id='type-id-518' name='name'/>
+            <parameter type-id='type-id-4' name='max_frame'/>
+            <parameter type-id='type-id-538' name='qos'/>
+            <parameter type-id='type-id-16' name='flags'/>
+            <parameter type-id='type-id-515' name='out'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_register_publisher' mangled-name='renoir_frame_register_publisher' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_register_publisher'>
+            <parameter type-id='type-id-112' name='h'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_assert_liveliness' mangled-name='renoir_frame_assert_liveliness' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_assert_liveliness'>
+            <parameter type-id='type-id-112' name='h'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_liveliness' mangled-name='renoir_frame_liveliness' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_liveliness'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-540' name='out'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_wait_liveliness_change' mangled-name='renoir_frame_wait_liveliness_change' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_wait_liveliness_change'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-10' name='timeout_ns'/>
+            <parameter type-id='type-id-540' name='out'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_is_owner' mangled-name='renoir_frame_is_owner' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_is_owner'>
+            <parameter type-id='type-id-112' name='h'/>
+            <return type-id='type-id-73'/>
+          </function-decl>
+          <function-decl name='renoir_frame_view_qos' mangled-name='renoir_frame_view_qos' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_view_qos'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-721' name='out_data'/>
+            <parameter type-id='type-id-722' name='out_len'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_wait_deadline' mangled-name='renoir_frame_wait_deadline' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_wait_deadline'>
+            <parameter type-id='type-id-112' name='h'/>
+            <parameter type-id='type-id-16' name='spin_iterations'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_frame_deadline_misses' mangled-name='renoir_frame_deadline_misses' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_frame_deadline_misses'>
+            <parameter type-id='type-id-112' name='h'/>
+            <return type-id='type-id-10'/>
+          </function-decl>
+        </namespace-decl>
         <namespace-decl name='lean'>
           <function-decl name='renoir_lean_open' mangled-name='renoir_lean_open' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_open'>
             <parameter type-id='type-id-518' name='name'/>
@@ -8262,10 +8324,6 @@
             <parameter type-id='type-id-112' name='h'/>
             <parameter type-id='type-id-16' name='spin_iterations'/>
             <return type-id='type-id-1480'/>
-          </function-decl>
-          <function-decl name='renoir_lean_deadline_misses' mangled-name='renoir_lean_deadline_misses' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_deadline_misses'>
-            <parameter type-id='type-id-112' name='h'/>
-            <return type-id='type-id-10'/>
           </function-decl>
           <function-decl name='renoir_lean_wait_adaptive' mangled-name='renoir_lean_wait_adaptive' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_lean_wait_adaptive'>
             <parameter type-id='type-id-112' name='h'/>
@@ -8643,6 +8701,29 @@
           <function-decl name='renoir_rpc_server_close' mangled-name='renoir_rpc_server_close' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_server_close'>
             <parameter type-id='type-id-112' name='server'/>
             <return type-id='type-id-457'/>
+          </function-decl>
+          <function-decl name='renoir_rpc_client_set_stamp' mangled-name='renoir_rpc_client_set_stamp' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_client_set_stamp'>
+            <parameter type-id='type-id-112' name='client'/>
+            <parameter type-id='type-id-73' name='enabled'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_rpc_client_servers_alive' mangled-name='renoir_rpc_client_servers_alive' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_client_servers_alive'>
+            <parameter type-id='type-id-112' name='client'/>
+            <return type-id='type-id-73'/>
+          </function-decl>
+          <function-decl name='renoir_rpc_client_wait_for_server' mangled-name='renoir_rpc_client_wait_for_server' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_client_wait_for_server'>
+            <parameter type-id='type-id-112' name='client'/>
+            <parameter type-id='type-id-10' name='timeout_ns'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_rpc_server_set_lifespan' mangled-name='renoir_rpc_server_set_lifespan' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_server_set_lifespan'>
+            <parameter type-id='type-id-112' name='server'/>
+            <parameter type-id='type-id-10' name='lifespan_ns'/>
+            <return type-id='type-id-1480'/>
+          </function-decl>
+          <function-decl name='renoir_rpc_server_stale_requests' mangled-name='renoir_rpc_server_stale_requests' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='renoir_rpc_server_stale_requests'>
+            <parameter type-id='type-id-112' name='server'/>
+            <return type-id='type-id-10'/>
           </function-decl>
         </namespace-decl>
         <namespace-decl name='sensor'>
@@ -10058,39 +10139,42 @@
       </namespace-decl>
       <namespace-decl name='rpc'>
         <namespace-decl name='client'>
-          <class-decl name='RpcClient' size-in-bits='4800' is-struct='yes' visibility='default' id='type-id-633'>
-            <data-member access='private' layout-offset-in-bits='3648'>
+          <class-decl name='RpcClient' size-in-bits='4864' is-struct='yes' visibility='default' id='type-id-633'>
+            <data-member access='private' layout-offset-in-bits='3712'>
               <var-decl name='service' type-id='type-id-774' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4416'>
+            <data-member access='private' layout-offset-in-bits='4480'>
               <var-decl name='msg_size' type-id='type-id-4' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4480'>
+            <data-member access='private' layout-offset-in-bits='4544'>
               <var-decl name='request_slots' type-id='type-id-4' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4736'>
+            <data-member access='private' layout-offset-in-bits='4800'>
               <var-decl name='client_id' type-id='type-id-16' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4544'>
+            <data-member access='private' layout-offset-in-bits='4608'>
               <var-decl name='sequence' type-id='type-id-10' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4608'>
+            <data-member access='private' layout-offset-in-bits='4672'>
               <var-decl name='max_payload' type-id='type-id-4' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='3840'>
+            <data-member access='private' layout-offset-in-bits='3904'>
               <var-decl name='shards' type-id='type-id-853' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4672'>
+            <data-member access='private' layout-offset-in-bits='4736'>
               <var-decl name='current' type-id='type-id-4' visibility='default'/>
             </data-member>
             <data-member access='private' layout-offset-in-bits='0'>
               <var-decl name='responses' type-id='type-id-701' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4032'>
+            <data-member access='private' layout-offset-in-bits='4096'>
               <var-decl name='request_buf' type-id='type-id-18' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4224'>
+            <data-member access='private' layout-offset-in-bits='4288'>
               <var-decl name='scratch' type-id='type-id-18' visibility='default'/>
+            </data-member>
+            <data-member access='private' layout-offset-in-bits='4832'>
+              <var-decl name='stamp' type-id='type-id-60' visibility='default'/>
             </data-member>
           </class-decl>
         </namespace-decl>
@@ -10106,24 +10190,30 @@
               <var-decl name='len' type-id='type-id-4' visibility='default'/>
             </data-member>
           </class-decl>
-          <class-decl name='RpcServer' size-in-bits='4544' is-struct='yes' visibility='default' id='type-id-635'>
-            <data-member access='private' layout-offset-in-bits='3648'>
+          <class-decl name='RpcServer' size-in-bits='4736' is-struct='yes' visibility='default' id='type-id-635'>
+            <data-member access='private' layout-offset-in-bits='3712'>
               <var-decl name='service' type-id='type-id-774' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4416'>
+            <data-member access='private' layout-offset-in-bits='4480'>
               <var-decl name='shard' type-id='type-id-4' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4480'>
+            <data-member access='private' layout-offset-in-bits='4544'>
               <var-decl name='max_payload' type-id='type-id-4' visibility='default'/>
             </data-member>
             <data-member access='private' layout-offset-in-bits='0'>
               <var-decl name='requests' type-id='type-id-701' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='4032'>
+            <data-member access='private' layout-offset-in-bits='4096'>
               <var-decl name='responses' type-id='type-id-1523' visibility='default'/>
             </data-member>
-            <data-member access='private' layout-offset-in-bits='3840'>
+            <data-member access='private' layout-offset-in-bits='3904'>
               <var-decl name='scratch' type-id='type-id-18' visibility='default'/>
+            </data-member>
+            <data-member access='private' layout-offset-in-bits='4608'>
+              <var-decl name='lifespan_ms' type-id='type-id-10' visibility='default'/>
+            </data-member>
+            <data-member access='private' layout-offset-in-bits='4672'>
+              <var-decl name='stale' type-id='type-id-10' visibility='default'/>
             </data-member>
           </class-decl>
         </namespace-decl>
@@ -11172,38 +11262,38 @@
             </data-member>
           </class-decl>
           <namespace-decl name='channel'>
-            <class-decl name='LeanChannel' size-in-bits='3648' is-struct='yes' visibility='default' id='type-id-701'>
-              <data-member access='private' layout-offset-in-bits='3456'>
+            <class-decl name='LeanChannel' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-701'>
+              <data-member access='private' layout-offset-in-bits='3520'>
                 <var-decl name='ring' type-id='type-id-466' visibility='default'/>
               </data-member>
               <data-member access='protected' layout-offset-in-bits='0'>
                 <var-decl name='publisher' type-id='type-id-697' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='3072'>
+              <data-member access='private' layout-offset-in-bits='3136'>
                 <var-decl name='cursor' type-id='type-id-707' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='1344'>
+              <data-member access='private' layout-offset-in-bits='1408'>
                 <var-decl name='gated' type-id='type-id-1079' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='2944'>
+              <data-member access='protected' layout-offset-in-bits='3008'>
                 <var-decl name='deadline' type-id='type-id-172' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='3520'>
+              <data-member access='protected' layout-offset-in-bits='3584'>
                 <var-decl name='deadline_misses' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='3584'>
+              <data-member access='private' layout-offset-in-bits='3648'>
                 <var-decl name='spin_budget' type-id='type-id-16' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='3616'>
+              <data-member access='protected' layout-offset-in-bits='3680'>
                 <var-decl name='announced' type-id='type-id-60' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='3624'>
+              <data-member access='protected' layout-offset-in-bits='3688'>
                 <var-decl name='fast' type-id='type-id-60' visibility='default'/>
               </data-member>
               <data-member access='protected' layout-offset-in-bits='640'>
                 <var-decl name='qos' type-id='type-id-1560' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='2112'>
+              <data-member access='private' layout-offset-in-bits='2176'>
                 <var-decl name='_region' type-id='type-id-597' visibility='default'/>
               </data-member>
             </class-decl>
@@ -11247,14 +11337,14 @@
             </class-decl>
           </namespace-decl>
           <namespace-decl name='frame_channel'>
-            <class-decl name='FrameChannel' size-in-bits='2688' is-struct='yes' visibility='default' id='type-id-705'>
-              <data-member access='private' layout-offset-in-bits='2560'>
+            <class-decl name='FrameChannel' size-in-bits='3712' is-struct='yes' visibility='default' id='type-id-705'>
+              <data-member access='protected' layout-offset-in-bits='3456'>
                 <var-decl name='ring' type-id='type-id-466' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='0'>
+              <data-member access='protected' layout-offset-in-bits='0'>
                 <var-decl name='publisher' type-id='type-id-697' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='960'>
+              <data-member access='protected' layout-offset-in-bits='1728'>
                 <var-decl name='consumer' type-id='type-id-1079' visibility='default'/>
               </data-member>
               <data-member access='private' layout-offset-in-bits='640'>
@@ -11263,10 +11353,22 @@
               <data-member access='private' layout-offset-in-bits='832'>
                 <var-decl name='pending_view' type-id='type-id-1110' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='2624'>
+              <data-member access='private' layout-offset-in-bits='3520'>
                 <var-decl name='stale_dropped' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='private' layout-offset-in-bits='1728'>
+              <data-member access='protected' layout-offset-in-bits='3648'>
+                <var-decl name='fast' type-id='type-id-60' visibility='default'/>
+              </data-member>
+              <data-member access='protected' layout-offset-in-bits='960'>
+                <var-decl name='qos' type-id='type-id-1560' visibility='default'/>
+              </data-member>
+              <data-member access='protected' layout-offset-in-bits='3328'>
+                <var-decl name='deadline' type-id='type-id-172' visibility='default'/>
+              </data-member>
+              <data-member access='protected' layout-offset-in-bits='3584'>
+                <var-decl name='deadline_misses' type-id='type-id-10' visibility='default'/>
+              </data-member>
+              <data-member access='private' layout-offset-in-bits='2496'>
                 <var-decl name='_region' type-id='type-id-597' visibility='default'/>
               </data-member>
             </class-decl>
@@ -11317,47 +11419,50 @@
                 <var-decl name='lost_count' type-id='type-id-10' visibility='default'/>
               </data-member>
             </class-decl>
-            <class-decl name='QosState' size-in-bits='704' is-struct='yes' visibility='default' id='type-id-1560'>
+            <class-decl name='QosState' size-in-bits='768' is-struct='yes' visibility='default' id='type-id-1560'>
               <data-member access='protected' layout-offset-in-bits='128'>
                 <var-decl name='lifespan_units' type-id='type-id-10' visibility='default'/>
               </data-member>
               <data-member access='protected' layout-offset-in-bits='192'>
+                <var-decl name='lifespan_ns' type-id='type-id-10' visibility='default'/>
+              </data-member>
+              <data-member access='protected' layout-offset-in-bits='256'>
                 <var-decl name='min_separation_units' type-id='type-id-10' visibility='default'/>
               </data-member>
               <data-member access='protected' layout-offset-in-bits='0'>
                 <var-decl name='last_delivered' type-id='type-id-1110' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='256'>
+              <data-member access='protected' layout-offset-in-bits='320'>
                 <var-decl name='stale_dropped' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='320'>
+              <data-member access='protected' layout-offset-in-bits='384'>
                 <var-decl name='filtered_out' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='640'>
+              <data-member access='protected' layout-offset-in-bits='704'>
                 <var-decl name='manual' type-id='type-id-60' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='384'>
+              <data-member access='protected' layout-offset-in-bits='448'>
                 <var-decl name='lease_ns' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='648'>
+              <data-member access='protected' layout-offset-in-bits='712'>
                 <var-decl name='was_alive' type-id='type-id-60' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='448'>
+              <data-member access='protected' layout-offset-in-bits='512'>
                 <var-decl name='lost_count' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='656'>
+              <data-member access='protected' layout-offset-in-bits='720'>
                 <var-decl name='exclusive' type-id='type-id-60' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='664'>
+              <data-member access='protected' layout-offset-in-bits='728'>
                 <var-decl name='assert_on_publish' type-id='type-id-60' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='512'>
+              <data-member access='protected' layout-offset-in-bits='576'>
                 <var-decl name='strength' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='576'>
+              <data-member access='protected' layout-offset-in-bits='640'>
                 <var-decl name='owner_checked_ns' type-id='type-id-10' visibility='default'/>
               </data-member>
-              <data-member access='protected' layout-offset-in-bits='672'>
+              <data-member access='protected' layout-offset-in-bits='736'>
                 <var-decl name='owner_cached' type-id='type-id-60' visibility='default'/>
               </data-member>
             </class-decl>
