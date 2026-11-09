@@ -51,6 +51,7 @@ pub struct LeanQos {
     pub ownership: LeanOwnership,
     pub min_separation: Option<Duration>,
     pub clock: LeanClock,
+    pub require_offer: bool,
 }
 
 impl LeanQos {
@@ -69,6 +70,7 @@ impl LeanQos {
             ownership: LeanOwnership::Shared,
             min_separation: None,
             clock: LeanClock::None,
+            require_offer: false,
         }
     }
 
@@ -103,6 +105,12 @@ impl LeanQos {
     #[must_use]
     pub const fn with_clock(mut self, clock: LeanClock) -> Self {
         self.clock = clock;
+        self
+    }
+
+    #[must_use]
+    pub const fn require_offer(mut self) -> Self {
+        self.require_offer = true;
         self
     }
 

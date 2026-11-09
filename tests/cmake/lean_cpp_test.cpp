@@ -112,6 +112,7 @@ int main() {
         renoir::LeanChannel qp(qosName, sizeof(Imu), options, false);
         renoir::LeanChannel qs(qosName, sizeof(Imu), options, true);
         CHECK(qs.liveliness().lost);
+        CHECK(!qs.waitLivelinessChange(10000000ULL));
         CHECK(qp.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(qp.assertLiveliness() == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(!qs.liveliness().lost && qs.liveliness().alive == 1);

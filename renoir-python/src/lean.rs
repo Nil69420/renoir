@@ -52,7 +52,7 @@ impl PyLeanChannel {
     #[staticmethod]
     #[pyo3(signature = (name, msg_size, depth=64, reliable=false, keep_all=false, transient_local=false,
         deadline_ms=None, lifespan_ms=None, min_separation_ms=None, lease_ms=None,
-        exclusive_strength=None, clock=None, subscriber=false, multi_producer=false))]
+        exclusive_strength=None, clock=None, subscriber=false, multi_producer=false, require_offer=false))]
     #[allow(clippy::too_many_arguments)]
     fn with_qos(
         name: &str,
@@ -69,6 +69,7 @@ impl PyLeanChannel {
         clock: Option<&str>,
         subscriber: bool,
         multi_producer: bool,
+        require_offer: bool,
     ) -> PyResult<Self> {
         let mut qos = if reliable {
             LeanQos::reliable(depth)
@@ -92,6 +93,9 @@ impl PyLeanChannel {
             }
         };
         qos = qos.with_clock(clock);
+        if require_offer {
+            qos = qos.require_offer();
+        }
         if let Some(v) = deadline_ms {
             qos = qos.with_deadline(Duration::from_millis(v));
         }
@@ -128,6 +132,26 @@ impl PyLeanChannel {
         d.set_item("lost", status.lost)?;
         d.set_item("lost_count", status.lost_count)?;
         Ok(d)
+    }
+
+    #[pyo3(signature = (timeout_ms=None))]
+    fn wait_liveliness_change<'py>(
+        &mut self,
+        py: Python<'py>,
+        timeout_ms: Option<u64>,
+    ) -> PyResult<Option<Bound<'py, pyo3::types::PyDict>>> {
+        let timeout = timeout_ms.map(Duration::from_millis);
+        let inner = &mut self.inner;
+        let status = py.detach(|| inner.wait_liveliness_change(timeout));
+        let Some(status) = status else {
+            return Ok(None);
+        };
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("registered", status.registered)?;
+        d.set_item("alive", status.alive)?;
+        d.set_item("lost", status.lost)?;
+        d.set_item("lost_count", status.lost_count)?;
+        Ok(Some(d))
     }
 
     fn is_owner(&mut self) -> bool {

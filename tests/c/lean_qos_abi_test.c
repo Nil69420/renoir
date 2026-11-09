@@ -166,11 +166,50 @@ static int lifespan_and_filter(void) {
   return 0;
 }
 
+static int strict_and_wait(void) {
+  RenoirLeanQos q;
+  RenoirLeanHandle plain = NULL;
+  RenoirLeanHandle sub = NULL;
+  RenoirLeanHandle pub = NULL;
+  RenoirLivelinessStatus st;
+  uint8_t buf[16] = {0};
+  char name[64];
+  name_for(name, sizeof name, "strict");
+  CHECK(renoir_lean_open(name, 16, 8, 0, &plain) == RenoirErrorCode_Success);
+  (void)renoir_lean_qos_default(&q);
+  q.depth = 8;
+  q.flags = RENOIR_QOS_FLAG_REQUIRE_OFFER;
+  CHECK(renoir_lean_open_qos(name, 16, &q, RENOIR_LEAN_CONSUMER, &sub) == RenoirErrorCode_InvalidParameter);
+  q.flags = 0;
+  CHECK(renoir_lean_open_qos(name, 16, &q, RENOIR_LEAN_CONSUMER, &sub) == RenoirErrorCode_Success);
+  renoir_lean_close(sub);
+  renoir_lean_close(plain);
+
+  name_for(name, sizeof name, "wait");
+  (void)renoir_lean_qos_default(&q);
+  q.liveliness_kind = RENOIR_QOS_LIVELINESS_MANUAL;
+  q.liveliness_lease_ns = 80 * MS;
+  CHECK(renoir_lean_open_qos(name, 16, &q, 0, &pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_open_qos(name, 16, &q, RENOIR_LEAN_CONSUMER, &sub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_wait_liveliness_change(sub, 20 * MS, &st) == RenoirErrorCode_BufferEmpty);
+  CHECK(renoir_lean_register_publisher(pub) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_liveliness(sub, &st) == RenoirErrorCode_Success && st.alive == 1);
+  CHECK(renoir_lean_wait_liveliness_change(sub, 3000 * MS, &st) == RenoirErrorCode_Success);
+  CHECK(st.lost == 1);
+  CHECK(renoir_lean_publish(pub, buf, sizeof buf) == RenoirErrorCode_Success);
+  CHECK(renoir_lean_liveliness(sub, &st) == RenoirErrorCode_Success && st.lost == 0);
+  CHECK(renoir_lean_wait_liveliness_change(NULL, 1, &st) == RenoirErrorCode_InvalidParameter);
+  renoir_lean_close(sub);
+  renoir_lean_close(pub);
+  return 0;
+}
+
 int main(void) {
   CHECK(defaults_and_validation() == 0);
   CHECK(compatibility_and_liveliness() == 0);
   CHECK(ownership() == 0);
   CHECK(lifespan_and_filter() == 0);
+  CHECK(strict_and_wait() == 0);
   puts("lean qos ABI ok");
   return 0;
 }

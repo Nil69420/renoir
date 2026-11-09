@@ -47,6 +47,7 @@ struct LeanQosOptions {
     bool exclusive = false;
     uint64_t ownershipStrength = 0;
     uint32_t clock = 0;
+    bool requireOffer = false;
 };
 
 struct LivelinessStatus {
@@ -93,6 +94,7 @@ public:
         qos.ownership = options.exclusive ? RENOIR_QOS_OWNERSHIP_EXCLUSIVE : RENOIR_QOS_OWNERSHIP_SHARED;
         qos.ownership_strength = options.ownershipStrength;
         qos.clock = options.clock;
+        qos.flags = options.requireOffer ? RENOIR_QOS_FLAG_REQUIRE_OFFER : 0U;
         const uint32_t flags = (subscriber ? RENOIR_LEAN_CONSUMER : 0U) |
                                (multiProducer ? RENOIR_LEAN_MULTI_PRODUCER : 0U);
         checkResult(renoir_lean_open_qos(name.c_str(), messageSize, &qos, flags, &handle_),
@@ -244,6 +246,18 @@ public:
             return LivelinessStatus{0, 0, true, 0};
         }
         return LivelinessStatus{raw.registered, raw.alive, raw.lost != 0, raw.lost_count};
+    }
+
+    bool waitLivelinessChange(uint64_t timeoutNs, LivelinessStatus* status = nullptr) noexcept {
+        RenoirLivelinessStatus raw{};
+        if (renoir_lean_wait_liveliness_change(handle_, timeoutNs, &raw) !=
+            RenoirErrorCode::RenoirErrorCode_Success) {
+            return false;
+        }
+        if (status != nullptr) {
+            *status = LivelinessStatus{raw.registered, raw.alive, raw.lost != 0, raw.lost_count};
+        }
+        return true;
     }
 
     bool isOwner() noexcept { return renoir_lean_is_owner(handle_) == 1; }

@@ -245,6 +245,8 @@
 
 #define RENOIR_QOS_OWNERSHIP_EXCLUSIVE 1
 
+#define RENOIR_QOS_FLAG_REQUIRE_OFFER 1
+
 /**
  * Topic registration flag: discard messages left by a previous clean session
  * when no live process holds the topic
@@ -435,7 +437,7 @@ typedef struct RenoirLeanQos {
   uint64_t liveliness_lease_ns;
   uint64_t ownership_strength;
   uint32_t clock;
-  uint32_t reserved;
+  uint32_t flags;
 } RenoirLeanQos;
 
 typedef struct RenoirLivelinessStatus {
@@ -1104,6 +1106,10 @@ enum RenoirErrorCode renoir_lean_try_read_stamped_qos(RenoirLeanHandle h,
 uint64_t renoir_lean_stale_dropped(RenoirLeanHandle h);
 
 uint64_t renoir_lean_filtered_out(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_wait_liveliness_change(RenoirLeanHandle h,
+                                                        uint64_t timeout_ns,
+                                                        struct RenoirLivelinessStatus *out);
 
 /**
  * Create a shared memory manager with control region

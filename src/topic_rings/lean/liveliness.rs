@@ -29,6 +29,7 @@ pub(super) struct QosState {
     pub(super) was_alive: bool,
     pub(super) lost_count: u64,
     pub(super) exclusive: bool,
+    pub(super) assert_on_publish: bool,
     pub(super) strength: u64,
     pub(super) owner_checked_ns: u64,
     pub(super) owner_cached: bool,
@@ -110,6 +111,8 @@ impl LeanChannel {
         self.qos.min_separation_units = ring.ns_to_units(separation);
         self.qos.manual = manual;
         self.qos.lease_ns = lease_ns;
+        self.qos.assert_on_publish =
+            !subscriber && qos.liveliness.kind == LeanLivelinessKind::Manual;
         if let LeanOwnership::Exclusive { strength } = qos.ownership {
             self.qos.exclusive = true;
             self.qos.strength = strength;
@@ -160,6 +163,29 @@ impl LeanChannel {
         }
     }
 
+    pub fn wait_liveliness_change(
+        &mut self,
+        timeout: Option<Duration>,
+    ) -> Option<LivelinessStatus> {
+        let start = std::time::Instant::now();
+        let baseline = self.liveliness();
+        let mut step = Duration::from_millis(1);
+        loop {
+            let waited = start.elapsed();
+            let remaining = match timeout {
+                Some(t) if waited >= t => return None,
+                Some(t) => t - waited,
+                None => step,
+            };
+            std::thread::sleep(step.min(remaining));
+            let now = self.liveliness();
+            if now.alive != baseline.alive || now.lost != baseline.lost {
+                return Some(now);
+            }
+            step = (step * 2).min(Duration::from_millis(8));
+        }
+    }
+
     pub fn is_owner(&mut self) -> bool {
         let Some(mine) = self.publisher.producer.map(|h| h.entry) else {
             return false;
@@ -171,8 +197,16 @@ impl LeanChannel {
         if !self.announced {
             self.register_publisher()?;
         }
+        if self.qos.assert_on_publish {
+            if let Some(h) = self.publisher.producer {
+                self.ring()
+                    .producer_entry(h.entry)
+                    .last_assert
+                    .store(monotonic_ns(), Ordering::Release);
+            }
+        }
         if !self.qos.exclusive {
-            self.fast = true;
+            self.fast = !self.qos.assert_on_publish;
             return Ok(());
         }
         let now = monotonic_ns();
