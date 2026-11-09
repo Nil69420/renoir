@@ -3,16 +3,17 @@
 ## Baseline
 
 Renoir's own benchmark suite measures the actual topic pub/sub hot path
-(the `topic_rings` Criterion benchmark). The baseline is recorded in
-`.ai/benchmarks/topic_rings_baseline.md` with the methodology for
-reproducing it.
+(the `topic_rings` Criterion benchmark, `benches/topic_rings_bench.rs`;
+run it with `cargo bench --bench topic_rings_bench`). Measured results and
+methodology for the lean and frame rings are in
+[benchmarks.md](benchmarks.md).
 
 ## Comparison vs iceoryx2
 
 A same-hardware, same-operation comparison against iceoryx2 0.9.3 was
 run (256-byte payload, 100k publish/receive round trips, 3 rounds).
-Full methodology and reproduction steps are in
-`.ai/benchmarks/iceoryx2_comparison.md`.
+The reproduction harness is under `benches/comparison/` and the current
+lean-ring and frame-ring comparison is in [benchmarks.md](benchmarks.md).
 
 **Result — iceoryx2 is faster in this benchmark.** Renoir loses by
 roughly 1.8x on mean latency and throughput:

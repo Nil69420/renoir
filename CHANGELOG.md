@@ -141,7 +141,7 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 - Criterion benchmark for the topic pub/sub hot path with a recorded
   baseline
 - Published benchmark comparison against iceoryx2 (see
-  `.ai/benchmarks/iceoryx2_comparison.md`)
+  `docs/src/benchmarks.md`)
 - Named enum variants in the generated C header
   (`RenoirErrorCode_Success`, ...) to avoid global-namespace collisions
 
