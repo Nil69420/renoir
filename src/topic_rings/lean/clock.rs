@@ -24,6 +24,11 @@ impl LeanClock {
 }
 
 #[inline]
+pub(super) fn ticks_to_ns(ticks: u64, hz: u64) -> u64 {
+    u64::try_from(u128::from(ticks) * 1_000_000_000 / u128::from(hz)).unwrap_or(u64::MAX)
+}
+
+#[inline]
 pub fn monotonic_ns() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,

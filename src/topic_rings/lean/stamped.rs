@@ -14,7 +14,7 @@ use super::{
 pub const STAMP_BYTES: usize = 8;
 const SCRATCH_BYTES: usize = LEAN_MAX_SLOT_LINES * LINE;
 
-fn stamped_geometry(data_size: usize) -> Result<(usize, usize)> {
+pub(super) fn stamped_geometry(data_size: usize) -> Result<(usize, usize)> {
     let msg_size = data_size
         .checked_add(STAMP_BYTES)
         .ok_or_else(|| RenoirError::invalid_parameter("msg_size", "Message size overflows"))?;
@@ -92,8 +92,7 @@ impl LeanRing {
     #[must_use]
     pub fn ticks_to_ns(&self, ticks: u64) -> u64 {
         if self.clock == LeanClock::Ticks && self.tick_hz != 0 {
-            u64::try_from(u128::from(ticks) * 1_000_000_000 / u128::from(self.tick_hz))
-                .unwrap_or(u64::MAX)
+            clock::ticks_to_ns(ticks, self.tick_hz)
         } else {
             ticks
         }

@@ -98,3 +98,27 @@ fn unstamped_and_oversized_use_is_rejected() {
     }
     .is_err());
 }
+
+#[test]
+fn tick_conversion_is_monotonic_and_exact_at_real_counter_rates() {
+    let (ring, _mem) = ring(LeanMode::SingleProducer, 16, LeanClock::Ticks);
+    let hz = ring.tick_hz();
+    assert!(hz > 0);
+    assert_eq!(ring.ticks_to_ns(hz), 1_000_000_000);
+    assert_eq!(ring.ticks_to_ns(0), 0);
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    let mut previous = (0u64, 0u64);
+    let mut samples = Vec::with_capacity(100_000);
+    for _ in 0..100_000 {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        samples.push(x >> 2);
+    }
+    samples.sort_unstable();
+    for t in samples {
+        let ns = ring.ticks_to_ns(t);
+        assert!(ns >= previous.1, "conversion not monotonic at {t}");
+        previous = (t, ns);
+    }
+}
