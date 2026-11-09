@@ -34,4 +34,13 @@ for cfg in "2 8" "3 12" "4 14"; do
   tlc -config "${TMPDIR:-/tmp}/StampedSeqlock_big.cfg" StampedSeqlock.tla | grep -q "No error has been found"
   echo "StampedSeqlock ok: N=$1 MaxIdx=$2"
 done
+echo "Ownership: without the forced recheck a stale owner can write after ownership moved, with it only within the recheck window"
+tlc -config Ownership_NoForce.cfg Ownership.tla | grep -q "Invariant BoundedOverlap is violated"
+for cfg in Ownership_lease_TRUE Ownership_lease_FALSE Ownership_ties; do
+  tlc -config "$cfg.cfg" Ownership.tla | grep -q "No error has been found"
+  echo "Ownership ok: $cfg"
+done
+sed "s/N = 3 R = 2 MaxT = 6/N = 4 R = 2 MaxT = 5/" Ownership_lease_TRUE.cfg > "${TMPDIR:-/tmp}/Ownership_big.cfg"
+tlc -config "${TMPDIR:-/tmp}/Ownership_big.cfg" Ownership.tla | grep -q "No error has been found"
+echo "Ownership ok: 4 publishers"
 echo "formal: all green"
