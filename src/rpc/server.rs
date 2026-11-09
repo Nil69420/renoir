@@ -1,5 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
+use super::{monotonic_ms, sent_ms};
+
 use crate::{
     error::{RenoirError, Result},
     topic_rings::{LeanChannel, LeanMode, LeanRead},
@@ -26,6 +28,8 @@ pub struct RpcServer {
     requests: LeanChannel,
     responses: HashMap<u32, LeanChannel>,
     scratch: Vec<u8>,
+    lifespan_ms: u64,
+    stale: u64,
 }
 
 impl RpcServer {
@@ -50,6 +54,8 @@ impl RpcServer {
                     requests,
                     responses: HashMap::with_capacity(MAX_CACHED_CLIENTS),
                     scratch: vec![0u8; msg],
+                    lifespan_ms: 0,
+                    stale: 0,
                 });
             }
             requests.unregister_consumer();
@@ -73,6 +79,13 @@ impl RpcServer {
                     else {
                         continue;
                     };
+                    if self.lifespan_ms != 0 {
+                        let sent = sent_ms(sequence);
+                        if sent != 0 && monotonic_ms().saturating_sub(sent) > self.lifespan_ms {
+                            self.stale += 1;
+                            continue;
+                        }
+                    }
                     if payload.len() < len {
                         return Err(RenoirError::invalid_parameter(
                             "buffer",
@@ -88,6 +101,17 @@ impl RpcServer {
                 }
             }
         }
+    }
+
+    pub fn set_request_lifespan(&mut self, lifespan: Option<Duration>) {
+        self.lifespan_ms = lifespan.map_or(0, |d| {
+            u64::try_from(d.as_millis()).unwrap_or(u64::MAX).max(1)
+        });
+    }
+
+    #[must_use]
+    pub fn stale_requests(&self) -> u64 {
+        self.stale
     }
 
     pub fn wait_request(&self, spin_iterations: u32, timeout: Option<Duration>) -> bool {

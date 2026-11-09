@@ -64,6 +64,21 @@ pub(crate) fn decode(buf: &[u8], max_payload: usize) -> Option<(u32, u64, usize)
     Some((client_id, seq, len))
 }
 
+const SEQUENCE_BITS: u32 = 24;
+const SEQUENCE_MASK: u64 = (1 << SEQUENCE_BITS) - 1;
+
+pub(crate) fn pack_sequence(counter: u64, sent_ms: u64) -> u64 {
+    (sent_ms << SEQUENCE_BITS) | (counter & SEQUENCE_MASK)
+}
+
+pub(crate) fn sent_ms(wire_sequence: u64) -> u64 {
+    wire_sequence >> SEQUENCE_BITS
+}
+
+pub(crate) fn monotonic_ms() -> u64 {
+    crate::topic_rings::monotonic_ns() / 1_000_000
+}
+
 pub(crate) fn check_ring_fits(msg_size: usize) -> Result<()> {
     lean_slot_bytes(msg_size)
         .map(|_| ())

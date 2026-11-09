@@ -29,6 +29,7 @@ pub struct RpcClient {
     responses: LeanChannel,
     request_buf: Vec<u8>,
     scratch: Vec<u8>,
+    stamp: bool,
 }
 
 fn new_client_id() -> u32 {
@@ -69,6 +70,7 @@ impl RpcClient {
             responses,
             request_buf: vec![0u8; msg],
             scratch: vec![0u8; msg],
+            stamp: false,
         };
         client.reroute()?;
         Ok(client)
@@ -98,6 +100,32 @@ impl RpcClient {
         self.shards[self.current].0
     }
 
+    pub fn set_stamp_requests(&mut self, stamp: bool) {
+        self.stamp = stamp;
+    }
+
+    pub fn servers_alive(&mut self) -> Result<usize> {
+        self.reroute()?;
+        Ok(self
+            .shards
+            .iter()
+            .filter(|(_, channel)| channel.live_consumers() > 0)
+            .count())
+    }
+
+    pub fn wait_for_server(&mut self, timeout: Option<Duration>) -> Result<bool> {
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
+        loop {
+            if self.servers_alive()? > 0 {
+                return Ok(true);
+            }
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub fn client_id(&self) -> u32 {
         self.client_id
     }
@@ -117,6 +145,8 @@ impl RpcClient {
         let deadline = Instant::now().checked_add(timeout);
         self.sequence += 1;
         let sequence = self.sequence;
+        let sequence =
+            super::pack_sequence(sequence, if self.stamp { super::monotonic_ms() } else { 0 });
         encode(&mut self.request_buf, self.client_id, sequence, request);
         self.send(deadline)?;
         let mut next_check = Instant::now() + FAILOVER_SLICE;
