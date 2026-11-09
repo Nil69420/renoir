@@ -7,15 +7,12 @@
 //! - Rollback capabilities for failed migrations
 //! - Custom migration function registration
 
-use super::schema_evolution::{
-    EvolutionAwareSchema, MigrationStep, SchemaEvolutionManager, SemanticVersion,
-};
+use super::schema_evolution::{EvolutionAwareSchema, MigrationStep, SemanticVersion};
 use crate::error::{RenoirError, Result};
 // Compatibility validation is handled by the evolution manager
 use super::FormatType;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, Mutex};
 
 /// Migration executor for handling schema transformations
 pub struct SchemaMigrationExecutor {
@@ -66,11 +63,6 @@ pub struct MigrationStatistics {
     pub failed_migrations: u64,
     pub total_data_migrated_bytes: u64,
     pub average_migration_time_ms: f64,
-}
-
-/// Automated migration planner
-pub struct MigrationPlanner {
-    evolution_manager: Arc<Mutex<SchemaEvolutionManager>>,
 }
 
 impl SchemaMigrationExecutor {
@@ -529,56 +521,6 @@ pub struct MigrationResult {
     pub duration_ms: u64,
 }
 
-impl MigrationPlanner {
-    pub fn new(evolution_manager: Arc<Mutex<SchemaEvolutionManager>>) -> Self {
-        Self { evolution_manager }
-    }
-
-    /// Generate an optimal migration plan between schema versions
-    pub fn generate_migration_plan(
-        &self,
-        from_schema: &EvolutionAwareSchema,
-        to_schema: &EvolutionAwareSchema,
-    ) -> Result<Vec<MigrationStep>> {
-        // Check if migration is needed
-        let compatibility = {
-            let manager = self
-                .evolution_manager
-                .lock()
-                .map_err(|_| RenoirError::platform("Failed to acquire evolution manager lock"))?;
-            manager.check_compatibility(from_schema, to_schema)?
-        };
-
-        match compatibility {
-            super::schema_evolution::CompatibilityLevel::FullCompatible => {
-                // No migration needed
-                Ok(vec![])
-            }
-            super::schema_evolution::CompatibilityLevel::BackwardCompatible
-            | super::schema_evolution::CompatibilityLevel::ForwardCompatible => {
-                // Minor migration may be needed
-                self.generate_compatible_migration_plan(from_schema, to_schema)
-            }
-            super::schema_evolution::CompatibilityLevel::Breaking => {
-                // Full migration required
-                let manager = self.evolution_manager.lock().map_err(|_| {
-                    RenoirError::platform("Failed to acquire evolution manager lock")
-                })?;
-                manager.generate_migration_plan(from_schema, to_schema)
-            }
-        }
-    }
-
-    fn generate_compatible_migration_plan(
-        &self,
-        _from_schema: &EvolutionAwareSchema,
-        _to_schema: &EvolutionAwareSchema,
-    ) -> Result<Vec<MigrationStep>> {
-        // For compatible schemas, we might still need minor adjustments
-        Ok(vec![])
-    }
-}
-
 impl Default for SchemaMigrationExecutor {
     fn default() -> Self {
         Self::new()
@@ -714,8 +656,6 @@ impl Default for EvolutionAwareSchema {
             semantic_version: super::schema_evolution::SemanticVersion::new(1, 0, 0),
             compatibility_rules: std::collections::BTreeMap::new(),
             fields: HashMap::new(),
-            deprecated_fields: std::collections::HashSet::new(),
-            requires_migration_from: None,
         }
     }
 }

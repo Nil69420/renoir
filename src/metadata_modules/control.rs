@@ -50,8 +50,7 @@ impl Default for ControlHeader {
             global_sequence: AtomicU64::new(0),
             created_at: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+                .map_or(0, |d| d.as_secs()),
             last_modified: AtomicU64::new(0),
         }
     }
@@ -180,7 +179,12 @@ impl ControlRegion {
         }
 
         // Deserialize registry
-        bincode::deserialize(registry_slice)
+        use bincode::Options;
+        bincode::options()
+            .with_fixint_encoding()
+            .allow_trailing_bytes()
+            .with_limit(registry_slice.len() as u64)
+            .deserialize(registry_slice)
             .map_err(|e| RenoirError::serialization(format!("Failed to load registry: {}", e)))
     }
 
@@ -219,8 +223,7 @@ impl ControlRegion {
         header.last_modified.store(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+                .map_or(0, |d| d.as_secs()),
             std::sync::atomic::Ordering::SeqCst,
         );
 

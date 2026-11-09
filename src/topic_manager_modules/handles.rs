@@ -8,9 +8,12 @@ use std::{
     time::Duration,
 };
 
+use parking_lot::Mutex;
+
 use crate::{
     error::Result,
-    topic::{Message, TopicConfig, TopicStats},
+    topic::{Message, TopicStats},
+    topic_rings::{BroadcastCursor, BroadcastReservation, BroadcastView, ReadInto, ViewRead},
 };
 
 use super::{
@@ -59,14 +62,25 @@ impl Publisher {
         Ok(true)
     }
 
+    pub fn supports_zero_copy(&self) -> bool {
+        self.topic.supports_zero_copy()
+    }
+
+    pub fn reserve(&self, len: usize) -> Result<BroadcastReservation> {
+        self.topic.reserve(len)
+    }
+
+    pub fn commit(&self, reservation: BroadcastReservation, len: usize) -> Result<u64> {
+        self.topic.commit_reserved(reservation, len)
+    }
+
+    pub fn discard(&self, reservation: BroadcastReservation) {
+        self.topic.discard_reserved(reservation)
+    }
+
     /// Get topic statistics
     pub fn stats(&self) -> Arc<TopicStats> {
         self.topic.stats.clone()
-    }
-
-    /// Get the topic configuration
-    pub fn config(&self) -> &TopicConfig {
-        &self.topic.config
     }
 
     /// Get the topic name
@@ -108,6 +122,7 @@ pub struct Subscriber {
     pub topic_id: TopicId,
     topic: Arc<TopicInstance>,
     last_sequence: AtomicUsize,
+    cursor: Mutex<Option<BroadcastCursor>>,
 }
 
 impl Subscriber {
@@ -120,6 +135,7 @@ impl Subscriber {
         Self {
             handle,
             topic_id,
+            cursor: Mutex::new(topic.new_cursor()),
             topic,
             last_sequence: AtomicUsize::new(0),
         }
@@ -127,7 +143,7 @@ impl Subscriber {
 
     /// Subscribe to the next available message
     pub fn subscribe(&self) -> Result<Option<Message>> {
-        let message = self.topic.subscribe()?;
+        let message = self.topic.subscribe_with(&self.cursor)?;
 
         if let Some(ref msg) = message {
             self.last_sequence
@@ -147,13 +163,47 @@ impl Subscriber {
     /// Note: In MPMC mode, the message may be consumed by another subscriber
     /// between peek and the next subscribe call
     pub fn peek(&self) -> Result<Option<Message>> {
-        self.topic.peek()
+        self.topic.peek_with(&self.cursor)
+    }
+
+    pub fn read_into(&self, dst: &mut [u8]) -> Result<ReadInto> {
+        let result = self.topic.read_into_with(&self.cursor, dst)?;
+        if let ReadInto::Message { sequence, .. } = result {
+            self.last_sequence
+                .store(sequence as usize, Ordering::Relaxed);
+        }
+        Ok(result)
+    }
+
+    pub fn view(&self) -> Result<ViewRead> {
+        self.topic.view_with(&self.cursor)
+    }
+
+    pub fn release_view(&self, view: &BroadcastView) -> Result<bool> {
+        let intact = self.topic.release_view_with(&self.cursor, view)?;
+        if intact {
+            self.last_sequence
+                .store(view.sequence() as usize, Ordering::Relaxed);
+        }
+        Ok(intact)
+    }
+
+    pub fn skip_to_latest(&self, keep: u64) -> u64 {
+        self.topic.skip_to_latest_with(&self.cursor, keep)
+    }
+
+    pub fn wait_readable(&self, timeout: Option<Duration>) -> bool {
+        self.topic.wait_readable_with(&self.cursor, timeout)
+    }
+
+    pub fn overruns(&self) -> u64 {
+        self.cursor.lock().map_or(0, |c| c.overruns())
     }
 
     /// Wait for a message with optional timeout
     #[cfg(target_os = "linux")]
     pub fn wait_for_message(&self, timeout: Option<Duration>) -> Result<Option<Message>> {
-        let message = self.topic.wait_for_message(timeout)?;
+        let message = self.topic.wait_with(&self.cursor, timeout)?;
 
         if let Some(ref msg) = message {
             self.last_sequence
@@ -174,11 +224,6 @@ impl Subscriber {
         self.topic.stats.clone()
     }
 
-    /// Get the topic configuration
-    pub fn config(&self) -> &TopicConfig {
-        &self.topic.config
-    }
-
     /// Get the topic name
     pub fn topic_name(&self) -> &str {
         &self.topic.config.name
@@ -191,7 +236,7 @@ impl Subscriber {
 
     /// Get the number of pending messages in the ring buffer
     pub fn pending_messages(&self) -> usize {
-        self.topic.pending_messages()
+        self.topic.pending_with(&self.cursor)
     }
 
     /// Get the last consumed message sequence number
@@ -201,9 +246,7 @@ impl Subscriber {
 
     /// Check if there are new messages since last consumption
     pub fn has_new_messages(&self) -> bool {
-        let current_seq = self.topic.stats.current_sequence.load(Ordering::Relaxed);
-        let last_seq = self.last_sequence.load(Ordering::Relaxed);
-        current_seq > last_seq as u64
+        self.topic.has_pending_with(&self.cursor)
     }
 
     /// Check if the topic is active (has publishers)

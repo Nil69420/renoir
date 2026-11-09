@@ -226,6 +226,16 @@ fn main() -> Result<()> {
                 ),
         )
         .subcommand(Command::new("info").about("Show version and build information"))
+        .subcommand(
+            Command::new("topics")
+                .about("Introspect live topic rings in shared memory")
+                .arg(
+                    Arg::new("watch")
+                        .long("watch")
+                        .num_args(0)
+                        .help("Refresh every second until Ctrl-C"),
+                ),
+        )
         .get_matches();
 
     match matches.subcommand() {
@@ -235,6 +245,7 @@ fn main() -> Result<()> {
         Some(("ringbuf", ring_matches)) => handle_ringbuf_commands(ring_matches),
         Some(("large-payloads", large_matches)) => handle_large_payloads_commands(large_matches),
         Some(("info", _)) => show_info(),
+        Some(("topics", topics_matches)) => handle_topics_commands(topics_matches),
         _ => {
             println!("Use --help for usage information");
             Ok(())
@@ -272,7 +283,7 @@ fn handle_region_commands(matches: &clap::ArgMatches) -> Result<()> {
             let file_path = create_matches
                 .get_one::<String>("file")
                 .map(PathBuf::from)
-                .or_else(|| Some(PathBuf::from(format!("/tmp/renoir_{}", name))));
+                .or_else(|| Some(renoir::memory::region_path(name)));
 
             let manager = SharedMemoryManager::new();
             let config = RegionConfig {
@@ -338,7 +349,7 @@ fn handle_buffer_commands(matches: &clap::ArgMatches) -> Result<()> {
                 name: region_name.to_string(),
                 size: buffer_size * count * 2,
                 backing_type: BackingType::FileBacked,
-                file_path: Some(PathBuf::from(format!("/tmp/renoir_{}", region_name))),
+                file_path: Some(renoir::memory::region_path(region_name)),
                 create: true,
                 permissions: 0o644,
             };
@@ -922,4 +933,166 @@ fn show_info() -> Result<()> {
     println!("  - Zero-copy data sharing");
 
     Ok(())
+}
+
+/// Introspect live topic rings: scan the file-backed topic region files in
+/// the shared memory directory and report each ring's shared control block (capacity, positions,
+/// utilization, pending bytes, oldest pending message latency).
+fn handle_topics_commands(matches: &clap::ArgMatches) -> Result<()> {
+    let watch = matches.get_flag("watch");
+
+    if watch {
+        println!("Watching topic rings (Ctrl-C to stop)...\n");
+    }
+
+    loop {
+        print_topics_table()?;
+        if !watch {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        // Redraw: move cursor up past the table lines. Simple approach —
+        // clear the screen area by re-printing over it.
+        print!("\x1b[2J\x1b[H");
+    }
+
+    Ok(())
+}
+
+struct BroadcastRow {
+    name: String,
+    info: renoir::topic_rings::BroadcastControlInfo,
+}
+
+struct TopicRow {
+    name: String,
+    ring_type: &'static str,
+    info: renoir::topic_rings::RingControlInfo,
+    pending_header: Option<(u64, u64)>,
+}
+
+fn print_topics_table() -> Result<()> {
+    let dir = renoir::memory::shm_dir();
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        renoir::error::RenoirError::from_io(e, "Failed to read shared memory directory")
+    })?;
+
+    let mut rows: Vec<TopicRow> = Vec::new();
+    let mut broadcast_rows: Vec<BroadcastRow> = Vec::new();
+
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if !name.starts_with("renoir_topic_") {
+            continue;
+        }
+
+        let path = entry.path();
+
+        if let Some(info) = probe_broadcast(&path) {
+            broadcast_rows.push(BroadcastRow {
+                name: name.to_string(),
+                info,
+            });
+            continue;
+        }
+
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+
+        // Distinguish ring type by magic and read live positions
+        if let Some(info) = renoir::topic_rings::SPSCTopicRing::read_control_info(&bytes) {
+            let pending = renoir::topic_rings::SPSCTopicRing::read_pending_header(&bytes);
+            rows.push(TopicRow {
+                name: name.to_string(),
+                ring_type: "SPSC",
+                info,
+                pending_header: pending,
+            });
+        } else if let Some(info) = renoir::topic_rings::MPMCTopicRing::read_control_info(&bytes) {
+            let pending = renoir::topic_rings::MPMCTopicRing::read_pending_header(&bytes);
+            rows.push(TopicRow {
+                name: name.to_string(),
+                ring_type: "MPMC",
+                info,
+                pending_header: pending,
+            });
+        }
+    }
+
+    if rows.is_empty() && broadcast_rows.is_empty() {
+        println!(
+            "No topic rings found (no renoir_topic_* regions in {})",
+            dir.display()
+        );
+        return Ok(());
+    }
+
+    if !broadcast_rows.is_empty() {
+        println!(
+            "{:<45} {:<5} {:>8} {:>12} {:>12} {:>8} {:>8}",
+            "Topic", "Type", "Slots", "MaxPayload", "Published", "Waiters", "Session"
+        );
+        for row in &broadcast_rows {
+            println!(
+                "{:<45} {:<5} {:>8} {:>12} {:>12} {:>8} {:>8}",
+                row.name,
+                "SPMC",
+                row.info.slot_count,
+                row.info.payload_capacity,
+                row.info.published,
+                row.info.waiters,
+                if row.info.session == 0 {
+                    "clean"
+                } else {
+                    "live"
+                },
+            );
+        }
+        println!();
+    }
+
+    if rows.is_empty() {
+        return Ok(());
+    }
+
+    println!(
+        "{:<45} {:<5} {:>10} {:>10} {:>8} {:>12}",
+        "Topic", "Type", "Capacity", "Pending", "Util%", "Latency(ns)"
+    );
+    for row in rows {
+        let latency_ns = row
+            .pending_header
+            .map(|(_, ts)| now_ns().saturating_sub(ts))
+            .unwrap_or(0);
+        println!(
+            "{:<45} {:<5} {:>10} {:>10} {:>7.1}% {:>12}",
+            row.name,
+            row.ring_type,
+            row.info.capacity,
+            row.info.pending_bytes(),
+            row.info.utilization() * 100.0,
+            latency_ns,
+        );
+    }
+
+    Ok(())
+}
+
+fn probe_broadcast(path: &std::path::Path) -> Option<renoir::topic_rings::BroadcastControlInfo> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut head = [0u8; renoir::topic_rings::BROADCAST_HEADER_PROBE_BYTES];
+    file.read_exact(&mut head).ok()?;
+    renoir::topic_rings::BroadcastTopicRing::read_control_info(&head)
+}
+
+/// Current wall-clock time in nanoseconds since the UNIX epoch
+fn now_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
 }

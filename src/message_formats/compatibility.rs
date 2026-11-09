@@ -150,53 +150,6 @@ impl SchemaCompatibilityValidator {
         })
     }
 
-    /// Validate full compatibility (both directions)
-    pub fn validate_full_compatibility(
-        schema_a: &EvolutionAwareSchema,
-        schema_b: &EvolutionAwareSchema,
-    ) -> Result<ValidationResult> {
-        let backward = Self::validate_backward_compatibility(schema_a, schema_b)?;
-        let forward = Self::validate_forward_compatibility(schema_b, schema_a)?;
-
-        // Combine results
-        let mut violations = backward.violations;
-        violations.extend(forward.violations);
-
-        let mut warnings = backward.warnings;
-        warnings.extend(forward.warnings);
-
-        let compatibility_level = if violations.is_empty() {
-            if warnings.is_empty() {
-                CompatibilityLevel::FullCompatible
-            } else {
-                // If either direction has issues, it's not fully compatible
-                match (backward.compatibility_level, forward.compatibility_level) {
-                    (CompatibilityLevel::FullCompatible, CompatibilityLevel::FullCompatible) => {
-                        CompatibilityLevel::FullCompatible
-                    }
-                    (CompatibilityLevel::BackwardCompatible, _)
-                    | (_, CompatibilityLevel::BackwardCompatible) => {
-                        CompatibilityLevel::BackwardCompatible
-                    }
-                    (CompatibilityLevel::ForwardCompatible, _)
-                    | (_, CompatibilityLevel::ForwardCompatible) => {
-                        CompatibilityLevel::ForwardCompatible
-                    }
-                    _ => CompatibilityLevel::Breaking,
-                }
-            }
-        } else {
-            CompatibilityLevel::Breaking
-        };
-
-        Ok(ValidationResult {
-            is_compatible: violations.is_empty(),
-            compatibility_level,
-            violations,
-            warnings,
-        })
-    }
-
     /// Generate field compatibility analysis
     pub fn analyze_field_changes(
         old_schema: &EvolutionAwareSchema,

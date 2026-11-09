@@ -24,7 +24,8 @@ renoir/
 │       ├── README.md
 │       ├── topic_basic_example.cpp
 │       ├── topic_async_example.cpp
-│       └── topic_comprehensive_example.cpp
+│       ├── topic_comprehensive_example.cpp
+│       └── topic_peek_example.cpp
 ```
 
 ## Topic Examples
@@ -52,6 +53,12 @@ renoir/
   - Topic and ring buffer statistics
   - Control region metadata tracking
   - Event-driven notifications
+- **Status**: ✅ Compiles and runs successfully
+
+### 4. Peek Example (`topic_peek_example.cpp`)
+- **Purpose**: Non-destructive message inspection
+- **Features**: `renoir_subscribe_peek()` previews the next message without
+  consuming it; verifies peeked content and that consume advances past it
 - **Status**: ✅ Compiles and runs successfully
 
 ## Build System Integration
@@ -99,12 +106,14 @@ Testing: Topic Async Example
 ✓ PASSED: Topic Async Example
 Testing: Topic Comprehensive Example
 ✓ PASSED: Topic Comprehensive Example
+Testing: Topic Peek Example
+✓ PASSED: Topic Peek Example
 
 ================================
  Test Summary
 ================================
-Total Tests: 7
-Passed: 7
+Total Tests: 8
+Passed: 8
 Failed: 0
 
 ✓ All tests passed!
@@ -147,7 +156,7 @@ epoll_wait(epoll_fd, events, 1, timeout_ms);
 while (true) {
     RenoirReceivedMessage msg = {};
     auto result = renoir_subscribe_read_next(subscriber, &msg, 0);
-    if (result == RenoirErrorCode::BufferEmpty) break;
+    if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) break;
     
     // Process message
     renoir_message_release(msg.handle);

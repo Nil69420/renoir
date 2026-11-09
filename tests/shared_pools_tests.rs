@@ -88,4 +88,21 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_get_pool_for_size_rejects_overflowing_sizes() {
+        let region = create_test_region();
+        let registry = BufferPoolRegistry::new(region);
+
+        // next_power_of_two() panics for sizes with the top bit set and
+        // yields 0 (division by zero) in release; must be a clean error
+        let huge = (1usize << (usize::BITS - 1)) + 1;
+        assert!(registry.get_pool_for_size(huge).is_err());
+        assert!(registry.get_buffer_for_payload(huge).is_err());
+        assert!(registry.get_pool_for_size(usize::MAX).is_err());
+
+        // Normal sizes still work
+        assert!(registry.get_pool_for_size(256).is_ok());
+        assert!(registry.get_pool_for_size(0).is_err());
+    }
 }

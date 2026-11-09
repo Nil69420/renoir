@@ -51,7 +51,7 @@ private:
     }
 
     void check_error(RenoirErrorCode error, const std::string& operation) {
-        if (error != RenoirErrorCode::Success) {
+        if (error != RenoirErrorCode::RenoirErrorCode_Success) {
             std::cerr << "ERROR in " << operation << ": " << static_cast<int>(error) << std::endl;
             cleanup();
             exit(1);
@@ -173,7 +173,7 @@ private:
                 &seq_out
             );
 
-            if (result == RenoirErrorCode::Success) {
+            if (result == RenoirErrorCode::RenoirErrorCode_Success) {
                 messages_sent++;
                 std::cout << "  [Producer] Published IMU #" << i 
                           << " (seq=" << seq_out << ")" << std::endl;
@@ -192,7 +192,7 @@ private:
         // Get event fd for efficient waiting
         int event_fd = -1;
         auto result = renoir_subscriber_get_event_fd(sub_sensor, &event_fd);
-        if (result == RenoirErrorCode::Success && event_fd >= 0) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success && event_fd >= 0) {
             std::cout << "  [Consumer] Using event-driven mode (fd=" << event_fd << ")" << std::endl;
         }
 #endif
@@ -201,7 +201,7 @@ private:
             RenoirReceivedMessage msg = {};
             auto result = renoir_subscribe_read_next(sub_sensor, &msg, 100);  // 100ms timeout
 
-            if (result == RenoirErrorCode::Success) {
+            if (result == RenoirErrorCode::RenoirErrorCode_Success) {
                 messages_received++;
                 auto* imu_data = reinterpret_cast<const struct ImuData*>(msg.payload_ptr);
                 
@@ -212,7 +212,7 @@ private:
                           << imu_data->accel[2] << "]" << std::endl;
 
                 renoir_message_release(msg.handle);
-            } else if (result == RenoirErrorCode::BufferEmpty) {
+            } else if (result == RenoirErrorCode::RenoirErrorCode_BufferEmpty) {
                 // Timeout - check if we should continue
                 if (messages_received >= messages_sent && messages_sent > 0) {
                     break;
@@ -236,7 +236,7 @@ private:
         // Sensor topic stats
         RenoirTopicStats sensor_stats = {};
         auto result = renoir_topic_stats(topic_manager, "/sensors/imu", &sensor_stats);
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "\n  /sensors/imu Statistics:" << std::endl;
             std::cout << "    Messages Published: " << sensor_stats.messages_published << std::endl;
             std::cout << "    Messages Consumed:  " << sensor_stats.messages_consumed << std::endl;
@@ -248,7 +248,7 @@ private:
         // Telemetry topic stats
         RenoirTopicStats telemetry_stats = {};
         result = renoir_topic_stats(topic_manager, "/telemetry/status", &telemetry_stats);
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "\n  /telemetry/status Statistics:" << std::endl;
             std::cout << "    Messages Published: " << telemetry_stats.messages_published << std::endl;
             std::cout << "    Messages Consumed:  " << telemetry_stats.messages_consumed << std::endl;

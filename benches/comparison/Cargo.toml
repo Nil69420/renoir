@@ -1,0 +1,24 @@
+[package]
+name = "renoir-iox2-comparison"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+renoir = { path = "../.." }
+iceoryx2 = "0.10"
+libc = "0.2"
+
+[[bench]]
+name = "vs_iceoryx2"
+path = "../vs_iceoryx2.rs"
+harness = false
+
+[[bench]]
+name = "fanout"
+path = "../fanout.rs"
+harness = false
+
+[[bench]]
+name = "frames_vs_iceoryx2"
+path = "../frames_vs_iceoryx2.rs"
+harness = false

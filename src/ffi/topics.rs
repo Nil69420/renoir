@@ -13,7 +13,7 @@
 //! # Thread Safety
 //! All handles are thread-safe and can be shared across threads.
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CString};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -100,7 +100,8 @@ pub extern "C" fn renoir_topic_manager_destroy(
     let manager_id = manager as usize;
     let mut registry = HANDLE_REGISTRY.lock();
 
-    if registry.remove_topic_manager(manager_id) {
+    if let Some(manager) = registry.remove_topic_manager(manager_id) {
+        manager.mark_all_regions_clean();
         RenoirErrorCode::Success
     } else {
         RenoirErrorCode::InvalidParameter
@@ -111,12 +112,28 @@ pub extern "C" fn renoir_topic_manager_destroy(
 // Topic Registration API
 // ============================================================================
 
+/// Topic registration flag: discard messages left by a previous clean session
+/// when no live process holds the topic
+pub const RENOIR_TOPIC_FLAG_FRESH_START: u32 = 1;
+
 /// Register a new topic with the manager
 #[no_mangle]
 pub extern "C" fn renoir_topic_register(
     manager: RenoirTopicManagerHandle,
     topic_name: *const c_char,
     options: *const RenoirTopicOptions,
+    topic_id: *mut RenoirTopicId,
+) -> RenoirErrorCode {
+    renoir_topic_register_ex(manager, topic_name, options, 0, topic_id)
+}
+
+/// Register a new topic with the manager, with extra `RENOIR_TOPIC_FLAG_*` flags
+#[no_mangle]
+pub extern "C" fn renoir_topic_register_ex(
+    manager: RenoirTopicManagerHandle,
+    topic_name: *const c_char,
+    options: *const RenoirTopicOptions,
+    flags: u32,
     topic_id: *mut RenoirTopicId,
 ) -> RenoirErrorCode {
     if manager.is_null() || topic_name.is_null() || options.is_null() || topic_id.is_null() {
@@ -154,6 +171,7 @@ pub extern "C" fn renoir_topic_register(
         max_payload_size: options.max_payload_size,
         use_shared_pool: options.use_shared_pool,
         shared_pool_threshold: options.shared_pool_threshold,
+        fresh_start: flags & RENOIR_TOPIC_FLAG_FRESH_START != 0,
         enable_notifications: options.enable_notifications,
         qos: TopicQoS {
             reliability: Reliability::BestEffort,
@@ -298,7 +316,10 @@ pub extern "C" fn renoir_topic_list(
     }
 
     // Allocate array for topic info
-    let layout = std::alloc::Layout::array::<RenoirTopicInfo>(topic_count).unwrap();
+    let layout = match std::alloc::Layout::array::<RenoirTopicInfo>(topic_count) {
+        Ok(l) => l,
+        Err(_) => return RenoirErrorCode::OutOfMemory,
+    };
     let ptr = unsafe { std::alloc::alloc(layout) as *mut RenoirTopicInfo };
 
     if ptr.is_null() {
@@ -348,10 +369,22 @@ pub extern "C" fn renoir_topic_list(
 /// Free topic list returned by renoir_topic_list
 #[no_mangle]
 pub extern "C" fn renoir_topic_list_free(topics: *mut RenoirTopicInfo, count: usize) {
-    if !topics.is_null() && count > 0 {
-        unsafe {
-            let _ = Vec::from_raw_parts(topics, count, count);
+    if topics.is_null() || count == 0 {
+        return;
+    }
+
+    unsafe {
+        // Free each per-topic name CString allocated by renoir_topic_list
+        for i in 0..count {
+            let name = (*topics.add(i)).name;
+            if !name.is_null() {
+                drop(CString::from_raw(name as *mut c_char));
+            }
         }
+
+        let layout = std::alloc::Layout::array::<RenoirTopicInfo>(count)
+            .unwrap_or(std::alloc::Layout::new::<RenoirTopicInfo>());
+        std::alloc::dealloc(topics as *mut u8, layout);
     }
 }
 
@@ -522,6 +555,31 @@ pub extern "C" fn renoir_publish_reserve(
         return RenoirErrorCode::InvalidParameter;
     }
 
+    let pub_id = publisher as usize;
+    let pub_arc = {
+        let registry = HANDLE_REGISTRY.lock();
+        registry.get_publisher(pub_id)
+    };
+    if let Some(pub_arc) = pub_arc {
+        if pub_arc.supports_zero_copy() {
+            return match pub_arc.reserve(size) {
+                Ok(reservation) => {
+                    let ptr = reservation.payload_ptr();
+                    let mut registry = HANDLE_REGISTRY.lock();
+                    let id = registry.next_id;
+                    registry.next_id += 1;
+                    registry.reserved_slots.insert(id, (pub_arc, reservation));
+                    unsafe {
+                        *payload_ptr = ptr;
+                        *reserved = id as RenoirReservedBufferHandle;
+                    }
+                    RenoirErrorCode::Success
+                }
+                Err(e) => e.into(),
+            };
+        }
+    }
+
     // Allocate a buffer for zero-copy publishing
     let mut buffer = vec![0u8; size];
     let buffer_ptr = buffer.as_mut_ptr();
@@ -555,6 +613,19 @@ pub extern "C" fn renoir_publish_commit(
 
     let pub_id = publisher as usize;
     let buffer_id = reserved as usize;
+
+    let slot_entry = HANDLE_REGISTRY.lock().reserved_slots.remove(&buffer_id);
+    if let Some((pub_arc, reservation)) = slot_entry {
+        return match pub_arc.commit(reservation, actual_len) {
+            Ok(seq) => {
+                if !sequence.is_null() {
+                    unsafe { *sequence = seq };
+                }
+                RenoirErrorCode::Success
+            }
+            Err(e) => e.into(),
+        };
+    }
 
     // Get the reserved buffer
     let buffer = {
@@ -600,6 +671,28 @@ pub extern "C" fn renoir_publish_commit(
         }
         Err(e) => e.into(),
     }
+}
+
+/// Abandon a reservation without publishing it
+#[no_mangle]
+pub extern "C" fn renoir_publish_discard(
+    publisher: RenoirPublisherHandle,
+    reserved: RenoirReservedBufferHandle,
+) -> RenoirErrorCode {
+    if publisher.is_null() || reserved.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let id = reserved as usize;
+    let mut registry = HANDLE_REGISTRY.lock();
+    if let Some((pub_arc, reservation)) = registry.reserved_slots.remove(&id) {
+        drop(registry);
+        pub_arc.discard(reservation);
+        return RenoirErrorCode::Success;
+    }
+    if registry.reserved_buffers.remove(&id).is_some() {
+        return RenoirErrorCode::Success;
+    }
+    RenoirErrorCode::InvalidParameter
 }
 
 // ============================================================================
@@ -994,6 +1087,27 @@ pub extern "C" fn renoir_wait_event(fd: std::os::fd::RawFd, timeout_ms: u64) -> 
 // Statistics API
 // ============================================================================
 
+/// Fill a `RenoirTopicStats` struct from a topic's live stats
+unsafe fn fill_topic_stats(
+    out: *mut RenoirTopicStats,
+    topic_stats: &crate::topic::TopicStats,
+    topic_id: RenoirTopicId,
+) {
+    use std::sync::atomic::Ordering;
+
+    (*out).topic_id = topic_id;
+    (*out).publisher_count = topic_stats.active_publishers.load(Ordering::Relaxed) as usize;
+    (*out).subscriber_count = topic_stats.active_subscribers.load(Ordering::Relaxed) as usize;
+    (*out).messages_published = topic_stats.messages_published.load(Ordering::Relaxed);
+    (*out).messages_consumed = topic_stats.messages_consumed.load(Ordering::Relaxed);
+    (*out).messages_dropped = topic_stats.messages_dropped.load(Ordering::Relaxed);
+    (*out).bytes_transferred = topic_stats.avg_message_size.load(Ordering::Relaxed)
+        * topic_stats.messages_published.load(Ordering::Relaxed);
+    (*out).average_latency_ns = topic_stats.average_latency_ns();
+    (*out).peak_latency_ns = topic_stats.peak_latency_ns();
+    (*out).throughput_mbps = topic_stats.throughput_mbps();
+}
+
 /// Get topic statistics
 #[no_mangle]
 pub extern "C" fn renoir_topic_stats(
@@ -1026,34 +1140,7 @@ pub extern "C" fn renoir_topic_stats(
     match manager.topic_stats(&name) {
         Ok(topic_stats) => {
             unsafe {
-                (*stats).topic_id = topic_id as RenoirTopicId;
-                (*stats).publisher_count = topic_stats
-                    .active_publishers
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as usize;
-                (*stats).subscriber_count = topic_stats
-                    .active_subscribers
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    as usize;
-                (*stats).messages_published = topic_stats
-                    .messages_published
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_consumed = topic_stats
-                    .messages_consumed
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).messages_dropped = topic_stats
-                    .messages_dropped
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                (*stats).bytes_transferred = topic_stats
-                    .avg_message_size
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    * topic_stats
-                        .messages_published
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                // Latency tracking would require timestamp collection - not implemented yet
-                (*stats).average_latency_ns = 0;
-                (*stats).peak_latency_ns = 0;
-                (*stats).throughput_mbps = 0.0;
+                fill_topic_stats(stats, &topic_stats, topic_id as RenoirTopicId);
             }
             RenoirErrorCode::Success
         }
@@ -1082,32 +1169,7 @@ pub extern "C" fn renoir_publisher_stats(
     let topic_stats = pub_handle.stats();
 
     unsafe {
-        (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats
-            .active_publishers
-            .load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats
-            .active_subscribers
-            .load(std::sync::atomic::Ordering::Relaxed)
-            as usize;
-        (*stats).messages_published = topic_stats
-            .messages_published
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats
-            .messages_consumed
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats
-            .messages_dropped
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats
-            .avg_message_size
-            .load(std::sync::atomic::Ordering::Relaxed)
-            * topic_stats
-                .messages_published
-                .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).average_latency_ns = 0;
-        (*stats).peak_latency_ns = 0;
-        (*stats).throughput_mbps = 0.0;
+        fill_topic_stats(stats, &topic_stats, 0);
     }
 
     RenoirErrorCode::Success
@@ -1134,32 +1196,7 @@ pub extern "C" fn renoir_subscriber_stats(
     let topic_stats = sub_handle.stats();
 
     unsafe {
-        (*stats).topic_id = 0;
-        (*stats).publisher_count = topic_stats
-            .active_publishers
-            .load(std::sync::atomic::Ordering::Relaxed) as usize;
-        (*stats).subscriber_count = topic_stats
-            .active_subscribers
-            .load(std::sync::atomic::Ordering::Relaxed)
-            as usize;
-        (*stats).messages_published = topic_stats
-            .messages_published
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_consumed = topic_stats
-            .messages_consumed
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).messages_dropped = topic_stats
-            .messages_dropped
-            .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).bytes_transferred = topic_stats
-            .avg_message_size
-            .load(std::sync::atomic::Ordering::Relaxed)
-            * topic_stats
-                .messages_published
-                .load(std::sync::atomic::Ordering::Relaxed);
-        (*stats).average_latency_ns = 0;
-        (*stats).peak_latency_ns = 0;
-        (*stats).throughput_mbps = 0.0;
+        fill_topic_stats(stats, &topic_stats, 0);
     }
 
     RenoirErrorCode::Success
@@ -1284,6 +1321,215 @@ pub extern "C" fn renoir_subscriber_topic_name(
     string_to_c_str(name.to_string())
 }
 
+/// Copy the next message straight into a caller-owned buffer (SPMC topics)
+///
+/// Returns `Success` with `*out_len` set, `BufferEmpty` if nothing is pending,
+/// or `InsufficientSpace` with `*out_len` set to the size needed (the message
+/// is not consumed in that case).
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_read_into(
+    subscriber: RenoirSubscriberHandle,
+    buffer: *mut u8,
+    buffer_len: usize,
+    out_len: *mut usize,
+    metadata: *mut RenoirMessageMetadata,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || out_len.is_null() || (buffer.is_null() && buffer_len > 0) {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let dst: &mut [u8] = if buffer_len == 0 {
+        &mut []
+    } else {
+        unsafe { std::slice::from_raw_parts_mut(buffer, buffer_len) }
+    };
+    match sub.read_into(dst) {
+        Ok(crate::topic_rings::ReadInto::Message {
+            len,
+            sequence,
+            timestamp_ns,
+        }) => {
+            unsafe {
+                *out_len = len;
+                if !metadata.is_null() {
+                    (*metadata).timestamp_ns = timestamp_ns;
+                    (*metadata).sequence_number = sequence;
+                    (*metadata).source_id = 0;
+                    (*metadata).message_type = 0;
+                    (*metadata).flags = 0;
+                }
+            }
+            RenoirErrorCode::Success
+        }
+        Ok(crate::topic_rings::ReadInto::TooSmall(needed)) => {
+            unsafe { *out_len = needed };
+            RenoirErrorCode::InsufficientSpace
+        }
+        Ok(crate::topic_rings::ReadInto::Empty) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+/// In-place view of the next message of an SPMC topic (no copy)
+///
+/// `data` points into the shared ring slot. The producer may overwrite the
+/// slot while the caller reads it, so the bytes are only trustworthy once
+/// `renoir_subscribe_view_release` reports `Success`.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RenoirFrameView {
+    pub data: *const u8,
+    pub len: usize,
+    pub sequence: u64,
+    pub timestamp_ns: u64,
+    pub token: u64,
+}
+
+/// Borrow the next SPMC message in place; `BufferEmpty` if nothing is pending
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_view(
+    subscriber: RenoirSubscriberHandle,
+    view: *mut RenoirFrameView,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || view.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    match sub.view() {
+        Ok(crate::topic_rings::ViewRead::View(v)) => {
+            unsafe {
+                *view = RenoirFrameView {
+                    data: v.data_ptr(),
+                    len: v.len(),
+                    sequence: v.sequence(),
+                    timestamp_ns: v.timestamp_ns(),
+                    token: v.index(),
+                };
+            }
+            RenoirErrorCode::Success
+        }
+        Ok(crate::topic_rings::ViewRead::Empty) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+/// Finish with a view: `Success` if the bytes stayed intact while it was held,
+/// `ConcurrencyError` if the producer overwrote the slot (discard what was read).
+/// The subscriber advances past the message in both cases.
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_view_release(
+    subscriber: RenoirSubscriberHandle,
+    view: *const RenoirFrameView,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || view.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let v = unsafe { *view };
+    let view = crate::topic_rings::BroadcastView::from_parts(
+        v.data,
+        v.len,
+        v.sequence,
+        v.timestamp_ns,
+        v.token,
+    );
+    match sub.release_view(&view) {
+        Ok(true) => RenoirErrorCode::Success,
+        Ok(false) => RenoirErrorCode::ConcurrencyError,
+        Err(e) => e.into(),
+    }
+}
+
+/// Number of messages this subscriber lost because it fell behind (SPMC topics)
+#[no_mangle]
+pub extern "C" fn renoir_subscriber_overruns(
+    subscriber: RenoirSubscriberHandle,
+    out_overruns: *mut u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() || out_overruns.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let registry = HANDLE_REGISTRY.lock();
+    match registry.get_subscriber(subscriber as usize) {
+        Some(s) => {
+            unsafe { *out_overruns = s.overruns() };
+            RenoirErrorCode::Success
+        }
+        None => RenoirErrorCode::InvalidParameter,
+    }
+}
+
+/// Block until a message is readable or the timeout elapses (SPMC topics)
+///
+/// Returns `Success` when a message can be read, `BufferEmpty` on timeout. A
+/// `timeout_ms` of 0 only polls.
+#[no_mangle]
+pub extern "C" fn renoir_subscribe_wait(
+    subscriber: RenoirSubscriberHandle,
+    timeout_ms: u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    if sub.wait_readable(Some(Duration::from_millis(timeout_ms))) {
+        RenoirErrorCode::Success
+    } else {
+        RenoirErrorCode::BufferEmpty
+    }
+}
+
+/// Drop unread messages so at most `keep` (minimum 1) of the newest remain (SPMC topics)
+///
+/// Use before reading when only fresh data matters, e.g. a vision pipeline
+/// that must not process stale frames. `out_skipped` may be null.
+#[no_mangle]
+pub extern "C" fn renoir_subscriber_skip_to_latest(
+    subscriber: RenoirSubscriberHandle,
+    keep: u64,
+    out_skipped: *mut u64,
+) -> RenoirErrorCode {
+    if subscriber.is_null() {
+        return RenoirErrorCode::InvalidParameter;
+    }
+    let sub = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_subscriber(subscriber as usize) {
+            Some(s) => s,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
+    };
+    let skipped = sub.skip_to_latest(keep);
+    if !out_skipped.is_null() {
+        unsafe { *out_skipped = skipped };
+    }
+    RenoirErrorCode::Success
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1371,5 +1617,21 @@ mod tests {
             assert_eq!(ptr, buf.as_ptr());
             assert_eq!(len, buf.len());
         }
+    }
+
+    #[test]
+    fn test_topic_list_layout_overflow_guard() {
+        // renoir_topic_list uses Layout::array::<RenoirTopicInfo>(topic_count)
+        // and must return OutOfMemory instead of panicking on overflow
+        let pathological_count = usize::MAX / std::mem::size_of::<RenoirTopicInfo>() + 1;
+        assert!(
+            std::alloc::Layout::array::<RenoirTopicInfo>(pathological_count).is_err(),
+            "pathological topic count must fail layout construction"
+        );
+        let ok_count = 64usize;
+        assert!(
+            std::alloc::Layout::array::<RenoirTopicInfo>(ok_count).is_ok(),
+            "normal topic count must construct a layout"
+        );
     }
 }

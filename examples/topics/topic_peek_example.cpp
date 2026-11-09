@@ -38,7 +38,7 @@ int main() {
     
     RenoirTopicId topic_id;
     auto result = renoir_topic_register(manager, "/example/peek", &topic_opts, &topic_id);
-    if (result != RenoirErrorCode::Success) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success) {
         std::cerr << "Failed to register topic: " << static_cast<int>(result) << std::endl;
         renoir_topic_manager_destroy(manager);
         return 1;
@@ -55,7 +55,7 @@ int main() {
     
     RenoirPublisherHandle publisher = nullptr;
     result = renoir_publisher_create(manager, "/example/peek", &pub_opts, &publisher);
-    if (result != RenoirErrorCode::Success) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success) {
         std::cerr << "Failed to create publisher" << std::endl;
         renoir_topic_manager_destroy(manager);
         return 1;
@@ -72,7 +72,7 @@ int main() {
     
     RenoirSubscriberHandle subscriber = nullptr;
     result = renoir_subscriber_create(manager, "/example/peek", &sub_opts, &subscriber);
-    if (result != RenoirErrorCode::Success) {
+    if (result != RenoirErrorCode::RenoirErrorCode_Success) {
         std::cerr << "Failed to create subscriber" << std::endl;
         renoir_publisher_destroy(publisher);
         renoir_topic_manager_destroy(manager);
@@ -87,7 +87,7 @@ int main() {
         RenoirSequenceNumber seq = 0;
         result = renoir_publish(publisher, reinterpret_cast<const uint8_t*>(messages[i]),
                                strlen(messages[i]) + 1, nullptr, &seq);
-        if (result == RenoirErrorCode::Success) {
+        if (result == RenoirErrorCode::RenoirErrorCode_Success) {
             std::cout << "   Published: \"" << messages[i] << "\" (seq: " << seq << ")" << std::endl;
         } else {
             std::cerr << "   Failed to publish \"" << messages[i]
@@ -102,7 +102,7 @@ int main() {
     std::cout << "\n   a) Peeking at first message..." << std::endl;
     RenoirReceivedMessage msg{};
     result = renoir_subscribe_peek(subscriber, &msg);
-    if (result == RenoirErrorCode::Success) {
+    if (result == RenoirErrorCode::RenoirErrorCode_Success) {
         std::cout << "      Peeked: \"" << reinterpret_cast<const char*>(msg.payload_ptr) << "\"" << std::endl;
         renoir_message_release(msg.handle);
     }
@@ -110,7 +110,7 @@ int main() {
     // Peek again - should see same message
     std::cout << "   b) Peeking again..." << std::endl;
     result = renoir_subscribe_peek(subscriber, &msg);
-    if (result == RenoirErrorCode::Success) {
+    if (result == RenoirErrorCode::RenoirErrorCode_Success) {
         std::cout << "      Peeked: \"" << reinterpret_cast<const char*>(msg.payload_ptr) 
                   << "\" (same message!)" << std::endl;
         renoir_message_release(msg.handle);
@@ -119,7 +119,7 @@ int main() {
     // Consume the message
     std::cout << "   c) Now consuming the message..." << std::endl;
     result = renoir_subscribe_read_next(subscriber, &msg, 0);
-    if (result == RenoirErrorCode::Success) {
+    if (result == RenoirErrorCode::RenoirErrorCode_Success) {
         std::cout << "      Consumed: \"" << reinterpret_cast<const char*>(msg.payload_ptr) << "\"" << std::endl;
         renoir_message_release(msg.handle);
     }
@@ -127,7 +127,7 @@ int main() {
     // Peek again - should see next message
     std::cout << "   d) Peeking again (should be different now)..." << std::endl;
     result = renoir_subscribe_peek(subscriber, &msg);
-    if (result == RenoirErrorCode::Success) {
+    if (result == RenoirErrorCode::RenoirErrorCode_Success) {
         std::cout << "      Peeked: \"" << reinterpret_cast<const char*>(msg.payload_ptr) 
                   << "\" (next message!)" << std::endl;
         renoir_message_release(msg.handle);

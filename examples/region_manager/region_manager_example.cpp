@@ -37,7 +37,7 @@ private:
     }
 
     void check_error(RenoirErrorCode error, const std::string& operation) {
-        if (error != Success) {
+        if (error != RenoirErrorCode_Success) {
             std::cerr << "Error in " << operation << ": " << static_cast<int>(error) << std::endl;
             cleanup();
             exit(1);
@@ -202,7 +202,7 @@ private:
         for (size_t i = 0; i < regions.size(); ++i) {
             RenoirRegionStats stats;
             error = renoir_region_stats(regions[i], &stats);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "\nRegion " << (i + 1) << ":" << std::endl;
                 print_region_stats(stats);
 
@@ -223,7 +223,7 @@ private:
         // Close all regions
         for (auto region : regions) {
             RenoirErrorCode error = renoir_region_close(region);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Region closed" << std::endl;
             }
         }
@@ -232,7 +232,7 @@ private:
         // Destroy manager
         if (manager) {
             RenoirErrorCode error = renoir_manager_destroy(manager);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Manager destroyed" << std::endl;
             }
             manager = nullptr;

@@ -1,0 +1,10 @@
+AArch64 gate_consumer_plain_store_CONTROL
+{
+0:X1=pos; 0:X3=data; 0:X2=1;
+1:X1=pos; 1:X3=data; 1:X2=1;
+pos=0; data=0;
+}
+ P0                | P1               ;
+ LDR W5,[X3]       | LDAR W4,[X1]     ;
+ STR W2,[X1]       | STR W2,[X3]      ;
+exists (0:X5=1 /\ 1:X4=1)

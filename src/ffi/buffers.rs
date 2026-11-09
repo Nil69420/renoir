@@ -1,7 +1,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 //! FFI functions for buffer management
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CString};
 use std::sync::Arc;
 
 use crate::buffers::{BufferPool, BufferPoolConfig};
@@ -334,44 +334,6 @@ pub extern "C" fn renoir_buffer_pool_stats(
     RenoirErrorCode::Success
 }
 
-/// Get computed buffer pool statistics (rates and health indicators only)
-#[no_mangle]
-pub extern "C" fn renoir_buffer_pool_computed_stats(
-    pool: RenoirBufferPoolHandle,
-    success_rate: *mut f64,
-    utilization: *mut f64,
-    failure_rate: *mut f64,
-    is_healthy: *mut bool,
-) -> RenoirErrorCode {
-    if pool.is_null()
-        || success_rate.is_null()
-        || utilization.is_null()
-        || failure_rate.is_null()
-        || is_healthy.is_null()
-    {
-        return RenoirErrorCode::InvalidParameter;
-    }
-
-    let pool_id = pool as usize;
-
-    let registry = HANDLE_REGISTRY.lock();
-    let pool = match registry.get_buffer_pool(pool_id) {
-        Some(p) => p,
-        None => return RenoirErrorCode::InvalidParameter,
-    };
-
-    let pool_stats = pool.stats();
-
-    unsafe {
-        *success_rate = pool_stats.success_rate();
-        *utilization = pool_stats.utilization();
-        *failure_rate = pool_stats.failure_rate();
-        *is_healthy = pool_stats.is_healthy();
-    }
-
-    RenoirErrorCode::Success
-}
-
 /// Get the number of available buffers in the pool
 #[no_mangle]
 pub extern "C" fn renoir_buffer_pool_available_count(
@@ -480,18 +442,37 @@ pub extern "C" fn renoir_buffer_pool_config(
     }
 
     let pool_id = pool as usize;
-    let registry = HANDLE_REGISTRY.lock();
-    let pool = match registry.get_buffer_pool(pool_id) {
-        Some(p) => p,
-        None => return RenoirErrorCode::InvalidParameter,
+    let pool = {
+        let registry = HANDLE_REGISTRY.lock();
+        match registry.get_buffer_pool(pool_id) {
+            Some(p) => p,
+            None => return RenoirErrorCode::InvalidParameter,
+        }
     };
 
     let pool_config = pool.config();
 
+    // Store an owned CString in the registry so the returned `name` pointer
+    // stays valid for the pool's lifetime instead of dangling after this call
+    let name_cstr = match CString::new(pool_config.name.clone()) {
+        Ok(c) => c,
+        Err(_) => return RenoirErrorCode::InvalidParameter,
+    };
+    let name_ptr = {
+        let mut registry = HANDLE_REGISTRY.lock();
+        registry.set_buffer_pool_name(pool_id, name_cstr);
+        registry
+            .buffer_pool_names
+            .get(&pool_id)
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null())
+    };
+    if name_ptr.is_null() {
+        return RenoirErrorCode::OutOfMemory;
+    }
+
     unsafe {
-        // Note: The name pointer will be invalidated after this function returns
-        // In practice, the C caller should copy the string if needed
-        (*config).name = pool_config.name.as_ptr() as *const c_char;
+        (*config).name = name_ptr;
         (*config).buffer_size = pool_config.buffer_size;
         (*config).initial_count = pool_config.initial_count;
         (*config).max_count = pool_config.max_count;
@@ -516,7 +497,7 @@ pub extern "C" fn renoir_buffer_pool_destroy(pool: RenoirBufferPoolHandle) -> Re
     let pool_id = pool as usize;
     let mut registry = HANDLE_REGISTRY.lock();
 
-    if registry.buffer_pools.remove(&pool_id).is_some() {
+    if registry.remove_buffer_pool(pool_id).is_some() {
         RenoirErrorCode::Success
     } else {
         RenoirErrorCode::InvalidParameter

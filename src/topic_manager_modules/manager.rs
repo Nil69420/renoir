@@ -12,7 +12,7 @@ use crate::{
     error::{RenoirError, Result},
     memory::{BackingType, RegionConfig, SharedMemoryManager},
     shared_pools::BufferPoolRegistry,
-    topic::{TopicConfig, TopicStats},
+    topic::{TopicConfig, TopicPattern, TopicStats},
 };
 
 use super::{
@@ -72,26 +72,37 @@ impl TopicManager {
 
         {
             let topics = self.topics.read();
-            if topics.contains_key(&config.name) {
+            if let Some(existing) = topics.get(&config.name) {
+                // A second registration with a meaningfully different config
+                // must not be silently ignored: the first registration is
+                // authoritative, and callers relying on a later call's options
+                // taking effect would get silent misbehavior
+                Self::validate_config_match(&existing.config, &config)?;
                 return Ok(topic_id);
             }
         }
 
-        // Create memory region for this topic with unique name
+        // Create memory region for this topic with unique name.
+        // Topics always use FileBacked regions so the region is attachable by
+        // a second process; `enable_notifications` only controls eventfd
+        // notification, which has zero coupling to the backing type.
+        let region_name = format!("topic_{}_{}", config.name, topic_id);
         let region_config = RegionConfig {
-            name: format!("topic_{}_{}", config.name, topic_id),
+            name: region_name.clone(),
             size: self.calculate_topic_memory_size(&config),
-            backing_type: if config.enable_notifications {
-                BackingType::MemFd
-            } else {
-                BackingType::FileBacked
-            },
-            file_path: None,
+            backing_type: BackingType::FileBacked,
+            // Topic names can contain '/' (e.g. "/sensors/imu"); the default
+            // path derives from the region name, so sanitize it or the file
+            // would land in a non-existent nested directory
+            file_path: Some(crate::memory::region_path(&region_name.replace('/', "_"))),
             create: true,
             permissions: 0o600,
         };
-
-        let region_name = region_config.name.clone();
+        if config.fresh_start {
+            if let Some(path) = &region_config.file_path {
+                reset_stale_region(path)?;
+            }
+        }
         let memory_region = self.memory_manager.create_region(region_config)?;
         let topic_instance = Arc::new(TopicInstance::new(
             topic_id,
@@ -165,6 +176,9 @@ impl TopicManager {
             topic_ids.remove(&topic.topic_id);
 
             // Clean up the memory region
+            if let Ok(region) = self.memory_manager.get_region(&topic.region_name) {
+                region.mark_session_clean();
+            }
             if let Err(e) = self.memory_manager.remove_region(&topic.region_name) {
                 // Log error but don't fail the removal
                 log::warn!(
@@ -178,6 +192,18 @@ impl TopicManager {
         }
 
         Ok(())
+    }
+
+    /// Mark every topic region as cleanly closed. C and Python callers
+    /// release topics through FFI destroy calls rather than Rust Drop, so
+    /// the CLEAN marker is written here on those paths, not only in Drop.
+    pub fn mark_all_regions_clean(&self) {
+        let topics = self.topics.read();
+        for topic in topics.values() {
+            if let Ok(region) = self.memory_manager.get_region(&topic.region_name) {
+                region.mark_session_clean();
+            }
+        }
     }
 
     /// List all topics
@@ -239,9 +265,62 @@ impl TopicManager {
         hasher.finish() as TopicId
     }
 
+    /// Validate that a second registration of an existing topic name does not
+    /// contradict the first registration's authoritative configuration.
+    fn validate_config_match(existing: &TopicConfig, incoming: &TopicConfig) -> Result<()> {
+        if incoming.pattern != existing.pattern {
+            return Err(RenoirError::invalid_parameter(
+                "pattern",
+                format!(
+                    "Topic '{}' already registered with pattern {:?}, cannot re-register with {:?}",
+                    existing.name, existing.pattern, incoming.pattern
+                ),
+            ));
+        }
+
+        if incoming.max_payload_size != existing.max_payload_size {
+            return Err(RenoirError::invalid_parameter(
+                "max_payload_size",
+                format!(
+                    "Topic '{}' already registered with max_payload_size {}, cannot re-register with {}",
+                    existing.name, existing.max_payload_size, incoming.max_payload_size
+                ),
+            ));
+        }
+
+        if incoming.use_shared_pool != existing.use_shared_pool
+            || incoming.shared_pool_threshold != existing.shared_pool_threshold
+        {
+            return Err(RenoirError::invalid_parameter(
+                "use_shared_pool",
+                format!(
+                    "Topic '{}' already registered with use_shared_pool {}/threshold {}, cannot re-register with {}/{}",
+                    existing.name,
+                    existing.use_shared_pool,
+                    existing.shared_pool_threshold,
+                    incoming.use_shared_pool,
+                    incoming.shared_pool_threshold
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
     fn calculate_topic_memory_size(&self, config: &TopicConfig) -> usize {
-        // Ring buffer size + overhead
-        let ring_size = config.ring_capacity * (config.max_payload_size + 128); // Header overhead
+        // Ring control block + message buffer (ring_capacity is in KiB)
+        let ring_size = match config.pattern {
+            TopicPattern::SPSC => {
+                crate::topic_rings::SPSCTopicRing::required_memory_size(config.ring_capacity * 1024)
+            }
+            TopicPattern::SPMC => crate::topic_rings::BroadcastTopicRing::required_memory_size(
+                config.ring_capacity * 1024,
+                config.max_payload_size,
+            ),
+            TopicPattern::MPSC | TopicPattern::MPMC => {
+                crate::topic_rings::MPMCTopicRing::required_memory_size(config.ring_capacity * 1024)
+            }
+        };
 
         // Add buffer pool space if using shared pools
         let pool_size = if config.use_shared_pool {
@@ -251,5 +330,29 @@ impl TopicManager {
         };
 
         (ring_size + pool_size).max(1024 * 1024) // At least 1MB
+    }
+}
+
+fn reset_stale_region(path: &std::path::Path) -> Result<()> {
+    use nix::fcntl::{flock, FlockArg};
+    use std::os::fd::AsRawFd;
+
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(RenoirError::from_io(e, "Failed to open region for reset")),
+    };
+    match flock(file.as_raw_fd(), FlockArg::LockExclusiveNonblock) {
+        Ok(()) => {
+            file.set_len(0)
+                .map_err(|e| RenoirError::from_io(e, "Failed to reset stale region"))?;
+            Ok(())
+        }
+        Err(nix::errno::Errno::EWOULDBLOCK) => Ok(()),
+        Err(e) => Err(RenoirError::platform(format!("flock failed: {}", e))),
     }
 }

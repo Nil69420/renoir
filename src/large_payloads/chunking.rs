@@ -167,11 +167,6 @@ impl IncompleteMessage {
 
         Ok(result)
     }
-
-    /// Check if this message has expired
-    fn is_expired(&self, timeout: Duration) -> bool {
-        self.created_at.elapsed().unwrap_or(timeout) >= timeout
-    }
 }
 
 /// Chunk manager for handling large message chunking and reassembly
@@ -183,8 +178,6 @@ pub struct ChunkManager {
     strategy: ChunkingStrategy,
     /// Incomplete messages being reassembled (sequence_id -> IncompleteMessage)
     incomplete_messages: Arc<Mutex<HashMap<u64, IncompleteMessage>>>,
-    /// Reassembly timeout
-    reassembly_timeout: Duration,
 }
 
 impl ChunkManager {
@@ -194,13 +187,7 @@ impl ChunkManager {
             pool_manager,
             strategy,
             incomplete_messages: Arc::new(Mutex::new(HashMap::new())),
-            reassembly_timeout: Duration::from_secs(30), // 30 second timeout
         }
-    }
-
-    /// Set reassembly timeout
-    pub fn set_reassembly_timeout(&mut self, timeout: Duration) {
-        self.reassembly_timeout = timeout;
     }
 
     /// Check if payload needs chunking
@@ -256,6 +243,18 @@ impl ChunkManager {
             let buffer_desc = self.pool_manager.get_buffer(pool_id)?;
             let buffer_data = self.pool_manager.get_buffer_data(&buffer_desc)?;
 
+            let required = ChunkDescriptor::SIZE
+                .checked_add(chunk_data.len())
+                .ok_or_else(|| {
+                    RenoirError::invalid_parameter("chunk_size", "Chunk size overflow")
+                })?;
+            if required > buffer_data.capacity() {
+                return Err(RenoirError::insufficient_space(
+                    required,
+                    buffer_data.capacity(),
+                ));
+            }
+
             // Write chunk descriptor + data to buffer
             unsafe {
                 let buffer_ptr = buffer_data.as_mut_ptr();
@@ -294,10 +293,19 @@ impl ChunkManager {
         let chunk_desc: ChunkDescriptor =
             unsafe { std::ptr::read_unaligned(chunk_buffer.as_ptr() as *const ChunkDescriptor) };
 
-        // Extract chunk data
+        // Validate chunk_size against the remaining buffer before slicing,
+        // since chunk_desc is untrusted shared-memory data
         let chunk_data_offset = ChunkDescriptor::SIZE;
-        let chunk_data =
-            &chunk_buffer[chunk_data_offset..chunk_data_offset + chunk_desc.chunk_size as usize];
+        let chunk_data_end = match chunk_data_offset.checked_add(chunk_desc.chunk_size as usize) {
+            Some(end) if end <= chunk_buffer.len() => end,
+            _ => {
+                return Err(RenoirError::invalid_parameter(
+                    "chunk_size",
+                    "Chunk size exceeds available buffer data",
+                ));
+            }
+        };
+        let chunk_data = &chunk_buffer[chunk_data_offset..chunk_data_end];
 
         // Verify chunk
         if !chunk_desc.verify_checksum(chunk_data) {
@@ -328,16 +336,6 @@ impl ChunkManager {
         } else {
             Ok(None)
         }
-    }
-
-    /// Clean up expired incomplete messages
-    pub fn cleanup_expired(&self) -> usize {
-        let mut incomplete = self.incomplete_messages.lock();
-        let initial_count = incomplete.len();
-
-        incomplete.retain(|_, msg| !msg.is_expired(self.reassembly_timeout));
-
-        initial_count - incomplete.len()
     }
 
     /// Get statistics about incomplete messages

@@ -40,6 +40,9 @@ pub struct SharedBufferPool {
     active_count: AtomicUsize,
     /// Pool statistics
     stats: Mutex<SharedPoolBufferStats>,
+    /// Keeps the shared memory region mapped for as long as any buffer in
+    /// this pool exists; declared last so it is dropped last
+    _memory_region: Arc<SharedMemoryRegion>,
 }
 
 impl SharedBufferPool {
@@ -49,7 +52,7 @@ impl SharedBufferPool {
         config: BufferPoolConfig,
         memory_region: Arc<SharedMemoryRegion>,
     ) -> Result<Self> {
-        let buffer_pool = Arc::new(BufferPool::new(config.clone(), memory_region)?);
+        let buffer_pool = Arc::new(BufferPool::new(config.clone(), memory_region.clone())?);
 
         Ok(Self {
             pool_id,
@@ -59,6 +62,7 @@ impl SharedBufferPool {
             next_handle: AtomicU32::new(1),
             active_count: AtomicUsize::new(0),
             stats: Mutex::new(SharedPoolBufferStats::default()),
+            _memory_region: memory_region,
         })
     }
 

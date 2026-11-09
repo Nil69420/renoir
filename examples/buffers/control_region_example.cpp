@@ -39,7 +39,7 @@ private:
     }
 
     void check_error(RenoirErrorCode error, const std::string& operation) {
-        if (error != Success) {
+        if (error != RenoirErrorCode_Success) {
             std::cerr << "Error in " << operation << ": " << static_cast<int>(error) << std::endl;
             cleanup();
             exit(1);
@@ -286,7 +286,7 @@ private:
                     for (int j = 0; j < 3; ++j) {
                         RenoirBufferHandle buffer;
                         error = renoir_buffer_get(buffer_pools[pool_idx], &buffer);
-                        if (error == Success) {
+                        if (error == RenoirErrorCode_Success) {
                             temp_buffers.push_back(buffer);
                         }
                     }
@@ -348,7 +348,7 @@ private:
         // Destroy buffer pools
         for (auto pool : buffer_pools) {
             RenoirErrorCode error = renoir_buffer_pool_destroy(pool);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Buffer pool destroyed" << std::endl;
             }
         }
@@ -357,7 +357,7 @@ private:
         // Destroy control region
         if (control_region) {
             RenoirErrorCode error = renoir_control_region_destroy(control_region);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Control region destroyed" << std::endl;
             }
             control_region = nullptr;
@@ -366,7 +366,7 @@ private:
         // Close backing region
         if (backing_region) {
             RenoirErrorCode error = renoir_region_close(backing_region);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Backing region closed" << std::endl;
             }
             backing_region = nullptr;
@@ -375,7 +375,7 @@ private:
         // Destroy manager
         if (manager) {
             RenoirErrorCode error = renoir_manager_destroy(manager);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Manager destroyed" << std::endl;
             }
             manager = nullptr;

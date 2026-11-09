@@ -25,7 +25,7 @@ pub mod zero_copy;
 // Export key traits and types for external use
 pub use compatibility::{SchemaCompatibilityValidator, ValidationResult};
 pub use migration::{
-    MigrationContext, MigrationFunction, MigrationPlanner, MigrationResult, SchemaMigrationExecutor,
+    MigrationContext, MigrationFunction, MigrationResult, SchemaMigrationExecutor,
 };
 pub use official_flatbuffers::OfficialFlatBufferFormat;
 pub use registry::{SchemaInfo as RegistrySchemaInfo, UseCase, ZeroCopyFormatRegistry};

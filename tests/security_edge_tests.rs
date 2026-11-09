@@ -345,6 +345,86 @@ mod security_edge_tests {
         }
     }
 
+    #[test]
+    fn security_pool_return_buffer_and_counts() {
+        use std::time::Duration;
+
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SharedMemoryManager::new();
+        let region_config = RegionConfig::new("return_buffer_region", 1024 * 1024)
+            .with_backing_type(BackingType::FileBacked)
+            .with_file_path(temp_dir.path().join("return_buffer.dat"))
+            .with_create(true);
+        let region = manager.create_region(region_config).unwrap();
+
+        let pool_config = BufferPoolConfig::new("return_buffer_pool")
+            .with_buffer_size(4096)
+            .with_initial_count(0)
+            .with_max_count(4)
+            .with_pre_allocate(false)
+            .with_timeout(Some(Duration::from_millis(200)));
+        let pool = Arc::new(BufferPool::new(pool_config, region).unwrap());
+
+        assert_eq!(pool.available_count(), 0);
+        assert_eq!(pool.allocated_count(), 0);
+
+        // Allocate up to the max
+        let mut held = Vec::new();
+        for _ in 0..4 {
+            held.push(pool.get_buffer().unwrap());
+        }
+        assert_eq!(pool.available_count(), 0);
+        assert_eq!(pool.allocated_count(), 4);
+        assert!(!pool.can_expand());
+
+        // Exhaustion with timeout must return an error, not hang forever
+        let start = Instant::now();
+        let exhausted = pool.get_buffer();
+        assert!(
+            exhausted.is_err(),
+            "get_buffer past max_count with a timeout must error, not hang"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "pool exhaustion must resolve quickly, not block"
+        );
+
+        // Return a buffer explicitly; counts must update and the waiter wakes
+        let returned = held.pop().unwrap();
+        pool.return_buffer(returned).unwrap();
+        assert_eq!(pool.available_count(), 1);
+        assert_eq!(pool.allocated_count(), 3);
+
+        let rebought = pool.get_buffer().unwrap();
+        assert_eq!(pool.available_count(), 0);
+        assert_eq!(pool.allocated_count(), 4);
+        held.push(rebought);
+
+        // Dropping a Buffer must NOT silently reclaim it (allocator-level
+        // dealloc only) — the pool's return path is explicit.
+        drop(held.pop().unwrap());
+        assert_eq!(pool.available_count(), 0, "drop must not return to pool");
+        assert_eq!(
+            pool.allocated_count(),
+            4,
+            "drop must not remove from the pool's allocated map either"
+        );
+
+        // Shrink removes excess available buffers
+        pool.shrink(0);
+        held.clear();
+
+        // At this point the pool is fully exhausted and drops never returned
+        // buffers (the return path is explicit only) — the configured-timeout
+        // wait must error rather than hang.
+        let start = Instant::now();
+        assert!(pool.get_buffer().is_err());
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "no hang on exhaustion"
+        );
+    }
+
     /// Test: Boundary condition handling
     #[test]
     fn security_boundary_conditions() {
@@ -744,5 +824,26 @@ mod security_edge_tests {
             successes > 0,
             "Should complete some operations under extreme threading"
         );
+    }
+
+    #[test]
+    fn security_buffer_offset_overflow_returns_error() {
+        use renoir::allocators::BumpAllocator;
+        use renoir::buffers::Buffer;
+
+        let mut backing = vec![0u8; 64 * 1024];
+        let allocator: Arc<dyn renoir::allocators::Allocator> =
+            Arc::new(BumpAllocator::new(&mut backing).unwrap());
+        let mut buffer = Buffer::new(allocator, 1024, 64).unwrap();
+
+        // offset + len overflows usize in release builds if unchecked
+        let huge_offset = usize::MAX - 10;
+        assert!(buffer.write(huge_offset, b"data").is_err());
+        assert!(buffer.read(huge_offset, 20).is_err());
+
+        // Plain out-of-range offsets still error cleanly
+        assert!(buffer.write(1023, b"data").is_err());
+        assert!(buffer.read(0, 1025).is_err());
+        assert!(buffer.write(0, b"ok").is_ok());
     }
 }

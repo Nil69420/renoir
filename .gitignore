@@ -1,3 +1,6 @@
+# Agent planning/log scratch space
+.ai/
+
 # Rust build artifacts
 /target/
 **/*.rs.bk
@@ -80,3 +83,11 @@ node_modules/
 # Test artifacts
 *.test
 test_results/
+# Python bindings build artifacts
+renoir-python/target/
+renoir-python/__pycache__/
+
+# Documentation build output
+/docs/book/
+
+/benches/comparison/target/

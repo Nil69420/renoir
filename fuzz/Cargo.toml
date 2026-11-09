@@ -1,0 +1,49 @@
+[package]
+name = "renoir-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+renoir = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "sensor_validators"
+path = "fuzz_targets/sensor_validators.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_info"
+path = "fuzz_targets/control_info.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "broadcast_corrupt_ring"
+path = "fuzz_targets/broadcast_corrupt_ring.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lean_corrupt_ring"
+path = "fuzz_targets/lean_corrupt_ring.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_corrupt_ring"
+path = "fuzz_targets/frame_corrupt_ring.rs"
+test = false
+doc = false
+bench = false

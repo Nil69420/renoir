@@ -31,8 +31,25 @@ impl BufferPoolRegistry {
 
     /// Get or create a pool for a specific size class
     pub fn get_pool_for_size(&self, size: usize) -> Result<PoolId> {
-        // Round up to next power of 2 for size class
-        let size_class = size.next_power_of_two();
+        // Round up to next power of 2 for size class.
+        // Reject zero (would divide by zero below) and sizes whose next power
+        // of two would overflow (top bit set, panics in debug, yields 0 in
+        // release).
+        if size == 0 {
+            return Err(crate::error::RenoirError::invalid_parameter(
+                "size",
+                "Payload size must be greater than 0",
+            ));
+        }
+        let size_class = match size.checked_next_power_of_two() {
+            Some(s) => s,
+            None => {
+                return Err(crate::error::RenoirError::invalid_parameter(
+                    "size",
+                    "Payload size too large for a size class",
+                ));
+            }
+        };
 
         {
             let size_classes = self.size_classes.read();
@@ -79,31 +96,6 @@ impl BufferPoolRegistry {
     /// Get the pool manager
     pub fn manager(&self) -> &Arc<SharedBufferPoolManager> {
         &self.manager
-    }
-
-    /// Get all registered size classes
-    pub fn size_classes(&self) -> Vec<(usize, PoolId)> {
-        let size_classes = self.size_classes.read();
-        size_classes
-            .iter()
-            .map(|(&size, &pool_id)| (size, pool_id))
-            .collect()
-    }
-
-    /// Get statistics for all pools
-    pub fn all_pool_stats(&self) -> Vec<(PoolId, String, usize, usize, usize, usize)> {
-        let pools = self.manager.list_pools();
-        pools
-            .into_iter()
-            .filter_map(|(pool_id, name)| {
-                self.manager
-                    .pool_stats(pool_id)
-                    .ok()
-                    .map(|(allocated, returned, active, peak)| {
-                        (pool_id, name, allocated, returned, active, peak)
-                    })
-            })
-            .collect()
     }
 
     /// Remove unused pools (pools with no active buffers)

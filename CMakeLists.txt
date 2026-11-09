@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(renoir VERSION 0.1.0 LANGUAGES C CXX)
+project(renoir VERSION 0.9.0 LANGUAGES C CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -129,18 +129,25 @@ endif()
 
 # Compiler-specific options
 target_compile_options(renoir_cpp PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic>
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Werror -fstack-protector-strong>
     $<$<CXX_COMPILER_ID:MSVC>:/W4>
     $<$<CONFIG:Release>:-O3>
     $<$<CONFIG:Debug>:-g -O0>
 )
+
+# Sanitizer options (address + undefined behavior)
+option(ENABLE_ASAN "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_ASAN AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(renoir_cpp PRIVATE -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer)
+    target_link_options(renoir_cpp PRIVATE -fsanitize=address -fsanitize=undefined)
+endif()
 
 # Add alias for consistent naming
 add_library(renoir::cpp ALIAS renoir_cpp)
 
 # Examples
 if(BUILD_EXAMPLES)
-    add_subdirectory(examples/cmake)
+    add_subdirectory(examples)
 endif()
 
 # Tests
@@ -159,7 +166,7 @@ include(GNUInstallDirs)
 
 # Install headers
 install(
-    FILES include/renoir.h include/renoir.hpp
+    FILES include/renoir.h include/renoir.hpp include/renoir_lean.hpp include/renoir_rpc.hpp include/renoir_discovery.hpp include/renoir_frame.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 

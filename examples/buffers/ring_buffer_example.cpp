@@ -37,7 +37,7 @@ private:
     }
 
     void check_error(RenoirErrorCode error, const std::string& operation) {
-        if (error != Success) {
+        if (error != RenoirErrorCode_Success) {
             std::cerr << "Error in " << operation << ": " << static_cast<int>(error) << std::endl;
             cleanup();
             exit(1);
@@ -145,24 +145,24 @@ private:
             size_t available_space = 0;
 
             RenoirErrorCode error = renoir_ring_buffer_is_empty(ring_buffer, &is_empty);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "Is Empty: " << (is_empty ? "Yes" : "No") << std::endl;
             }
 
             error = renoir_ring_buffer_is_full(ring_buffer, &is_full);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "Is Full: " << (is_full ? "Yes" : "No") << std::endl;
             }
 
             error = renoir_ring_buffer_available_space(ring_buffer, &available_space);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "Available Space: " << available_space << " bytes" << std::endl;
             }
 
             // Get statistics
             RenoirRingStats stats;
             error = renoir_ring_buffer_stats(ring_buffer, &stats);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "Statistics:" << std::endl;
                 std::cout << "  Size: " << stats.size << " bytes" << std::endl;
                 std::cout << "  Writes: " << stats.writes << std::endl;
@@ -179,7 +179,7 @@ private:
         // Final statistics
         RenoirRingStats final_stats;
         RenoirErrorCode error = renoir_ring_buffer_stats(ring_buffer, &final_stats);
-        if (error == Success) {
+        if (error == RenoirErrorCode_Success) {
             std::cout << "\nFinal Ring Buffer Statistics:" << std::endl;
             print_ring_stats(final_stats);
         }
@@ -191,7 +191,7 @@ private:
         // Destroy ring buffer
         if (ring_buffer) {
             RenoirErrorCode error = renoir_ring_buffer_destroy(ring_buffer);
-            if (error == Success) {
+            if (error == RenoirErrorCode_Success) {
                 std::cout << "✓ Ring buffer destroyed" << std::endl;
             }
             ring_buffer = nullptr;

@@ -1,0 +1,9 @@
+homepage: "https://github.com/Nil69420/renoir"
+language: rust
+primary_contact: "OWNER_EMAIL_REQUIRED_BY_OSS_FUZZ"
+main_repo: "https://github.com/Nil69420/renoir"
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address
+  - undefined

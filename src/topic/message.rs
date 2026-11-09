@@ -1,7 +1,7 @@
 //! Message types and payload handling
 
 use super::header::MessageHeader;
-use crate::error::{RenoirError, Result};
+use crate::topic::header::{FORMAT_TYPE_DESCRIPTOR, FORMAT_TYPE_INLINE};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Large message descriptor for shared buffer pool
@@ -16,6 +16,17 @@ pub struct MessageDescriptor {
     pub payload_size: u32,
     /// Reference count for garbage collection
     pub ref_count: AtomicU32,
+}
+
+impl Clone for MessageDescriptor {
+    fn clone(&self) -> Self {
+        Self {
+            pool_id: self.pool_id,
+            buffer_handle: self.buffer_handle,
+            payload_size: self.payload_size,
+            ref_count: AtomicU32::new(self.ref_count.load(Ordering::Relaxed)),
+        }
+    }
 }
 
 impl MessageDescriptor {
@@ -62,7 +73,20 @@ impl Message {
     /// Create a new inline message
     pub fn new_inline(topic_id: u32, sequence: u64, payload: Vec<u8>) -> Self {
         let mut header = MessageHeader::new(topic_id, sequence, payload.len() as u32);
+        header.set_format_type(FORMAT_TYPE_INLINE);
         header.set_checksum(&payload);
+
+        Self {
+            header,
+            payload: MessagePayload::Inline(payload),
+        }
+    }
+
+    /// Create an inline message without computing a payload checksum
+    pub fn new_inline_unchecked(topic_id: u32, sequence: u64, payload: Vec<u8>) -> Self {
+        let mut header = MessageHeader::new(topic_id, sequence, payload.len() as u32);
+        header.set_format_type(FORMAT_TYPE_INLINE);
+        header.set_no_checksum();
 
         Self {
             header,
@@ -74,11 +98,12 @@ impl Message {
     pub fn new_descriptor(topic_id: u32, sequence: u64, descriptor: MessageDescriptor) -> Self {
         // For descriptor messages, the payload_length is the size of the descriptor itself,
         // not the size of the data it references
-        let header = MessageHeader::new(
+        let mut header = MessageHeader::new(
             topic_id,
             sequence,
             std::mem::size_of::<MessageDescriptor>() as u32,
         );
+        header.set_format_type(FORMAT_TYPE_DESCRIPTOR);
 
         Self {
             header,
@@ -93,26 +118,5 @@ impl Message {
                 MessagePayload::Inline(data) => data.len(),
                 MessagePayload::Descriptor(_) => std::mem::size_of::<MessageDescriptor>(),
             }
-    }
-
-    /// Validate the message integrity
-    pub fn validate(&self) -> Result<()> {
-        self.header.validate()?;
-
-        match &self.payload {
-            MessagePayload::Inline(data) => {
-                if !self.header.verify_checksum(data) {
-                    return Err(RenoirError::invalid_parameter(
-                        "checksum",
-                        "Message checksum validation failed",
-                    ));
-                }
-            }
-            MessagePayload::Descriptor(_) => {
-                // Descriptor validation would require access to buffer pool
-            }
-        }
-
-        Ok(())
     }
 }
