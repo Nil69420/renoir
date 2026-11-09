@@ -201,3 +201,39 @@ fn a_ring_initialised_through_mmap_is_found_by_the_fast_rescan() {
     let _ = std::fs::remove_file(dir.join(format!("renoir_{source}")));
     let _ = std::fs::remove_file(target_path);
 }
+
+#[test]
+fn closing_the_owner_leaves_the_ring_listed_until_the_file_is_removed() {
+    if std::env::var(ROLE).is_ok() {
+        return;
+    }
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = dir();
+    let name = format!("watch_drop_{}", std::process::id());
+    let path = dir.join(format!("renoir_{name}"));
+    let mut watcher = DiscoveryWatcher::open_dir(dir, Duration::from_millis(30)).unwrap();
+    let mut channel = LeanChannel::open(&name, 16, 16, false).unwrap();
+    channel.publish(&[1u8; 16]).unwrap();
+    next_event(
+        &mut watcher,
+        Duration::from_secs(3),
+        |e| matches!(e, DiscoveryEvent::Appeared(r) if r.name == name),
+    )
+    .expect("ring never reported as appeared");
+    drop(channel);
+    assert!(
+        path.exists(),
+        "a closed ring stays on disk until it is swept"
+    );
+    assert!(next_event(&mut watcher, Duration::from_millis(300), |e| {
+        matches!(e, DiscoveryEvent::Disappeared { .. })
+    })
+    .is_none());
+    std::fs::remove_file(&path).unwrap();
+    next_event(
+        &mut watcher,
+        Duration::from_secs(3),
+        |e| matches!(e, DiscoveryEvent::Disappeared { name: n } if *n == name),
+    )
+    .expect("removal never reported");
+}
