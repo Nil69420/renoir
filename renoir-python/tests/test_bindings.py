@@ -391,3 +391,30 @@ def test_stamped_lean_channel_round_trip_lag_and_wait_strategies(tmp_path, monke
     assert waiter.wait_phased(50, 200, timeout_ms=5) is False
     with pytest.raises(ValueError):
         waiter.wait_with("hover", timeout_ms=1)
+
+
+def test_discovery_watch_reports_appearance_and_disappearance():
+    watch = renoir.DiscoveryWatch(20)
+    assert watch.fileno() >= 0
+    name = "py_watch_%d" % time.monotonic_ns()
+    channel = renoir.LeanChannel(name, 16, 16, clock="nanoseconds")
+
+    def wait_for(kind):
+        deadline = time.monotonic() + 5
+        seen = []
+        while time.monotonic() < deadline:
+            for event in watch.poll(50):
+                ring = event.get("ring")
+                label = event.get("name") or ring["name"]
+                seen.append((event["event"], label))
+                if event["event"] == kind and label == name:
+                    return event
+        raise AssertionError("no %s event for %s; seen %r" % (kind, name, seen))
+
+    appeared = wait_for("appeared")
+    assert appeared["ring"]["kind"] == "lean" and appeared["ring"]["clock"] == "nanoseconds"
+    assert appeared["ring"]["msg_size"] == 16
+    channel.publish_now(b"x" * 16)
+    del channel
+    renoir.sweep(ignore_unreadable=True)
+    wait_for("disappeared")
