@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use ::renoir::discovery::{scan, sweep as sweep_rings, RingKind, SweepOptions};
-use ::renoir::topic_rings::LeanMode;
+use ::renoir::topic_rings::{LeanClock, LeanMode, STAMP_BYTES};
 
 #[pyfunction]
 pub fn discover(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
@@ -32,7 +32,22 @@ pub fn discover(py: Python<'_>) -> PyResult<Vec<Py<PyDict>>> {
                     LeanMode::MultiProducerGated => "multi_producer_gated",
                 },
             )?;
-            d.set_item("msg_size", l.msg_size)?;
+            d.set_item(
+                "clock",
+                match l.clock {
+                    LeanClock::None => "none",
+                    LeanClock::Nanoseconds => "nanoseconds",
+                    LeanClock::Ticks => "ticks",
+                },
+            )?;
+            d.set_item(
+                "msg_size",
+                if l.clock.is_stamped() {
+                    l.msg_size.saturating_sub(STAMP_BYTES as u64)
+                } else {
+                    l.msg_size
+                },
+            )?;
             d.set_item("slot_count", l.slot_count)?;
             d.set_item("published", l.published)?;
             d.set_item("live_publishers", l.live_publishers)?;

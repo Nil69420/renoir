@@ -288,6 +288,7 @@ def test_discover_lists_rings_and_sweep_keeps_open_ones(tmp_path, monkeypatch):
     ring = rings[name]
     assert ring["kind"] == "lean"
     assert ring["msg_size"] == 24
+    assert ring["clock"] == "none"
     assert ring["slot_count"] == 32
     assert ring["published"] == 1
     assert ring["live_publishers"] >= 1
@@ -333,3 +334,60 @@ def test_frame_lifespan_drops_stale_frames(tmp_path, monkeypatch):
     assert sub.read(max_age_ms=20) == b"new"
     assert sub.stale_dropped() == 1
     assert sub.read(max_age_ms=20) is None
+
+
+def test_stamped_lean_channel_round_trip_lag_and_wait_strategies(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    name = "py_stamped_%d" % time.monotonic_ns()
+    writer = renoir.LeanChannel(name, 16, 16, clock="nanoseconds")
+    reader = renoir.LeanChannel(name, 16, 16, from_oldest=True, clock="nanoseconds")
+    assert writer.clock == "nanoseconds" and writer.msg_size == 16
+    assert reader.try_read_stamped() is None
+    writer.publish_at(1234, b"a" * 16)
+    stamp, data = reader.try_read_stamped()
+    assert stamp == 1234 and data == b"a" * 16
+    before = writer.stamp_now()
+    writer.publish_now(b"b" * 16)
+    stamp, data = reader.try_read_stamped()
+    assert before <= stamp <= writer.stamp_now() and data == b"b" * 16
+
+    for i in range(100):
+        writer.publish_at(i + 1, bytes([i]) * 16)
+    reads = 0
+    while True:
+        item = reader.try_read_stamped()
+        if item is None:
+            break
+        reads += 1
+    assert reads < 100
+
+    ticks = renoir.LeanChannel(name + "_t", 16, 16, clock="ticks")
+    assert ticks.clock == "ticks" and ticks.tick_hz > 1_000_000
+    assert ticks.stamp_to_ns(ticks.tick_hz) == 1_000_000_000
+    with pytest.raises(ValueError):
+        renoir.LeanChannel(name + "_bad", 16, 16, clock="furlongs")
+
+    plain_name = name + "_plain"
+    pw = renoir.LeanChannel(plain_name, 16, 16)
+    pr = renoir.LeanChannel(plain_name, 16, 16, from_oldest=True)
+    for i in range(100):
+        pw.publish(bytes([i]) * 16)
+    total_reads = total_missed = 0
+    while True:
+        message, missed = pr.try_read_lagged()
+        total_missed += missed
+        if message is None:
+            break
+        total_reads += 1
+    assert total_missed > 0 and total_reads + total_missed == 100
+
+    waiter = renoir.LeanChannel(name + "_w", 16, 16, from_oldest=True, clock="nanoseconds")
+    source = renoir.LeanChannel(name + "_w", 16, 16, clock="nanoseconds")
+    for strategy in ("busy_spin", "yielding", "sleeping", "blocking", "phased_backoff"):
+        assert waiter.wait_with(strategy, timeout_ms=5) is False
+        source.publish_now_notify(b"c" * 16)
+        assert waiter.wait_with(strategy, timeout_ms=1000) is True
+        assert waiter.try_read_stamped() is not None
+    assert waiter.wait_phased(50, 200, timeout_ms=5) is False
+    with pytest.raises(ValueError):
+        waiter.wait_with("hover", timeout_ms=1)
