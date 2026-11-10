@@ -1,4 +1,5 @@
 mod client;
+mod reap;
 mod server;
 
 pub use client::RpcClient;

@@ -4,12 +4,13 @@ use super::{monotonic_ms, sent_ms};
 
 use crate::{
     error::{RenoirError, Result},
+    memory::config::region_path,
     topic_rings::{LeanChannel, LeanMode, LeanRead},
 };
 
 use super::{
-    check_ring_fits, check_slots, decode, encode, message_size, request_ring_name,
-    response_ring_name, RESPONSE_SLOTS, RPC_MAX_SERVERS,
+    check_ring_fits, check_slots, decode, encode, message_size, reap::reap_abandoned,
+    request_ring_name, response_ring_name, RESPONSE_SLOTS, RPC_MAX_SERVERS,
 };
 
 const MAX_CACHED_CLIENTS: usize = 64;
@@ -37,6 +38,7 @@ impl RpcServer {
         let msg = message_size(max_payload)?;
         check_ring_fits(msg)?;
         check_slots(request_slots)?;
+        reap_abandoned(service);
         for shard in 0..RPC_MAX_SERVERS {
             let mut requests = LeanChannel::open_with_mode(
                 &request_ring_name(service, shard),
@@ -139,6 +141,11 @@ fn response_channel<'a>(
     msg_size: usize,
 ) -> Result<&'a mut LeanChannel> {
     if !responses.contains_key(&client_id) {
+        if !region_path(&response_ring_name(service, client_id)).exists() {
+            return Err(RenoirError::concurrency(
+                "The client's response ring is gone",
+            ));
+        }
         if responses.len() >= MAX_CACHED_CLIENTS {
             if let Some(oldest) = responses.keys().next().copied() {
                 responses.remove(&oldest);

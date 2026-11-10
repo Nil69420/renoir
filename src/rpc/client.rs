@@ -10,8 +10,9 @@ use crate::{
 };
 
 use super::{
-    check_ring_fits, check_slots, decode, encode, message_size, request_ring_name,
-    response_ring_name, RESPONSE_SLOTS, RPC_HEADER_BYTES, RPC_MAX_SERVERS,
+    check_ring_fits, check_slots, decode, encode, message_size,
+    reap::{reap_abandoned, ResponseLease},
+    request_ring_name, response_ring_name, RESPONSE_SLOTS, RPC_HEADER_BYTES, RPC_MAX_SERVERS,
 };
 
 const SPIN_ITERATIONS: u32 = 2000;
@@ -27,6 +28,7 @@ pub struct RpcClient {
     shards: Vec<(usize, LeanChannel)>,
     current: usize,
     responses: LeanChannel,
+    _lease: ResponseLease,
     request_buf: Vec<u8>,
     scratch: Vec<u8>,
     stamp: bool,
@@ -52,12 +54,10 @@ impl RpcClient {
         check_slots(request_slots)?;
         let client_id = new_client_id();
         let first = open_shard(service, 0, msg, request_slots)?;
-        let responses = LeanChannel::open(
-            &response_ring_name(service, client_id),
-            msg,
-            RESPONSE_SLOTS,
-            false,
-        )?;
+        reap_abandoned(service);
+        let response_name = response_ring_name(service, client_id);
+        let responses = LeanChannel::open(&response_name, msg, RESPONSE_SLOTS, false)?;
+        let lease = ResponseLease::acquire(&response_name)?;
         let mut client = Self {
             service: service.to_owned(),
             msg_size: msg,
@@ -68,6 +68,7 @@ impl RpcClient {
             shards: vec![(0, first)],
             current: 0,
             responses,
+            _lease: lease,
             request_buf: vec![0u8; msg],
             scratch: vec![0u8; msg],
             stamp: false,
