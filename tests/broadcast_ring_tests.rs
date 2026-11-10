@@ -522,6 +522,7 @@ fn test_broadcast_concurrent_no_torn_reads() {
                 }
                 let mut received = 0u64;
                 let mut last = 0u64;
+                let mut finishing = false;
                 loop {
                     match ring.try_consume(&mut cursor).unwrap() {
                         Some(m) => {
@@ -534,10 +535,11 @@ fn test_broadcast_concurrent_no_torn_reads() {
                             received += 1;
                         }
                         None => {
+                            if finishing {
+                                break;
+                            }
                             if done.load(Ordering::Acquire) {
-                                if ring.try_consume(&mut cursor).unwrap().is_none() {
-                                    break;
-                                }
+                                finishing = true;
                             } else {
                                 std::hint::spin_loop();
                             }
