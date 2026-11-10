@@ -36,6 +36,7 @@ pub enum RenoirErrorCode {
     AlignmentError = 11,
     VersionMismatch = 12,
     PlatformError = 13,
+    UnresolvedPayload = 14,
     UnknownError = 99,
 }
 

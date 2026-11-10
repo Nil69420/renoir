@@ -16,6 +16,8 @@ pub struct MessageDescriptor {
     pub payload_size: u32,
     /// Reference count for garbage collection
     pub ref_count: AtomicU32,
+    /// Identity of the pool manager instance that owns the buffer; zero when unset
+    pub owner_id: u64,
 }
 
 impl Clone for MessageDescriptor {
@@ -25,6 +27,7 @@ impl Clone for MessageDescriptor {
             buffer_handle: self.buffer_handle,
             payload_size: self.payload_size,
             ref_count: AtomicU32::new(self.ref_count.load(Ordering::Relaxed)),
+            owner_id: self.owner_id,
         }
     }
 }
@@ -37,7 +40,14 @@ impl MessageDescriptor {
             buffer_handle,
             payload_size,
             ref_count: AtomicU32::new(1),
+            owner_id: 0,
         }
+    }
+
+    /// Stamp the descriptor with the pool manager instance that owns the buffer
+    pub fn with_owner(mut self, owner_id: u64) -> Self {
+        self.owner_id = owner_id;
+        self
     }
 
     /// Increment reference count

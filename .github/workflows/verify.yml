@@ -138,9 +138,9 @@ jobs:
     - uses: dtolnay/rust-toolchain@stable
     - name: Lean ring, wait, chaos and cross-process tests, repeated
       run: |
-        cargo test --release --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --no-run
+        cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths --no-run
         for i in $(seq 1 50); do
-          cargo test --release --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths
+          cargo test --profile testing --test lean_ring_tests --test lean_wait_tests --test lean_multi_tests --test lean_gate_tests --test lean_batch_tests --test lean_qos_tests --test rpc_tests --test broadcast_view_tests --test lean_chaos_tests --test lean_chaos_multi_tests --test lean_chaos_gate_tests --test lean_cross_process_tests --test ring_init_race_tests --test zero_alloc_paths
         done
     - name: Latency
       run: cargo bench --bench latency_pingpong -- 0 1

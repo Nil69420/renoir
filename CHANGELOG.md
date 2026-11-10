@@ -7,6 +7,12 @@ and this project adheres to the versioning policy in `SEMVER.md`.
 
 ## [Unreleased]
 
+### Fixed
+- A message sent through the shared buffer pool (`use_shared_pool`) was only resolvable inside the process that published it, because the pool lives in an anonymous in-process mapping. A reader in another process got an empty message reported as success, or, if its own pool happened to hand out the same pool and buffer numbers, a buffer belonging to a different message. Descriptors now carry the identity of the pool manager that issued them; a manager refuses descriptors it did not issue, and the C API returns the new `RenoirErrorCode_UnresolvedPayload` (14) instead of an empty message. Payloads that must cross processes belong on a frame ring (`renoir_frame_*`) or an inline topic.
+
+### Changed
+- `MessageDescriptor` gained an `owner_id` field (its size grows from 16 to 24 bytes); the descriptor path is in-process only, so no cross-process data layout changes.
+
 ## [0.9.0] - 2026-11-08
 
 ### Fixed

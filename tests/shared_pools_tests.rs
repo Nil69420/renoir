@@ -106,3 +106,46 @@ mod tests {
         assert!(registry.get_pool_for_size(0).is_err());
     }
 }
+
+#[cfg(test)]
+mod foreign_descriptors {
+    use renoir::{
+        memory::{BackingType, RegionConfig, SharedMemoryManager},
+        shared_pools::SharedBufferPoolManager,
+    };
+
+    fn manager_with_pool(name: &str) -> (SharedBufferPoolManager, u32) {
+        let region = SharedMemoryManager::new()
+            .create_region(RegionConfig {
+                name: name.to_string(),
+                size: 1024 * 1024,
+                backing_type: BackingType::MemFd,
+                file_path: None,
+                create: true,
+                permissions: 0o600,
+            })
+            .unwrap();
+        let manager = SharedBufferPoolManager::new();
+        let pool = manager
+            .create_pool("p".to_string(), 1024, 16, region)
+            .unwrap();
+        (manager, pool)
+    }
+
+    #[test]
+    fn descriptor_from_another_manager_is_rejected_even_when_ids_collide() {
+        let (a, pool_a) = manager_with_pool("foreign_a");
+        let (b, pool_b) = manager_with_pool("foreign_b");
+        let from_a = a.get_buffer(pool_a).unwrap();
+        let from_b = b.get_buffer(pool_b).unwrap();
+
+        assert_eq!(from_a.pool_id, from_b.pool_id);
+        assert_eq!(from_a.buffer_handle, from_b.buffer_handle);
+        assert_ne!(from_a.owner_id, from_b.owner_id);
+
+        assert!(b.get_buffer_data(&from_a).is_err());
+        assert!(b.return_buffer(&from_a).is_err());
+        assert!(a.get_buffer_data(&from_a).is_ok());
+        assert!(b.get_buffer_data(&from_b).is_ok());
+    }
+}

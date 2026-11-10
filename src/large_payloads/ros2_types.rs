@@ -526,7 +526,8 @@ impl ROS2MessageManager {
                 blob.pool_id,
                 blob.buffer_handle,
                 blob.header.payload_size as u32,
-            );
+            )
+            .with_owner(self.pool_manager.owner_id());
             let buffer = self.pool_manager.get_buffer_data(&main_desc)?;
             let bytes = buffer.as_slice();
             if bytes.len() < BlobHeader::SIZE {
@@ -562,7 +563,8 @@ impl ROS2MessageManager {
             blob.pool_id,
             blob.buffer_handle,
             blob.header.payload_size as u32,
-        );
+        )
+        .with_owner(self.pool_manager.owner_id());
         self.pool_manager.return_buffer(&main_desc)
     }
 }
