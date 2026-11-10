@@ -20,7 +20,9 @@ pub(super) struct ProducerEntry {
     pub(super) start: AtomicU64,
     lo: AtomicU64,
     hi: AtomicU64,
-    pad: [u8; 24],
+    pub(super) last_assert: AtomicU64,
+    pub(super) strength: AtomicU64,
+    pad: [u8; 8],
 }
 
 const _: () = assert!(std::mem::size_of::<ProducerEntry>() == 64);
@@ -153,6 +155,10 @@ impl LeanRing {
                 }
                 entry.hi.store(0, Ordering::Relaxed);
                 entry.lo.store(0, Ordering::Relaxed);
+                entry
+                    .last_assert
+                    .store(super::monotonic_ns(), Ordering::Relaxed);
+                entry.strength.store(0, Ordering::Relaxed);
                 entry.pid.store(pid, Ordering::Relaxed);
                 entry.start.store(start, Ordering::Relaxed);
                 entry.owner.store((token << 2) | ACTIVE, Ordering::Release);

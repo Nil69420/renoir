@@ -63,6 +63,39 @@ Borrows), ThreadSanitizer, AddressSanitizer, a corrupt-memory fuzz target, a cou
 allocator test that proves zero allocation per publish and read, and an aarch64 run
 under QEMU. See `.github/workflows/verify.yml`.
 
+## Publish timestamps
+
+A sensor message is only useful for estimation if the consumer knows when it was produced, so a lean ring can carry an 8-byte publish stamp inside each slot, written and read under the same sequence check as the payload. Open the ring with `RENOIR_LEAN_STAMP_NS` (nanoseconds on `CLOCK_MONOTONIC`) or `RENOIR_LEAN_STAMP_TICKS` (the raw cycle counter: `rdtsc` on x86-64, `cntvct_el0` on AArch64). `msg_size` stays the size of your data; the ring adds the stamp, so a one-line slot carries 48 data bytes instead of 56 and the largest stamped message is 496 bytes. Use `renoir_lean_memory_required_flags` to size caller-provided memory.
+
+```c
+renoir_lean_open("imu", sizeof(struct imu), 1024, RENOIR_LEAN_STAMP_TICKS, &pub);
+renoir_lean_publish_now(pub, (const uint8_t *)&sample, sizeof sample);   /* stamp from the ring clock */
+renoir_lean_publish_at(pub, hardware_timestamp, (const uint8_t *)&sample, sizeof sample);
+
+uint64_t stamp;
+if (renoir_lean_try_read_stamped(sub, (uint8_t *)&out, sizeof out, &stamp) == RenoirErrorCode_Success) {
+    uint64_t ns = renoir_lean_stamp_to_ns(sub, stamp);
+}
+```
+
+`publish_at_notify` and `publish_now_notify` do the same and also wake consumers blocked in the Blocking or PhasedBackoff waits (plain `publish_at` and `publish_now` do not, so a blocked consumer would sleep until its timeout). `publish_at` takes a stamp you already have, such as the sensor's own hardware time, and costs no clock read at all. Use it when the driver supplies the time of measurement, which is more accurate than the time of publication. The two clock choices differ in cost, not in meaning:
+
+| Publish (48 B, one core, i7-11800H) | Cost over an unstamped publish |
+|---|---|
+| `publish_at`, caller-supplied stamp | about 2 ns |
+| `publish_now`, tick clock | about 4 ns |
+| `publish_now`, nanosecond clock | about 14 ns (a `clock_gettime` call through the vDSO) |
+
+Tick stamps are comparable between processes on one machine because the counter is invariant and shared. Convert them with the ring's tick rate (`renoir_lean_tick_hz`), which is read from CPUID leaf 0x15 or calibrated against `CLOCK_MONOTONIC` when the CPU does not report it; if the CPU has no invariant counter, opening a tick ring fails and you should use the nanosecond clock. On AArch64 the rate is `cntfrq_el0`, typically a coarse clock (31.25 MHz on some Jetson parts is 32 ns per tick); the project has not measured Jetson. The ring remembers its clock in the header, so a process opening it with a different clock mode is rejected. The unstamped `publish` and `try_read` are not meant for a stamped ring: they work on the wire format, so a buffer of your data size plus eight bytes is accepted and its first eight bytes are the stamp, and any other size returns an error. Use the stamped calls.
+
+Stamped reads on plain rings take a direct path; gated and multi-producer rings go through a stack buffer and a copy. No path allocates (`tests/zero_alloc_paths.rs`).
+
+## Reporting what was missed
+
+A lossy ring overwrites the oldest message when a reader falls behind. `renoir_lean_lost` gives the running total; `renoir_lean_try_read_lagged` and `renoir_lean_try_read_stamped_lagged` (Rust: `try_read_lagged`, `try_read_stamped_lagged`) return the number of messages missed by that call as well, so a consumer can react at the moment the gap appears (for example, reset a filter when a sample is missing instead of integrating across the hole). Messages read plus messages missed always equals messages published since the reader started.
+
+To always work on the newest value, call `renoir_lean_skip_to_latest(handle, 1)` and then read: the skipped messages are counted as lost, and the read returns the latest one.
+
 ## Blocking consumers
 
 `publish` never issues a fence or a syscall beyond the seqlock stores, so a spinning consumer sees data in about the cache-line transfer time. A consumer that cannot afford to spin can block instead:
@@ -106,6 +139,22 @@ Savings measured on x86 for eight 32-byte messages: 28.6 ns as one batch against
 ## Adaptive waiting
 
 `wait_adaptive` (`renoir_lean_wait_adaptive`, `waitAdaptive`, `wait_adaptive`) tunes the spin budget itself. It starts at 1000 iterations, doubles the budget (up to 100,000) each time data arrives while still spinning, and halves it (down to 32) each time it has to fall through to the futex. Frequent messages therefore keep consumers on the polling path with no syscall, and sparse streams stop burning CPU. Use `wait` with an explicit spin count when you need a fixed budget.
+
+
+## Wait strategies
+
+A consumer that has nothing to read has to wait somehow, and the right choice trades latency against CPU. `renoir_lean_wait_strategy(handle, strategy, timeout_ns)` (Rust: `LeanChannel::wait_with`) offers the set the LMAX Disruptor uses; every one takes a timeout (`UINT64_MAX` for none), which also gives the Disruptor's timeout variants.
+
+| Strategy | Behaviour | Latency, CPU | Publisher must call |
+|---|---|---|---|
+| `RENOIR_LEAN_WAIT_BUSY_SPIN` | poll with a pause instruction | lowest latency, one core at 100% | `publish` |
+| `RENOIR_LEAN_WAIT_YIELDING` | poll and `sched_yield` between polls | low latency, core shared with other runnable threads | `publish` |
+| `RENOIR_LEAN_WAIT_SLEEPING` | poll, then sleep 50 us per step | latency up to about 50 us plus the scheduler's timer slack, almost no CPU | `publish` |
+| `RENOIR_LEAN_WAIT_BLOCKING` | futex wait, no polling | a wake-up through the kernel (microseconds), no CPU while idle | `publish_notify`, or `publish_at_notify` / `publish_now_notify` on a stamped ring |
+| `RENOIR_LEAN_WAIT_PHASED_BACKOFF` | spin for 50 us, yield for 1 ms, then block | spin latency for dense streams, no CPU for sparse ones | `publish_notify` |
+| `renoir_lean_wait_phased(handle, spin_ns, yield_ns, timeout_ns)` | the same with your own phase lengths | | `publish_notify` |
+
+`renoir_lean_wait_adaptive` (below) is a seventh option that tunes its own spin budget. The blocking phases only wake if the publisher uses `publish_notify`, which skips the wake-up system call when no consumer is blocked (the Disruptor's "lite" blocking optimisation); the polling strategies need no notification. These strategies are tested for correct timeout and wake-up, not benchmarked for latency here, so measure on your own hardware, particularly the sleeping and yielding ones, whose behaviour depends on the kernel's scheduler.
 
 ## Crash recovery
 

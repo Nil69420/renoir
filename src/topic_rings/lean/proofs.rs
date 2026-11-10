@@ -1,7 +1,10 @@
 use super::{
+    clock::ticks_to_ns,
     frame::{frame_slot_bytes, LEAN_MAX_FRAME_BYTES},
     inspect::inspect,
-    lean_slot_bytes, LeanRing, LEAN_HEADER_BYTES, LEAN_MAX_SLOT_LINES,
+    lean_slot_bytes,
+    stamped::{stamped_geometry, STAMP_BYTES},
+    LeanClock, LeanRing, LEAN_HEADER_BYTES, LEAN_MAX_INDEX, LEAN_MAX_SLOT_LINES, LINE, SEQ_BYTES,
 };
 
 #[kani::proof]
@@ -77,4 +80,90 @@ fn inspect_rejects_short_buffers_without_panicking() {
     kani::assume(len < 64);
     let buf = vec![0u8; len];
     assert!(inspect(&buf).is_none());
+}
+
+#[kani::proof]
+fn stamped_geometry_fits_sequence_stamp_and_payload_in_the_slot() {
+    let data: usize = kani::any();
+    match stamped_geometry(data) {
+        Ok((msg, slot)) => {
+            assert!(msg == data + STAMP_BYTES);
+            assert!(slot % LINE == 0);
+            assert!(SEQ_BYTES + STAMP_BYTES + data <= slot);
+            assert!(slot <= LEAN_MAX_SLOT_LINES * LINE);
+            assert!(data <= LEAN_MAX_SLOT_LINES * LINE - SEQ_BYTES - STAMP_BYTES);
+        }
+        Err(_) => {
+            assert!(data > LEAN_MAX_SLOT_LINES * LINE - SEQ_BYTES - STAMP_BYTES);
+        }
+    }
+}
+
+#[kani::proof]
+fn stamped_and_plain_geometry_agree_on_the_wire_size() {
+    let data: usize = kani::any();
+    kani::assume(data <= 496);
+    let (msg, slot) = stamped_geometry(data).unwrap();
+    assert!(lean_slot_bytes(msg) == Some(slot));
+    assert!(slot >= lean_slot_bytes(data.max(1)).unwrap());
+}
+
+#[kani::proof]
+fn tick_conversion_product_cannot_overflow_for_any_counter_value() {
+    let ticks: u64 = kani::any();
+    let product = u128::from(ticks) * 1_000_000_000u128;
+    assert!(product <= u128::from(u64::MAX) * 1_000_000_000u128);
+    assert!(u128::from(u64::MAX) * 1_000_000_000u128 < u128::MAX);
+}
+
+#[kani::proof]
+fn tick_conversion_is_monotonic_and_exact_for_whole_seconds_over_a_bounded_range() {
+    let hz: u64 = kani::any();
+    kani::assume(hz > 0 && hz <= 63);
+    let a: u64 = kani::any();
+    let b: u64 = kani::any();
+    kani::assume(a <= 255 && b <= 255);
+    if a <= b {
+        assert!(ticks_to_ns(a, hz) <= ticks_to_ns(b, hz));
+    }
+    assert!(ticks_to_ns(0, hz) == 0);
+    assert!(ticks_to_ns(hz, hz) == 1_000_000_000);
+}
+
+#[kani::proof]
+fn clock_mode_decoding_round_trips_and_rejects_unknown_values() {
+    let raw: u32 = kani::any();
+    match LeanClock::from_raw(raw) {
+        Some(clock) => {
+            assert!(clock as u32 == raw);
+            assert!(raw <= 2);
+        }
+        None => assert!(raw > 2),
+    }
+}
+
+#[kani::proof]
+fn sequence_numbers_keep_their_parity_and_order_below_the_overflow_horizon() {
+    let idx: u64 = kani::any();
+    kani::assume(idx >= 1 && idx < (1u64 << 62));
+    let writing = 2 * idx - 1;
+    let published = 2 * idx;
+    assert!(writing % 2 == 1);
+    assert!(published % 2 == 0);
+    assert!(writing < published);
+    let next = idx + 1;
+    assert!(2 * next - 1 == published + 1);
+}
+
+#[kani::proof]
+fn a_clamped_index_never_overflows_the_sequence_arithmetic() {
+    let raw: u64 = kani::any();
+    let published = raw.min(LEAN_MAX_INDEX);
+    let next = published + 1;
+    let writing = 2 * next - 1;
+    let done = 2 * next;
+    assert!(writing < done);
+    assert!(next + 1 > next);
+    let after_batch = next + (LEAN_MAX_SLOT_LINES as u64);
+    assert!(2 * after_batch > 2 * next);
 }

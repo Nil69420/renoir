@@ -26,7 +26,7 @@ The timeout elapsed with no response: the server is not running, is busy, or use
 The library has the SONAME `librenoir.so.0`. Install it with its symlinks (the Debian package and the Jetson tarball do) or set `LD_LIBRARY_PATH` to the directory that contains `librenoir.so.0`.
 
 ## No `/dev/shm` space
-Rings live in RAM. Check `df -h /dev/shm`; set `RENOIR_SHM_DIR` to another tmpfs if needed.
+Rings live in RAM. Check `df -h /dev/shm`; set `RENOIR_SHM_DIR` to another tmpfs if needed. The variable is read once, the first time a ring is opened, and then fixed for the life of the process: changing `os.environ` or calling `setenv` afterwards has no effect, so set it before the process starts (or before its first ring is opened).
 
 ## Opening a ring fails with "Not enough space ... shared-memory filesystem"
 Rings reserve their whole size when they are created, so a full or small `/dev/shm` is reported at open. In Docker the default is 64 MB: start the container with `--shm-size=1g` (or whatever your rings need, see `docs/src/sizing.md`), or point `RENOIR_SHM_DIR` at a larger tmpfs. Rings are never sparse, so the memory is committed from the moment of creation.

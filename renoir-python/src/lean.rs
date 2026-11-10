@@ -1,5 +1,8 @@
-use ::renoir::topic_rings::{LeanChannel, LeanMode, LeanRead};
+use ::renoir::topic_rings::{
+    LeanChannel, LeanClock, LeanMode, LeanQos, LeanRead, LeanWaitStrategy,
+};
 use pyo3::{prelude::*, types::PyBytes};
+use std::time::Duration;
 
 use crate::map_err;
 
@@ -11,7 +14,8 @@ pub struct PyLeanChannel {
 #[pymethods]
 impl PyLeanChannel {
     #[new]
-    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false, multi_producer=false, gated=false, consumer=false))]
+    #[pyo3(signature = (name, msg_size, slot_count, from_oldest=false, multi_producer=false, gated=false, consumer=false, clock=None))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         name: &str,
         msg_size: usize,
@@ -20,14 +24,137 @@ impl PyLeanChannel {
         multi_producer: bool,
         gated: bool,
         consumer: bool,
+        clock: Option<&str>,
     ) -> PyResult<Self> {
         let mode = LeanMode::new(multi_producer, gated);
-        let mut inner = LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
-            .map_err(map_err)?;
+        let clock = match clock {
+            None | Some("none") => LeanClock::None,
+            Some("nanoseconds") | Some("ns") => LeanClock::Nanoseconds,
+            Some("ticks") => LeanClock::Ticks,
+            Some(other) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "clock must be None, 'nanoseconds' or 'ticks', not '{other}'"
+                )))
+            }
+        };
+        let mut inner = if clock.is_stamped() {
+            LeanChannel::open_stamped(name, msg_size, slot_count, from_oldest, mode, clock)
+        } else {
+            LeanChannel::open_with_mode(name, msg_size, slot_count, from_oldest, mode)
+        }
+        .map_err(map_err)?;
         if consumer {
             inner.register_consumer(from_oldest).map_err(map_err)?;
         }
         Ok(Self { inner })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (name, msg_size, depth=64, reliable=false, keep_all=false, transient_local=false,
+        deadline_ms=None, lifespan_ms=None, min_separation_ms=None, lease_ms=None,
+        exclusive_strength=None, clock=None, subscriber=false, multi_producer=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn with_qos(
+        name: &str,
+        msg_size: usize,
+        depth: usize,
+        reliable: bool,
+        keep_all: bool,
+        transient_local: bool,
+        deadline_ms: Option<u64>,
+        lifespan_ms: Option<u64>,
+        min_separation_ms: Option<u64>,
+        lease_ms: Option<u64>,
+        exclusive_strength: Option<u64>,
+        clock: Option<&str>,
+        subscriber: bool,
+        multi_producer: bool,
+    ) -> PyResult<Self> {
+        let mut qos = if reliable {
+            LeanQos::reliable(depth)
+        } else {
+            LeanQos::best_effort(depth)
+        };
+        if keep_all {
+            qos = qos.keep_all();
+        }
+        if transient_local {
+            qos = qos.transient_local();
+        }
+        let clock = match clock {
+            None | Some("none") => LeanClock::None,
+            Some("nanoseconds") | Some("ns") => LeanClock::Nanoseconds,
+            Some("ticks") => LeanClock::Ticks,
+            Some(other) => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "clock must be None, 'nanoseconds' or 'ticks', not '{other}'"
+                )))
+            }
+        };
+        qos = qos.with_clock(clock);
+        if let Some(v) = deadline_ms {
+            qos = qos.with_deadline(Duration::from_millis(v));
+        }
+        if let Some(v) = lifespan_ms {
+            qos = qos.with_lifespan(Duration::from_millis(v));
+        }
+        if let Some(v) = min_separation_ms {
+            qos = qos.with_min_separation(Duration::from_millis(v));
+        }
+        if let Some(v) = lease_ms {
+            qos = qos.with_manual_liveliness(Duration::from_millis(v));
+        }
+        if let Some(v) = exclusive_strength {
+            qos = qos.exclusive(v);
+        }
+        let inner = LeanChannel::open_qos(name, msg_size, qos, multi_producer, subscriber)
+            .map_err(map_err)?;
+        Ok(Self { inner })
+    }
+
+    fn register_publisher(&mut self) -> PyResult<()> {
+        self.inner.register_publisher().map_err(map_err)
+    }
+
+    fn assert_liveliness(&mut self) -> PyResult<()> {
+        self.inner.assert_liveliness().map_err(map_err)
+    }
+
+    fn liveliness<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let status = self.inner.liveliness();
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("registered", status.registered)?;
+        d.set_item("alive", status.alive)?;
+        d.set_item("lost", status.lost)?;
+        d.set_item("lost_count", status.lost_count)?;
+        Ok(d)
+    }
+
+    fn is_owner(&mut self) -> bool {
+        self.inner.is_owner()
+    }
+
+    fn try_read_stamped_qos<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Option<(u64, Bound<'py, PyBytes>)>> {
+        let mut buffer = vec![0u8; self.inner.ring().data_size()];
+        match self
+            .inner
+            .try_read_stamped_qos(&mut buffer)
+            .map_err(map_err)?
+        {
+            Some(stamp) => Ok(Some((stamp, PyBytes::new(py, &buffer)))),
+            None => Ok(None),
+        }
+    }
+
+    fn stale_dropped(&self) -> u64 {
+        self.inner.stale_dropped()
+    }
+
+    fn filtered_out(&self) -> u64 {
+        self.inner.filtered_out()
     }
 
     fn publish(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
@@ -141,7 +268,109 @@ impl PyLeanChannel {
 
     #[getter]
     fn msg_size(&self) -> usize {
-        self.inner.msg_size()
+        self.inner.ring().data_size()
+    }
+
+    #[getter]
+    fn clock(&self) -> &'static str {
+        match self.inner.ring().clock() {
+            LeanClock::None => "none",
+            LeanClock::Nanoseconds => "nanoseconds",
+            LeanClock::Ticks => "ticks",
+        }
+    }
+
+    #[getter]
+    fn tick_hz(&self) -> u64 {
+        self.inner.ring().tick_hz()
+    }
+
+    fn stamp_now(&self) -> u64 {
+        self.inner.ring().stamp_now()
+    }
+
+    fn stamp_to_ns(&self, stamp: u64) -> u64 {
+        self.inner.ring().ticks_to_ns(stamp)
+    }
+
+    fn publish_at(&mut self, stamp: u64, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner
+            .publish_at(stamp, payload.as_bytes())
+            .map_err(map_err)
+    }
+
+    fn publish_now(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner.publish_now(payload.as_bytes()).map_err(map_err)
+    }
+
+    fn publish_at_notify(&mut self, stamp: u64, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner
+            .publish_at_notify(stamp, payload.as_bytes())
+            .map_err(map_err)
+    }
+
+    fn publish_now_notify(&mut self, payload: &Bound<'_, PyBytes>) -> PyResult<()> {
+        self.inner
+            .publish_now_notify(payload.as_bytes())
+            .map_err(map_err)
+    }
+
+    fn try_read_stamped<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<Option<(u64, Bound<'py, PyBytes>)>> {
+        let size = self.inner.ring().data_size();
+        let mut buffer = vec![0u8; size];
+        match self.inner.try_read_stamped(&mut buffer).map_err(map_err)? {
+            Some(stamp) => Ok(Some((stamp, PyBytes::new(py, &buffer)))),
+            None => Ok(None),
+        }
+    }
+
+    fn try_read_lagged<'py>(
+        &mut self,
+        py: Python<'py>,
+    ) -> PyResult<(Option<Bound<'py, PyBytes>>, u64)> {
+        let mut buffer = vec![0u8; self.inner.msg_size()];
+        let (read, missed) = self.inner.try_read_lagged(&mut buffer).map_err(map_err)?;
+        let message = matches!(read, LeanRead::Message).then(|| PyBytes::new(py, &buffer));
+        Ok((message, missed))
+    }
+
+    #[pyo3(signature = (strategy, timeout_ms=None))]
+    fn wait_with(&self, py: Python<'_>, strategy: &str, timeout_ms: Option<u64>) -> PyResult<bool> {
+        let strategy = match strategy {
+            "busy_spin" => LeanWaitStrategy::BusySpin,
+            "yielding" => LeanWaitStrategy::Yielding,
+            "sleeping" => LeanWaitStrategy::Sleeping,
+            "blocking" => LeanWaitStrategy::Blocking,
+            "phased_backoff" => LeanWaitStrategy::PhasedBackoff,
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unknown wait strategy '{other}'"
+                )))
+            }
+        };
+        let timeout = timeout_ms.map(Duration::from_millis);
+        Ok(py.detach(|| self.inner.wait_with(strategy, timeout)))
+    }
+
+    #[pyo3(signature = (spin_us, yield_us, timeout_ms=None))]
+    fn wait_phased(
+        &self,
+        py: Python<'_>,
+        spin_us: u64,
+        yield_us: u64,
+        timeout_ms: Option<u64>,
+    ) -> bool {
+        let timeout = timeout_ms.map(Duration::from_millis);
+        py.detach(|| {
+            self.inner.wait_phased(
+                Duration::from_micros(spin_us),
+                Duration::from_micros(yield_us),
+                timeout,
+            )
+        })
     }
 }
 

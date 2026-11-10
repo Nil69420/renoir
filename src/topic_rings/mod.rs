@@ -18,10 +18,12 @@ pub use broadcast::{
     ReadInto, ViewRead, BROADCAST_HEADER_PROBE_BYTES, BROADCAST_RING_MAGIC,
 };
 pub use lean::{
-    frame_slot_bytes, inspect_lean_header, lean_slot_bytes, DeadlineWait, FrameChannel, FrameLoan,
-    FrameView, LeanChannel, LeanCursor, LeanGatedCursor, LeanInfo, LeanMode, LeanPublisher,
-    LeanQos, LeanRead, LeanReliability, LeanRing, LEAN_HEADER_BYTES, LEAN_MAX_CONSUMERS,
-    LEAN_MAX_FRAME_BYTES, LEAN_MAX_SLOT_LINES, LEAN_RING_MAGIC,
+    frame_slot_bytes, inspect_lean_header, lean_slot_bytes, monotonic_ns, tick_hz, DeadlineWait,
+    FrameChannel, FrameLoan, FrameView, LeanChannel, LeanClock, LeanCursor, LeanDurability,
+    LeanGatedCursor, LeanHistory, LeanInfo, LeanLiveliness, LeanLivelinessKind, LeanMode,
+    LeanOwnership, LeanPublisher, LeanQos, LeanRead, LeanReliability, LeanRing, LeanWaitStrategy,
+    LivelinessStatus, LEAN_HEADER_BYTES, LEAN_MAX_CONSUMERS, LEAN_MAX_FRAME_BYTES,
+    LEAN_MAX_SLOT_LINES, LEAN_RING_MAGIC, STAMP_BYTES,
 };
 pub use mpmc::{MPMCTopicRing, MPMC_RING_MAGIC};
 pub use spsc::{

@@ -288,6 +288,7 @@ def test_discover_lists_rings_and_sweep_keeps_open_ones(tmp_path, monkeypatch):
     ring = rings[name]
     assert ring["kind"] == "lean"
     assert ring["msg_size"] == 24
+    assert ring["clock"] == "none"
     assert ring["slot_count"] == 32
     assert ring["published"] == 1
     assert ring["live_publishers"] >= 1
@@ -333,3 +334,134 @@ def test_frame_lifespan_drops_stale_frames(tmp_path, monkeypatch):
     assert sub.read(max_age_ms=20) == b"new"
     assert sub.stale_dropped() == 1
     assert sub.read(max_age_ms=20) is None
+
+
+def test_stamped_lean_channel_round_trip_lag_and_wait_strategies(tmp_path, monkeypatch):
+    monkeypatch.setenv("RENOIR_SHM_DIR", str(tmp_path))
+    name = "py_stamped_%d" % time.monotonic_ns()
+    writer = renoir.LeanChannel(name, 16, 16, clock="nanoseconds")
+    reader = renoir.LeanChannel(name, 16, 16, from_oldest=True, clock="nanoseconds")
+    assert writer.clock == "nanoseconds" and writer.msg_size == 16
+    assert reader.try_read_stamped() is None
+    writer.publish_at(1234, b"a" * 16)
+    stamp, data = reader.try_read_stamped()
+    assert stamp == 1234 and data == b"a" * 16
+    before = writer.stamp_now()
+    writer.publish_now(b"b" * 16)
+    stamp, data = reader.try_read_stamped()
+    assert before <= stamp <= writer.stamp_now() and data == b"b" * 16
+
+    for i in range(100):
+        writer.publish_at(i + 1, bytes([i]) * 16)
+    reads = 0
+    while True:
+        item = reader.try_read_stamped()
+        if item is None:
+            break
+        reads += 1
+    assert reads < 100
+
+    ticks = renoir.LeanChannel(name + "_t", 16, 16, clock="ticks")
+    assert ticks.clock == "ticks" and ticks.tick_hz > 1_000_000
+    assert ticks.stamp_to_ns(ticks.tick_hz) == 1_000_000_000
+    with pytest.raises(ValueError):
+        renoir.LeanChannel(name + "_bad", 16, 16, clock="furlongs")
+
+    plain_name = name + "_plain"
+    pw = renoir.LeanChannel(plain_name, 16, 16)
+    pr = renoir.LeanChannel(plain_name, 16, 16, from_oldest=True)
+    for i in range(100):
+        pw.publish(bytes([i]) * 16)
+    total_reads = total_missed = 0
+    while True:
+        message, missed = pr.try_read_lagged()
+        total_missed += missed
+        if message is None:
+            break
+        total_reads += 1
+    assert total_missed > 0 and total_reads + total_missed == 100
+
+    waiter = renoir.LeanChannel(name + "_w", 16, 16, from_oldest=True, clock="nanoseconds")
+    source = renoir.LeanChannel(name + "_w", 16, 16, clock="nanoseconds")
+    for strategy in ("busy_spin", "yielding", "sleeping", "blocking", "phased_backoff"):
+        assert waiter.wait_with(strategy, timeout_ms=5) is False
+        source.publish_now_notify(b"c" * 16)
+        assert waiter.wait_with(strategy, timeout_ms=1000) is True
+        assert waiter.try_read_stamped() is not None
+    assert waiter.wait_phased(50, 200, timeout_ms=5) is False
+    with pytest.raises(ValueError):
+        waiter.wait_with("hover", timeout_ms=1)
+
+
+def test_discovery_watch_reports_appearance_and_disappearance():
+    watch = renoir.DiscoveryWatch(20)
+    assert watch.fileno() >= 0
+    name = "py_watch_%d" % time.monotonic_ns()
+    channel = renoir.LeanChannel(name, 16, 16, clock="nanoseconds")
+
+    def wait_for(kind):
+        deadline = time.monotonic() + 5
+        seen = []
+        while time.monotonic() < deadline:
+            for event in watch.poll(50):
+                ring = event.get("ring")
+                label = event.get("name") or ring["name"]
+                seen.append((event["event"], label))
+                if event["event"] == kind and label == name:
+                    return event
+        raise AssertionError("no %s event for %s; seen %r" % (kind, name, seen))
+
+    appeared = wait_for("appeared")
+    assert appeared["ring"]["kind"] == "lean" and appeared["ring"]["clock"] == "nanoseconds"
+    assert appeared["ring"]["msg_size"] == 16
+    channel.publish_now(b"x" * 16)
+    del channel
+    renoir.sweep(ignore_unreadable=True)
+    wait_for("disappeared")
+
+
+def test_qos_liveliness_ownership_lifespan_and_filter():
+    tag = "%d" % time.monotonic_ns()
+    live = "py_qos_live_" + tag
+    pub = renoir.LeanChannel.with_qos(live, 16, lease_ms=80)
+    sub = renoir.LeanChannel.with_qos(live, 16, lease_ms=200, subscriber=True)
+    assert sub.liveliness()["lost"] is True
+    pub.register_publisher()
+    assert sub.liveliness()["alive"] == 1
+    time.sleep(0.3)
+    status = sub.liveliness()
+    assert status["lost"] and status["registered"] == 1 and status["lost_count"] == 1
+    pub.assert_liveliness()
+    assert sub.liveliness()["alive"] == 1
+
+    with pytest.raises(Exception):
+        renoir.LeanChannel.with_qos(live, 16, lease_ms=40, subscriber=True)
+    with pytest.raises(ValueError):
+        renoir.LeanChannel.with_qos("py_qos_bad_" + tag, 16, clock="furlongs")
+
+    own = "py_qos_own_" + tag
+    weak = renoir.LeanChannel.with_qos(own, 16, exclusive_strength=2, multi_producer=True)
+    strong = renoir.LeanChannel.with_qos(own, 16, exclusive_strength=9, multi_producer=True)
+    weak.register_publisher()
+    strong.register_publisher()
+    with pytest.raises(Exception):
+        weak.publish(b"w" * 16)
+    strong.publish(b"s" * 16)
+    assert strong.is_owner() and not weak.is_owner()
+
+    filt = "py_qos_filter_" + tag
+    writer = renoir.LeanChannel.with_qos(
+        filt, 16, depth=64, clock="nanoseconds", min_separation_ms=5, transient_local=True
+    )
+    reader = renoir.LeanChannel.with_qos(
+        filt, 16, depth=64, clock="nanoseconds", min_separation_ms=5, transient_local=True, subscriber=True
+    )
+    for i in range(21):
+        writer.publish_at(i * 1_000_000, bytes([i]) * 16)
+    delivered = []
+    while True:
+        item = reader.try_read_stamped_qos()
+        if item is None:
+            break
+        delivered.append(item[0] // 1_000_000)
+    assert delivered == [0, 5, 10, 15, 20] and reader.filtered_out() == 16

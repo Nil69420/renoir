@@ -35,6 +35,112 @@ int main() {
     renoir::LeanChannel sub(name, sizeof(Imu), 128, true);
     CHECK(sub.messageSize() == sizeof(Imu));
 
+
+    {
+        const std::string stampedName = "lean_cpp_stamped_" + std::to_string(getpid());
+        renoir::LeanChannel sp(stampedName, sizeof(Imu), 64, renoir::LeanFlags::StampNanoseconds);
+        renoir::LeanChannel ss(stampedName, sizeof(Imu), 64,
+                               renoir::LeanFlags::StampNanoseconds | renoir::LeanFlags::FromOldest);
+        CHECK(sp.clockKind() == RENOIR_LEAN_CLOCK_NS);
+        Imu in{};
+        in.seq = 77;
+        Imu got{};
+        uint64_t stamp = 0;
+        uint64_t missed = 0;
+        CHECK(!ss.tryReadStamped(got, stamp));
+        CHECK(sp.publishAt(555, in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.tryReadStamped(got, stamp) && stamp == 555 && got.seq == 77);
+        const uint64_t before = sp.stampNow();
+        CHECK(sp.publishNow(in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.tryReadStamped(got, stamp) && stamp >= before && stamp <= sp.stampNow());
+        for (int i = 0; i < 200; ++i) {
+            CHECK(sp.publishAt(static_cast<uint64_t>(i + 1), in) ==
+                  RenoirErrorCode::RenoirErrorCode_Success);
+        }
+        uint64_t reads = 0;
+        uint64_t totalMissed = 0;
+        while (ss.tryReadStampedLagged(&got, sizeof got, stamp, missed)) {
+            ++reads;
+            totalMissed += missed;
+        }
+        CHECK(totalMissed > 0 && reads + totalMissed == 200);
+
+        const renoir::WaitStrategy all[] = {
+            renoir::WaitStrategy::BusySpin, renoir::WaitStrategy::Yielding,
+            renoir::WaitStrategy::Sleeping, renoir::WaitStrategy::Blocking,
+            renoir::WaitStrategy::PhasedBackoff};
+        for (const renoir::WaitStrategy strategy : all) {
+            CHECK(!ss.waitWith(strategy, 2000000ULL));
+        }
+        CHECK(!ss.waitPhased(100000ULL, 500000ULL, 3000000ULL));
+        CHECK(sp.publishAtNotify(9001, &in, sizeof in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.waitWith(renoir::WaitStrategy::Blocking, 1000000000ULL));
+        CHECK(ss.tryReadStamped(&got, sizeof got, stamp) && stamp == 9001);
+        CHECK(sp.publishNowNotify(&in, sizeof in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(ss.waitWith(renoir::WaitStrategy::PhasedBackoff, 1000000000ULL));
+        CHECK(ss.tryReadStamped(&got, sizeof got, stamp));
+    }
+    {
+        renoir::DiscoveryWatch watch(20);
+        CHECK(watch.valid() && watch.fd() >= 0);
+        const std::string watched = "lean_cpp_watch_" + std::to_string(getpid());
+        bool appeared = false;
+        {
+            renoir::LeanChannel w(watched, sizeof(Imu), 32);
+            for (int i = 0; i < 100 && !appeared; ++i) {
+                for (const renoir::DiscoveryEvent& e : watch.poll(50)) {
+                    if (e.kind == renoir::DiscoveryEventKind::Appeared && e.ring.name == watched) {
+                        appeared = e.ring.kind == renoir::RingKind::Lean &&
+                                   e.ring.msgSize == sizeof(Imu);
+                    }
+                }
+            }
+        }
+        CHECK(appeared);
+        renoir::DiscoveryWatch moved(std::move(watch));
+        CHECK(moved.valid() && !watch.valid());
+    }
+    {
+        renoir::LeanQosOptions options;
+        options.depth = 16;
+        options.clock = RENOIR_LEAN_CLOCK_NS;
+        options.minSeparationNs = 5000000;
+        options.manualLiveliness = true;
+        options.livelinessLeaseNs = 500000000;
+        options.transientLocal = true;
+        const std::string qosName = "lean_cpp_qos_" + std::to_string(getpid());
+        renoir::LeanChannel qp(qosName, sizeof(Imu), options, false);
+        renoir::LeanChannel qs(qosName, sizeof(Imu), options, true);
+        CHECK(qs.liveliness().lost);
+        CHECK(qp.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(qp.assertLiveliness() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(!qs.liveliness().lost && qs.liveliness().alive == 1);
+        Imu in{};
+        for (uint64_t i = 0; i < 12; ++i) {
+            CHECK(qp.publishAt(i * 1000000ULL, in) == RenoirErrorCode::RenoirErrorCode_Success);
+        }
+        Imu got{};
+        uint64_t stamp = 0;
+        uint64_t delivered = 0;
+        while (qs.tryReadStampedQos(&got, sizeof got, stamp)) {
+            ++delivered;
+        }
+        CHECK(delivered == 3 && qs.filteredOut() == 9 && qs.staleDropped() == 0);
+
+        renoir::LeanQosOptions strong;
+        strong.exclusive = true;
+        strong.ownershipStrength = 9;
+        renoir::LeanQosOptions weak = strong;
+        weak.ownershipStrength = 2;
+        const std::string ownName = "lean_cpp_own_" + std::to_string(getpid());
+        renoir::LeanChannel wk(ownName, sizeof(Imu), weak, false, true);
+        renoir::LeanChannel st(ownName, sizeof(Imu), strong, false, true);
+        CHECK(wk.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(wk.publish(in) != RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.publish(in) == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(st.isOwner() && !wk.isOwner());
+    }
     Imu out{};
     CHECK(!sub.tryRead(out));
     for (uint32_t i = 0; i < 50; ++i) {

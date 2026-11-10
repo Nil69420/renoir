@@ -6,7 +6,7 @@ use std::{
 use super::{
     atomic_store_bytes,
     liveness::{Liveness, HARD_STALL},
-    LeanCursor, LeanPublisher, LeanRing, SEQ_BYTES,
+    LeanCursor, LeanPublisher, LeanRing, LEAN_MAX_INDEX, SEQ_BYTES,
 };
 use crate::error::{RenoirError, Result};
 
@@ -58,16 +58,28 @@ impl LeanRing {
     }
 }
 
+fn index_out_of_range() -> RenoirError {
+    RenoirError::serialization("Lean ring index is outside the supported range")
+}
+
 impl LeanPublisher {
     pub(super) fn claim_index(&mut self) -> Result<u64> {
         if !self.ring.gated {
             self.begin_claim();
-            let idx = self.ring.hdr().claim.fetch_add(1, Ordering::AcqRel) + 1;
+            let previous = self.ring.hdr().claim.fetch_add(1, Ordering::AcqRel);
+            if previous >= LEAN_MAX_INDEX {
+                self.end_claim();
+                return Err(index_out_of_range());
+            }
+            let idx = previous + 1;
             self.mark_claimed(idx, 1);
             return Ok(idx);
         }
         loop {
             let current = self.ring.hdr().claim.load(Ordering::Acquire);
+            if current >= LEAN_MAX_INDEX {
+                return Err(index_out_of_range());
+            }
             let admitted = current + 1;
             if let Err(e) = self.gate_admits(admitted) {
                 self.end_claim();
@@ -97,12 +109,17 @@ impl LeanPublisher {
         Ok(())
     }
 
-    pub(super) fn claim_range(&mut self, count: u64) -> u64 {
+    pub(super) fn claim_range(&mut self, count: u64) -> Result<u64> {
         self.announce();
         self.begin_claim();
-        let first = self.ring.hdr().claim.fetch_add(count, Ordering::AcqRel) + 1;
+        let previous = self.ring.hdr().claim.fetch_add(count, Ordering::AcqRel);
+        if previous >= LEAN_MAX_INDEX || count > LEAN_MAX_INDEX - previous {
+            self.end_claim();
+            return Err(index_out_of_range());
+        }
+        let first = previous + 1;
         self.mark_claimed(first, count);
-        first
+        Ok(first)
     }
 }
 

@@ -187,6 +187,12 @@
 
 #define RENOIR_RING_MODE_NONE UINT32_MAX
 
+#define RENOIR_DISCOVERY_APPEARED 0
+
+#define RENOIR_DISCOVERY_DISAPPEARED 1
+
+#define RENOIR_DISCOVERY_CHANGED 2
+
 #define RENOIR_LEAN_FROM_OLDEST 1
 
 #define RENOIR_LEAN_MULTI_PRODUCER 2
@@ -195,9 +201,49 @@
 
 #define RENOIR_LEAN_CONSUMER 8
 
+#define RENOIR_LEAN_STAMP_NS 16
+
+#define RENOIR_LEAN_STAMP_TICKS 32
+
+#define RENOIR_LEAN_CLOCK_NONE 0
+
+#define RENOIR_LEAN_CLOCK_NS 1
+
+#define RENOIR_LEAN_CLOCK_TICKS 2
+
+#define RENOIR_LEAN_WAIT_BUSY_SPIN 0
+
+#define RENOIR_LEAN_WAIT_YIELDING 1
+
+#define RENOIR_LEAN_WAIT_SLEEPING 2
+
+#define RENOIR_LEAN_WAIT_BLOCKING 3
+
+#define RENOIR_LEAN_WAIT_PHASED_BACKOFF 4
+
 #define RENOIR_LEAN_RELIABLE_PUBLISHER RENOIR_LEAN_GATED
 
 #define RENOIR_LEAN_RELIABLE_SUBSCRIBER (RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER)
+
+#define RENOIR_QOS_BEST_EFFORT 0
+
+#define RENOIR_QOS_RELIABLE 1
+
+#define RENOIR_QOS_KEEP_LAST 0
+
+#define RENOIR_QOS_KEEP_ALL 1
+
+#define RENOIR_QOS_VOLATILE 0
+
+#define RENOIR_QOS_TRANSIENT_LOCAL 1
+
+#define RENOIR_QOS_LIVELINESS_AUTOMATIC 0
+
+#define RENOIR_QOS_LIVELINESS_MANUAL 1
+
+#define RENOIR_QOS_OWNERSHIP_SHARED 0
+
+#define RENOIR_QOS_OWNERSHIP_EXCLUSIVE 1
 
 /**
  * Topic registration flag: discard messages left by a previous clean session
@@ -362,9 +408,43 @@ typedef struct RenoirRingInfo {
   uint32_t reserved;
 } RenoirRingInfo;
 
+typedef void *RenoirDiscoveryWatchHandle;
+
+typedef struct RenoirDiscoveryEvent {
+  uint32_t kind;
+  uint32_t previous_live_publishers;
+  uint32_t previous_registered_consumers;
+  uint32_t reserved;
+  struct RenoirRingInfo ring;
+} RenoirDiscoveryEvent;
+
 typedef void *RenoirFrameHandle;
 
 typedef void *RenoirLeanHandle;
+
+typedef struct RenoirLeanQos {
+  uint32_t reliability;
+  uint32_t history;
+  uint32_t durability;
+  uint32_t depth;
+  uint64_t deadline_ns;
+  uint64_t lifespan_ns;
+  uint64_t min_separation_ns;
+  uint32_t liveliness_kind;
+  uint32_t ownership;
+  uint64_t liveliness_lease_ns;
+  uint64_t ownership_strength;
+  uint32_t clock;
+  uint32_t reserved;
+} RenoirLeanQos;
+
+typedef struct RenoirLivelinessStatus {
+  uint32_t registered;
+  uint32_t alive;
+  uint32_t lost;
+  uint32_t reserved;
+  uint64_t lost_count;
+} RenoirLivelinessStatus;
 
 typedef void *RenoirRegionHandle;
 
@@ -832,6 +912,19 @@ enum RenoirErrorCode renoir_discover(struct RenoirRingInfo *out,
 
 enum RenoirErrorCode renoir_discover_sweep(uint32_t flags, uintptr_t *removed);
 
+enum RenoirErrorCode renoir_discover_watch_open(uint32_t interval_ms,
+                                                RenoirDiscoveryWatchHandle *out);
+
+int32_t renoir_discover_watch_fd(RenoirDiscoveryWatchHandle handle);
+
+enum RenoirErrorCode renoir_discover_watch_poll(RenoirDiscoveryWatchHandle handle,
+                                                uint32_t timeout_ms,
+                                                struct RenoirDiscoveryEvent *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *count);
+
+void renoir_discover_watch_close(RenoirDiscoveryWatchHandle handle);
+
 enum RenoirErrorCode renoir_frame_open(const char *name,
                                        uintptr_t max_frame,
                                        uint32_t slot_count,
@@ -930,6 +1023,87 @@ int32_t renoir_lean_consumer_id(RenoirLeanHandle h);
 enum RenoirErrorCode renoir_lean_set_upstream(RenoirLeanHandle h, uint32_t upstream);
 
 void renoir_lean_close(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_publish_at(RenoirLeanHandle h,
+                                            uint64_t stamp,
+                                            const uint8_t *data,
+                                            uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_publish_now(RenoirLeanHandle h,
+                                             const uint8_t *data,
+                                             uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped(RenoirLeanHandle h,
+                                                  uint8_t *buffer,
+                                                  uintptr_t buffer_len,
+                                                  uint64_t *out_stamp);
+
+uint32_t renoir_lean_clock_kind(RenoirLeanHandle h);
+
+uint64_t renoir_lean_tick_hz(RenoirLeanHandle h);
+
+uint64_t renoir_lean_stamp_now(RenoirLeanHandle h);
+
+uint64_t renoir_lean_stamp_to_ns(RenoirLeanHandle h, uint64_t stamp);
+
+enum RenoirErrorCode renoir_lean_memory_required_flags(uint32_t msg_size,
+                                                       uint32_t slot_count,
+                                                       uint32_t flags,
+                                                       uintptr_t *out_bytes);
+
+enum RenoirErrorCode renoir_lean_try_read_lagged(RenoirLeanHandle h,
+                                                 uint8_t *buffer,
+                                                 uintptr_t buffer_len,
+                                                 uint64_t *out_missed);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped_lagged(RenoirLeanHandle h,
+                                                         uint8_t *buffer,
+                                                         uintptr_t buffer_len,
+                                                         uint64_t *out_stamp,
+                                                         uint64_t *out_missed);
+
+enum RenoirErrorCode renoir_lean_wait_strategy(RenoirLeanHandle h,
+                                               uint32_t strategy,
+                                               uint64_t timeout_ns);
+
+enum RenoirErrorCode renoir_lean_wait_phased(RenoirLeanHandle h,
+                                             uint64_t spin_ns,
+                                             uint64_t yield_ns,
+                                             uint64_t timeout_ns);
+
+enum RenoirErrorCode renoir_lean_publish_at_notify(RenoirLeanHandle h,
+                                                   uint64_t stamp,
+                                                   const uint8_t *data,
+                                                   uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_publish_now_notify(RenoirLeanHandle h,
+                                                    const uint8_t *data,
+                                                    uintptr_t len);
+
+enum RenoirErrorCode renoir_lean_qos_default(struct RenoirLeanQos *out);
+
+enum RenoirErrorCode renoir_lean_open_qos(const char *name,
+                                          uint32_t msg_size,
+                                          const struct RenoirLeanQos *qos,
+                                          uint32_t flags,
+                                          RenoirLeanHandle *out);
+
+enum RenoirErrorCode renoir_lean_register_publisher(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_assert_liveliness(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_liveliness(RenoirLeanHandle h, struct RenoirLivelinessStatus *out);
+
+int32_t renoir_lean_is_owner(RenoirLeanHandle h);
+
+enum RenoirErrorCode renoir_lean_try_read_stamped_qos(RenoirLeanHandle h,
+                                                      uint8_t *buffer,
+                                                      uintptr_t buffer_len,
+                                                      uint64_t *out_stamp);
+
+uint64_t renoir_lean_stale_dropped(RenoirLeanHandle h);
+
+uint64_t renoir_lean_filtered_out(RenoirLeanHandle h);
 
 /**
  * Create a shared memory manager with control region

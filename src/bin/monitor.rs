@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use renoir::discovery::{render_table, scan, sweep, SweepOptions};
+use renoir::discovery::{
+    render_table, scan, sweep, DiscoveryEvent, DiscoveryWatcher, SweepOptions,
+};
 
 fn usage() {
     println!(
-        "renoir-monitor [list | watch [SECONDS] | sweep [--dry-run] [--ignore-unreadable]]\n\
+        "renoir-monitor [list | watch [SECONDS] | events | sweep [--dry-run] [--ignore-unreadable]]\n\
          list   one-shot table of rings in the shared-memory directory\n\
          watch  refresh the table every SECONDS (default 1) with message rates\n\
+         events print one line each time a ring appears, changes or disappears\n\
          sweep  delete ring files that no process has mapped"
     );
 }
@@ -33,6 +36,34 @@ fn main() {
                     })
                     .collect();
                 std::thread::sleep(Duration::from_secs_f64(secs.max(0.1)));
+            }
+        }
+        Some("events") => {
+            let Ok(mut watcher) = DiscoveryWatcher::open(Duration::from_millis(100)) else {
+                eprintln!("cannot watch the shared-memory directory");
+                std::process::exit(1);
+            };
+            for ring in watcher.snapshot() {
+                println!("present     {}", ring.name);
+            }
+            loop {
+                for event in watcher.poll(Duration::from_secs(3600)) {
+                    match event {
+                        DiscoveryEvent::Appeared(ring) => println!("appeared    {}", ring.name),
+                        DiscoveryEvent::Disappeared { name } => println!("disappeared {name}"),
+                        DiscoveryEvent::Changed { previous, current } => {
+                            let (p, c) = (previous.lean.as_ref(), current.lean.as_ref());
+                            println!(
+                                "changed     {} publishers {} -> {} consumers {} -> {}",
+                                current.name,
+                                p.map_or(0, |l| l.live_publishers),
+                                c.map_or(0, |l| l.live_publishers),
+                                p.map_or(0, |l| l.registered_consumers),
+                                c.map_or(0, |l| l.registered_consumers),
+                            );
+                        }
+                    }
+                }
             }
         }
         Some("sweep") => {

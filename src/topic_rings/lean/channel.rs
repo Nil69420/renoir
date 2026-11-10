@@ -6,7 +6,8 @@ use crate::{
 };
 
 use super::{
-    lean_slot_bytes, LeanCursor, LeanGatedCursor, LeanMode, LeanPublisher, LeanRead, LeanRing,
+    lean_slot_bytes, stamped::STAMP_BYTES, LeanClock, LeanCursor, LeanGatedCursor, LeanMode,
+    LeanPublisher, LeanRead, LeanRing,
 };
 
 const SPIN_START: u32 = 1_000;
@@ -15,13 +16,15 @@ const SPIN_MAX: u32 = 100_000;
 
 pub struct LeanChannel {
     ring: Arc<LeanRing>,
-    publisher: LeanPublisher,
+    pub(super) publisher: LeanPublisher,
     cursor: LeanCursor,
     gated: Option<LeanGatedCursor>,
     pub(super) deadline: Option<Duration>,
     pub(super) deadline_misses: u64,
     spin_budget: u32,
-    announced: bool,
+    pub(super) announced: bool,
+    pub(super) fast: bool,
+    pub(super) qos: super::liveliness::QosState,
     _region: SharedMemoryRegion,
 }
 
@@ -43,6 +46,48 @@ impl LeanChannel {
         from_oldest: bool,
         mode: LeanMode,
     ) -> Result<Self> {
+        Self::open_clocked(
+            name,
+            msg_size,
+            slot_count,
+            from_oldest,
+            mode,
+            LeanClock::None,
+        )
+    }
+
+    pub fn open_stamped(
+        name: &str,
+        data_size: usize,
+        slot_count: usize,
+        from_oldest: bool,
+        mode: LeanMode,
+        clock: LeanClock,
+    ) -> Result<Self> {
+        if !clock.is_stamped() {
+            return Err(RenoirError::invalid_parameter(
+                "clock",
+                "A stamped channel needs a nanosecond or tick clock",
+            ));
+        }
+        Self::open_clocked(name, data_size, slot_count, from_oldest, mode, clock)
+    }
+
+    pub(super) fn open_clocked(
+        name: &str,
+        msg_size: usize,
+        slot_count: usize,
+        from_oldest: bool,
+        mode: LeanMode,
+        clock: LeanClock,
+    ) -> Result<Self> {
+        let msg_size = if clock.is_stamped() {
+            msg_size.checked_add(STAMP_BYTES).ok_or_else(|| {
+                RenoirError::invalid_parameter("msg_size", "Message size overflows")
+            })?
+        } else {
+            msg_size
+        };
         let slot_bytes = lean_slot_bytes(msg_size).ok_or_else(|| {
             RenoirError::invalid_parameter("msg_size", "Lean message size must be 1..=504 bytes")
         })?;
@@ -65,7 +110,18 @@ impl LeanChannel {
         let ptr = std::ptr::NonNull::new(unsafe { region.as_mut_ptr_unsafe::<u8>() })
             .ok_or_else(|| RenoirError::invalid_parameter("region", "Region mapping is null"))?;
         let ring = Arc::new(unsafe {
-            LeanRing::from_memory_mode(ptr, region.size(), ring_bytes, msg_size, mode)?
+            if clock.is_stamped() {
+                LeanRing::from_memory_stamped(
+                    ptr,
+                    region.size(),
+                    ring_bytes,
+                    msg_size - STAMP_BYTES,
+                    mode,
+                    clock,
+                )?
+            } else {
+                LeanRing::from_memory_mode(ptr, region.size(), ring_bytes, msg_size, mode)?
+            }
         });
         let cursor = if from_oldest {
             ring.cursor_oldest()
@@ -82,6 +138,8 @@ impl LeanChannel {
             deadline_misses: 0,
             spin_budget: SPIN_START,
             announced: false,
+            fast: false,
+            qos: super::liveliness::QosState::default(),
             _region: region,
         })
     }
@@ -107,19 +165,51 @@ impl LeanChannel {
 
     #[inline]
     pub fn publish(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish(data)
     }
 
     #[inline]
+    pub fn publish_at(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
+        self.announce()?;
+        self.publisher.publish_at(stamp, data)
+    }
+
+    #[inline]
+    pub fn publish_now(&mut self, data: &[u8]) -> Result<()> {
+        self.announce()?;
+        self.publisher.publish_now(data)
+    }
+
+    #[inline]
+    pub fn publish_at_notify(&mut self, stamp: u64, data: &[u8]) -> Result<()> {
+        self.announce()?;
+        self.publisher.publish_at_notify(stamp, data)
+    }
+
+    #[inline]
+    pub fn publish_now_notify(&mut self, data: &[u8]) -> Result<()> {
+        self.announce()?;
+        self.publisher.publish_now_notify(data)
+    }
+
+    #[inline]
+    pub fn try_read_stamped(&mut self, out: &mut [u8]) -> Result<Option<u64>> {
+        match self.gated.as_mut() {
+            Some(gated) => self.ring.try_read_stamped_gated(gated, out),
+            None => self.ring.try_read_stamped(&mut self.cursor, out),
+        }
+    }
+
+    #[inline]
     pub fn publish_notify(&mut self, data: &[u8]) -> Result<()> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_notify(data)
     }
 
     #[inline]
     pub fn publish_batch(&mut self, data: &[u8]) -> Result<usize> {
-        self.announce();
+        self.announce()?;
         self.publisher.publish_batch(data)
     }
 
@@ -149,12 +239,40 @@ impl LeanChannel {
             .wait_readable(self.active_cursor(), spin_iterations, timeout)
     }
 
+    pub fn wait_with(&self, strategy: super::LeanWaitStrategy, timeout: Option<Duration>) -> bool {
+        self.ring.wait_with(self.active_cursor(), strategy, timeout)
+    }
+
+    pub fn wait_phased(
+        &self,
+        spin_for: Duration,
+        yield_for: Duration,
+        timeout: Option<Duration>,
+    ) -> bool {
+        self.ring
+            .wait_phased(self.active_cursor(), spin_for, yield_for, timeout)
+    }
+
     #[inline]
     pub fn try_read(&mut self, out: &mut [u8]) -> Result<LeanRead> {
         match self.gated.as_mut() {
             Some(gated) => self.ring.try_read_gated(gated, out),
             None => self.ring.try_read(&mut self.cursor, out),
         }
+    }
+
+    #[inline]
+    pub fn try_read_lagged(&mut self, out: &mut [u8]) -> Result<(LeanRead, u64)> {
+        let before = self.lost();
+        let read = self.try_read(out)?;
+        Ok((read, self.lost() - before))
+    }
+
+    #[inline]
+    pub fn try_read_stamped_lagged(&mut self, out: &mut [u8]) -> Result<(Option<u64>, u64)> {
+        let before = self.lost();
+        let stamp = self.try_read_stamped(out)?;
+        Ok((stamp, self.lost() - before))
     }
 
     pub fn skip_to_latest(&mut self, keep: u64) -> u64 {
@@ -172,11 +290,12 @@ impl LeanChannel {
         self.ring.pending(self.active_cursor())
     }
 
-    #[inline]
-    fn announce(&mut self) {
-        if !self.announced {
-            self.announced = true;
-            self.publisher.announce();
+    #[inline(always)]
+    fn announce(&mut self) -> Result<()> {
+        if self.fast {
+            Ok(())
+        } else {
+            self.announce_slow()
         }
     }
 

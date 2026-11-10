@@ -22,6 +22,8 @@ pub(super) unsafe fn attach_header(
     slot_bytes: u64,
     msg_size: u64,
     mode: u32,
+    clock: u32,
+    tick_hz: u64,
 ) -> Result<()> {
     let magic = &*(header as *const AtomicU64);
     match claim(magic, LEAN_RING_MAGIC)? {
@@ -39,17 +41,29 @@ pub(super) unsafe fn attach_header(
                     "Existing lean ring uses a different producer mode",
                 ));
             }
+            if h.clock != clock {
+                return Err(RenoirError::invalid_parameter(
+                    "ring",
+                    "Existing lean ring uses a different timestamp mode",
+                ));
+            }
         }
         Claim::Create => {
             std::ptr::addr_of_mut!((*header).slot_count).write(slot_count);
             std::ptr::addr_of_mut!((*header).slot_bytes).write(slot_bytes);
             std::ptr::addr_of_mut!((*header).msg_size).write(msg_size);
             std::ptr::addr_of_mut!((*header).mode).write(mode);
+            std::ptr::addr_of_mut!((*header).clock).write(clock);
+            std::ptr::addr_of_mut!((*header).tick_hz).write(tick_hz);
             (*header).session.store(SESSION_DIRTY, Ordering::Relaxed);
             (*header).write_idx.store(0, Ordering::Relaxed);
             (*header).wake.store(0, Ordering::Relaxed);
             (*header).waiters.store(0, Ordering::Relaxed);
             (*header).claim.store(0, Ordering::Relaxed);
+            (*header).qos_offer.store(0, Ordering::Relaxed);
+            (*header).offered_deadline_ns.store(0, Ordering::Relaxed);
+            (*header).offered_lifespan_ns.store(0, Ordering::Relaxed);
+            (*header).offered_lease_ns.store(0, Ordering::Relaxed);
             for i in 0..LEAN_MAX_CONSUMERS {
                 let entry = &*(header as *const u8)
                     .add(LEAN_FIXED_HEADER_BYTES)

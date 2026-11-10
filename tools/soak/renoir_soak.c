@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
 #include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <renoir.h>
 #include <stdint.h>
@@ -213,6 +214,8 @@ static void *consumer(void *arg) {
     uint8_t *buf = malloc(s->payload);
     if (!s->work_ns || !buf) {
         s->failed = 1;
+        renoir_subscriber_destroy(sub);
+        free(buf);
         return NULL;
     }
     size_t pixels = (size_t)s->cfg.width * s->cfg.height;
@@ -284,6 +287,17 @@ static void *consumer(void *arg) {
     return NULL;
 }
 
+static int parse_count(const char *text, int *out) {
+    char *end = NULL;
+    errno = 0;
+    long value = strtol(text, &end, 10);
+    if (end == text || *end != '\0' || errno != 0 || value < 0 || value > INT_MAX) {
+        return -1;
+    }
+    *out = (int)value;
+    return 0;
+}
+
 static int parse_args(int argc, char **argv, config_t *c, const char **role) {
     if (argc < 2) {
         return -1;
@@ -302,16 +316,21 @@ static int parse_args(int argc, char **argv, config_t *c, const char **role) {
     for (int i = 2; i + 1 < argc; i += 2) {
         const char *k = argv[i];
         const char *v = argv[i + 1];
-        if (!strcmp(k, "--cams")) c->cams = atoi(v);
-        else if (!strcmp(k, "--fps")) c->fps = atoi(v);
-        else if (!strcmp(k, "--imu-hz")) c->imu_hz = atoi(v);
-        else if (!strcmp(k, "--width")) c->width = (uint32_t)atoi(v);
-        else if (!strcmp(k, "--height")) c->height = (uint32_t)atoi(v);
-        else if (!strcmp(k, "--duration")) c->duration_s = atoi(v);
-        else if (!strcmp(k, "--slow-ms")) c->slow_ms = atoi(v);
-        else if (!strcmp(k, "--latest")) c->latest = atoi(v);
-        else if (!strcmp(k, "--start-delay")) c->start_delay_s = atoi(v);
-        else if (!strcmp(k, "--label")) c->label = v;
+        if (!strcmp(k, "--label")) {
+            c->label = v;
+            continue;
+        }
+        int n;
+        if (parse_count(v, &n) != 0) return -1;
+        if (!strcmp(k, "--cams")) c->cams = n;
+        else if (!strcmp(k, "--fps")) c->fps = n;
+        else if (!strcmp(k, "--imu-hz")) c->imu_hz = n;
+        else if (!strcmp(k, "--width")) c->width = (uint32_t)n;
+        else if (!strcmp(k, "--height")) c->height = (uint32_t)n;
+        else if (!strcmp(k, "--duration")) c->duration_s = n;
+        else if (!strcmp(k, "--slow-ms")) c->slow_ms = n;
+        else if (!strcmp(k, "--latest")) c->latest = n;
+        else if (!strcmp(k, "--start-delay")) c->start_delay_s = n;
         else return -1;
     }
     return (c->cams < 1 || c->cams > MAX_CAMS || c->fps < 1 || c->imu_hz < 1 ||

@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use crate::topic_rings::{DeadlineWait, LeanChannel, LeanMode, LeanRead};
+use crate::topic_rings::{DeadlineWait, LeanChannel, LeanClock, LeanMode, LeanRead};
 
 use super::types::RenoirErrorCode;
 
@@ -13,11 +13,21 @@ pub const RENOIR_LEAN_FROM_OLDEST: u32 = 1;
 pub const RENOIR_LEAN_MULTI_PRODUCER: u32 = 2;
 pub const RENOIR_LEAN_GATED: u32 = 4;
 pub const RENOIR_LEAN_CONSUMER: u32 = 8;
+pub const RENOIR_LEAN_STAMP_NS: u32 = 16;
+pub const RENOIR_LEAN_STAMP_TICKS: u32 = 32;
+pub const RENOIR_LEAN_CLOCK_NONE: u32 = 0;
+pub const RENOIR_LEAN_CLOCK_NS: u32 = 1;
+pub const RENOIR_LEAN_CLOCK_TICKS: u32 = 2;
+pub const RENOIR_LEAN_WAIT_BUSY_SPIN: u32 = 0;
+pub const RENOIR_LEAN_WAIT_YIELDING: u32 = 1;
+pub const RENOIR_LEAN_WAIT_SLEEPING: u32 = 2;
+pub const RENOIR_LEAN_WAIT_BLOCKING: u32 = 3;
+pub const RENOIR_LEAN_WAIT_PHASED_BACKOFF: u32 = 4;
 pub const RENOIR_LEAN_RELIABLE_PUBLISHER: u32 = RENOIR_LEAN_GATED;
 pub const RENOIR_LEAN_RELIABLE_SUBSCRIBER: u32 = RENOIR_LEAN_GATED | RENOIR_LEAN_CONSUMER;
 
 #[inline(always)]
-fn handle<'a>(h: RenoirLeanHandle) -> Option<&'a mut LeanChannel> {
+pub(super) fn handle<'a>(h: RenoirLeanHandle) -> Option<&'a mut LeanChannel> {
     unsafe { (h as *mut LeanChannel).as_mut() }
 }
 
@@ -40,13 +50,34 @@ pub extern "C" fn renoir_lean_open(
         flags & RENOIR_LEAN_MULTI_PRODUCER != 0,
         flags & RENOIR_LEAN_GATED != 0,
     );
-    match LeanChannel::open_with_mode(
-        name,
-        msg_size as usize,
-        slot_count as usize,
-        from_oldest,
-        mode,
+    let clock = match (
+        flags & RENOIR_LEAN_STAMP_NS != 0,
+        flags & RENOIR_LEAN_STAMP_TICKS != 0,
     ) {
+        (false, false) => LeanClock::None,
+        (true, false) => LeanClock::Nanoseconds,
+        (false, true) => LeanClock::Ticks,
+        (true, true) => return RenoirErrorCode::InvalidParameter,
+    };
+    let opened = if clock.is_stamped() {
+        LeanChannel::open_stamped(
+            name,
+            msg_size as usize,
+            slot_count as usize,
+            from_oldest,
+            mode,
+            clock,
+        )
+    } else {
+        LeanChannel::open_with_mode(
+            name,
+            msg_size as usize,
+            slot_count as usize,
+            from_oldest,
+            mode,
+        )
+    };
+    match opened {
         Ok(mut channel) => {
             if flags & RENOIR_LEAN_CONSUMER != 0 {
                 if let Err(e) = channel.register_consumer(from_oldest) {

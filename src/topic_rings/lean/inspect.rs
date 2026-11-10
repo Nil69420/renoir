@@ -1,7 +1,7 @@
 use super::{
     gate::{self, GateEntry, LEAN_MAX_CONSUMERS},
     liveness::{self, LEAN_MAX_PRODUCERS},
-    LeanHeader, LeanMode, LEAN_FIXED_HEADER_BYTES, LEAN_HEADER_BYTES, LEAN_RING_MAGIC,
+    LeanClock, LeanHeader, LeanMode, LEAN_FIXED_HEADER_BYTES, LEAN_HEADER_BYTES, LEAN_RING_MAGIC,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,8 @@ pub struct LeanInfo {
     pub slot_bytes: u64,
     pub msg_size: u64,
     pub mode: LeanMode,
+    pub clock: LeanClock,
+    pub tick_hz: u64,
     pub published: u64,
     pub live_publishers: usize,
     pub registered_consumers: usize,
@@ -36,6 +38,7 @@ pub fn inspect(bytes: &[u8]) -> Option<LeanInfo> {
         3 => LeanMode::MultiProducerGated,
         _ => return None,
     };
+    let clock = LeanClock::from_raw(u32_at(bytes, std::mem::offset_of!(LeanHeader, clock))?)?;
     let registered_consumers = (0..LEAN_MAX_CONSUMERS)
         .filter(|i| {
             let at = LEAN_FIXED_HEADER_BYTES
@@ -75,6 +78,8 @@ pub fn inspect(bytes: &[u8]) -> Option<LeanInfo> {
         slot_bytes: u64_at(bytes, std::mem::offset_of!(LeanHeader, slot_bytes))?,
         msg_size: u64_at(bytes, std::mem::offset_of!(LeanHeader, msg_size))?,
         mode,
+        clock,
+        tick_hz: u64_at(bytes, std::mem::offset_of!(LeanHeader, tick_hz))?,
         published: u64_at(bytes, std::mem::offset_of!(LeanHeader, write_idx))?,
         live_publishers,
         registered_consumers,
