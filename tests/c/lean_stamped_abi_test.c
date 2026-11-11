@@ -172,7 +172,7 @@ int main(void) {
   RenoirLeanHandle plain = NULL;
   char name[64];
   uint64_t stamp = 0;
-  uint8_t buf[16];
+  uint8_t buf[16] = {0};
   (void)snprintf(name, sizeof name, "c_unstamped_%d", (int)getpid());
   CHECK(renoir_lean_open(name, 16, 64, 0, &plain) == RenoirErrorCode_Success);
   CHECK(renoir_lean_clock_kind(plain) == RENOIR_LEAN_CLOCK_NONE);
