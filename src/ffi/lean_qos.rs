@@ -23,6 +23,7 @@ pub const RENOIR_QOS_LIVELINESS_AUTOMATIC: u32 = 0;
 pub const RENOIR_QOS_LIVELINESS_MANUAL: u32 = 1;
 pub const RENOIR_QOS_OWNERSHIP_SHARED: u32 = 0;
 pub const RENOIR_QOS_OWNERSHIP_EXCLUSIVE: u32 = 1;
+pub const RENOIR_QOS_FLAG_REQUIRE_OFFER: u32 = 1;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +40,7 @@ pub struct RenoirLeanQos {
     pub liveliness_lease_ns: u64,
     pub ownership_strength: u64,
     pub clock: u32,
-    pub reserved: u32,
+    pub flags: u32,
 }
 
 #[repr(C)]
@@ -56,7 +57,7 @@ fn optional(ns: u64) -> Option<Duration> {
     (ns != 0).then(|| Duration::from_nanos(ns))
 }
 
-fn convert(q: &RenoirLeanQos) -> Option<LeanQos> {
+pub(super) fn convert(q: &RenoirLeanQos) -> Option<LeanQos> {
     let reliability = match q.reliability {
         RENOIR_QOS_BEST_EFFORT => LeanReliability::BestEffort,
         RENOIR_QOS_RELIABLE => LeanReliability::Reliable,
@@ -104,6 +105,7 @@ fn convert(q: &RenoirLeanQos) -> Option<LeanQos> {
         ownership,
         min_separation: optional(q.min_separation_ns),
         clock,
+        require_offer: q.flags & RENOIR_QOS_FLAG_REQUIRE_OFFER != 0,
     })
 }
 
@@ -126,7 +128,7 @@ pub extern "C" fn renoir_lean_qos_default(out: *mut RenoirLeanQos) -> RenoirErro
             liveliness_lease_ns: 0,
             ownership_strength: 0,
             clock: 0,
-            reserved: 0,
+            flags: 0,
         };
     }
     RenoirErrorCode::Success
@@ -183,6 +185,24 @@ pub extern "C" fn renoir_lean_assert_liveliness(h: RenoirLeanHandle) -> RenoirEr
     match h.assert_liveliness() {
         Ok(()) => RenoirErrorCode::Success,
         Err(e) => e.into(),
+    }
+}
+
+pub(super) fn fill_status(
+    status: crate::topic_rings::LivelinessStatus,
+    out: *mut RenoirLivelinessStatus,
+) {
+    if out.is_null() {
+        return;
+    }
+    unsafe {
+        *out = RenoirLivelinessStatus {
+            registered: u32::try_from(status.registered).unwrap_or(u32::MAX),
+            alive: u32::try_from(status.alive).unwrap_or(u32::MAX),
+            lost: u32::from(status.lost),
+            reserved: 0,
+            lost_count: status.lost_count,
+        };
     }
 }
 
@@ -247,4 +267,33 @@ pub extern "C" fn renoir_lean_stale_dropped(h: RenoirLeanHandle) -> u64 {
 #[no_mangle]
 pub extern "C" fn renoir_lean_filtered_out(h: RenoirLeanHandle) -> u64 {
     handle(h).map_or(0, |h| h.filtered_out())
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_lean_wait_liveliness_change(
+    h: RenoirLeanHandle,
+    timeout_ns: u64,
+    out: *mut RenoirLivelinessStatus,
+) -> RenoirErrorCode {
+    let Some(h) = handle(h) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    let timeout = (timeout_ns != u64::MAX).then(|| Duration::from_nanos(timeout_ns));
+    match h.wait_liveliness_change(timeout) {
+        Some(status) => {
+            if !out.is_null() {
+                unsafe {
+                    *out = RenoirLivelinessStatus {
+                        registered: u32::try_from(status.registered).unwrap_or(u32::MAX),
+                        alive: u32::try_from(status.alive).unwrap_or(u32::MAX),
+                        lost: u32::from(status.lost),
+                        reserved: 0,
+                        lost_count: status.lost_count,
+                    };
+                }
+            }
+            RenoirErrorCode::Success
+        }
+        None => RenoirErrorCode::BufferEmpty,
+    }
 }

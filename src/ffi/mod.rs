@@ -9,6 +9,7 @@
 pub mod buffers;
 pub mod discover;
 pub mod frame;
+pub mod frame_qos;
 pub mod lean;
 pub mod lean_ext;
 pub mod lean_qos;

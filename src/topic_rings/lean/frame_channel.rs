@@ -10,12 +10,16 @@ use super::{
 };
 
 pub struct FrameChannel {
-    ring: Arc<LeanRing>,
-    publisher: LeanPublisher,
-    consumer: Option<LeanGatedCursor>,
+    pub(super) ring: Arc<LeanRing>,
+    pub(super) publisher: LeanPublisher,
+    pub(super) consumer: Option<LeanGatedCursor>,
     pending_loan: Option<(u64, usize)>,
     pending_view: Option<u64>,
     stale_dropped: u64,
+    pub(super) fast: bool,
+    pub(super) qos: super::liveliness::QosState,
+    pub(super) deadline: Option<Duration>,
+    pub(super) deadline_misses: u64,
     _region: SharedMemoryRegion,
 }
 
@@ -66,6 +70,10 @@ impl FrameChannel {
             pending_loan: None,
             pending_view: None,
             stale_dropped: 0,
+            fast: false,
+            qos: super::liveliness::QosState::default(),
+            deadline: None,
+            deadline_misses: 0,
             _region: region,
         })
     }
@@ -75,8 +83,18 @@ impl FrameChannel {
         self.ring.max_frame()
     }
 
+    #[inline(always)]
+    fn gate(&mut self) -> Result<()> {
+        if self.fast {
+            return Ok(());
+        }
+        let ring = self.ring.clone();
+        self.fast = super::liveliness::gate(&ring, &mut self.publisher, &mut self.qos)?;
+        Ok(())
+    }
+
     pub fn loan(&mut self, len: usize) -> Result<FrameLoan<'_>> {
-        self.publisher.announce();
+        self.gate()?;
         self.publisher.loan_frame(len)
     }
 
@@ -138,7 +156,7 @@ impl FrameChannel {
                 "A frame is already on loan",
             ));
         }
-        self.publisher.announce();
+        self.gate()?;
         let idx = self.publisher.begin_frame(len)?;
         self.pending_loan = Some((idx, len));
         Ok(self.publisher.frame_buffer(idx))

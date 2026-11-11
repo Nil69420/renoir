@@ -34,6 +34,13 @@ public:
 
     ~RpcClient() { renoir_rpc_client_close(handle_); }
 
+    void setStampRequests(bool stamp) noexcept { renoir_rpc_client_set_stamp(handle_, stamp ? 1 : 0); }
+    int serversAlive() noexcept { return renoir_rpc_client_servers_alive(handle_); }
+    bool waitForServer(uint64_t timeoutNs = UINT64_MAX) noexcept {
+        return renoir_rpc_client_wait_for_server(handle_, timeoutNs) ==
+               RenoirErrorCode::RenoirErrorCode_Success;
+    }
+
     RenoirErrorCode call(const void* request, size_t requestLen, void* response,
                          size_t responseCapacity, size_t& responseLen,
                          uint64_t timeoutNs = UINT64_MAX) noexcept {
@@ -74,6 +81,11 @@ public:
     }
 
     ~RpcServer() { renoir_rpc_server_close(handle_); }
+
+    void setRequestLifespan(uint64_t lifespanNs) noexcept {
+        renoir_rpc_server_set_lifespan(handle_, lifespanNs);
+    }
+    uint64_t staleRequests() const noexcept { return renoir_rpc_server_stale_requests(handle_); }
 
     bool poll(void* buffer, size_t capacity, RpcRequestInfo& info) noexcept {
         return renoir_rpc_poll(handle_, static_cast<uint8_t*>(buffer), capacity, &info.clientId,

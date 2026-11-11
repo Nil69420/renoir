@@ -245,6 +245,8 @@
 
 #define RENOIR_QOS_OWNERSHIP_EXCLUSIVE 1
 
+#define RENOIR_QOS_FLAG_REQUIRE_OFFER 1
+
 /**
  * Topic registration flag: discard messages left by a previous clean session
  * when no live process holds the topic
@@ -420,8 +422,6 @@ typedef struct RenoirDiscoveryEvent {
 
 typedef void *RenoirFrameHandle;
 
-typedef void *RenoirLeanHandle;
-
 typedef struct RenoirLeanQos {
   uint32_t reliability;
   uint32_t history;
@@ -435,7 +435,7 @@ typedef struct RenoirLeanQos {
   uint64_t liveliness_lease_ns;
   uint64_t ownership_strength;
   uint32_t clock;
-  uint32_t reserved;
+  uint32_t flags;
 } RenoirLeanQos;
 
 typedef struct RenoirLivelinessStatus {
@@ -445,6 +445,8 @@ typedef struct RenoirLivelinessStatus {
   uint32_t reserved;
   uint64_t lost_count;
 } RenoirLivelinessStatus;
+
+typedef void *RenoirLeanHandle;
 
 typedef void *RenoirRegionHandle;
 
@@ -968,6 +970,33 @@ uintptr_t renoir_frame_max_frame(RenoirFrameHandle h);
 
 void renoir_frame_close(RenoirFrameHandle h);
 
+enum RenoirErrorCode renoir_frame_open_qos(const char *name,
+                                           uintptr_t max_frame,
+                                           const struct RenoirLeanQos *qos,
+                                           uint32_t flags,
+                                           RenoirFrameHandle *out);
+
+enum RenoirErrorCode renoir_frame_register_publisher(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_assert_liveliness(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_liveliness(RenoirFrameHandle h,
+                                             struct RenoirLivelinessStatus *out);
+
+enum RenoirErrorCode renoir_frame_wait_liveliness_change(RenoirFrameHandle h,
+                                                         uint64_t timeout_ns,
+                                                         struct RenoirLivelinessStatus *out);
+
+int32_t renoir_frame_is_owner(RenoirFrameHandle h);
+
+enum RenoirErrorCode renoir_frame_view_qos(RenoirFrameHandle h,
+                                           const uint8_t **out_data,
+                                           uintptr_t *out_len);
+
+enum RenoirErrorCode renoir_frame_wait_deadline(RenoirFrameHandle h, uint32_t spin_iterations);
+
+uint64_t renoir_frame_deadline_misses(RenoirFrameHandle h);
+
 enum RenoirErrorCode renoir_lean_open(const char *name,
                                       uint32_t msg_size,
                                       uint32_t slot_count,
@@ -1105,6 +1134,10 @@ uint64_t renoir_lean_stale_dropped(RenoirLeanHandle h);
 
 uint64_t renoir_lean_filtered_out(RenoirLeanHandle h);
 
+enum RenoirErrorCode renoir_lean_wait_liveliness_change(RenoirLeanHandle h,
+                                                        uint64_t timeout_ns,
+                                                        struct RenoirLivelinessStatus *out);
+
 /**
  * Create a shared memory manager with control region
  */
@@ -1238,6 +1271,16 @@ enum RenoirErrorCode renoir_rpc_reply(RenoirRpcHandle server,
                                       uintptr_t len);
 
 void renoir_rpc_server_close(RenoirRpcHandle server);
+
+enum RenoirErrorCode renoir_rpc_client_set_stamp(RenoirRpcHandle client, int32_t enabled);
+
+int32_t renoir_rpc_client_servers_alive(RenoirRpcHandle client);
+
+enum RenoirErrorCode renoir_rpc_client_wait_for_server(RenoirRpcHandle client, uint64_t timeout_ns);
+
+enum RenoirErrorCode renoir_rpc_server_set_lifespan(RenoirRpcHandle server, uint64_t lifespan_ns);
+
+uint64_t renoir_rpc_server_stale_requests(RenoirRpcHandle server);
 
 /**
  * Total payload bytes for an image frame (header plus pixels); 0 if the

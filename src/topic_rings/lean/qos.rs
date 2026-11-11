@@ -51,6 +51,7 @@ pub struct LeanQos {
     pub ownership: LeanOwnership,
     pub min_separation: Option<Duration>,
     pub clock: LeanClock,
+    pub require_offer: bool,
 }
 
 impl LeanQos {
@@ -69,6 +70,7 @@ impl LeanQos {
             ownership: LeanOwnership::Shared,
             min_separation: None,
             clock: LeanClock::None,
+            require_offer: false,
         }
     }
 
@@ -107,6 +109,12 @@ impl LeanQos {
     }
 
     #[must_use]
+    pub const fn require_offer(mut self) -> Self {
+        self.require_offer = true;
+        self
+    }
+
+    #[must_use]
     pub const fn with_lifespan(mut self, lifespan: Duration) -> Self {
         self.lifespan = Some(lifespan);
         self
@@ -134,6 +142,10 @@ impl LeanQos {
     }
 
     pub(super) fn validate(&self) -> Result<()> {
+        self.validate_with(true)
+    }
+
+    pub(super) fn validate_with(&self, needs_clock: bool) -> Result<()> {
         let bad =
             |what: &'static str, why: &'static str| Err(RenoirError::invalid_parameter(what, why));
         if self.depth < 2 {
@@ -142,7 +154,10 @@ impl LeanQos {
         if self.history == LeanHistory::KeepAll && self.reliability != LeanReliability::Reliable {
             return bad("history", "Keep-all history needs reliable delivery");
         }
-        if (self.lifespan.is_some() || self.min_separation.is_some()) && !self.clock.is_stamped() {
+        if needs_clock
+            && (self.lifespan.is_some() || self.min_separation.is_some())
+            && !self.clock.is_stamped()
+        {
             return bad(
                 "clock",
                 "Lifespan and time-based filtering need a stamped ring",

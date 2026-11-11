@@ -112,6 +112,7 @@ int main() {
         renoir::LeanChannel qp(qosName, sizeof(Imu), options, false);
         renoir::LeanChannel qs(qosName, sizeof(Imu), options, true);
         CHECK(qs.liveliness().lost);
+        CHECK(!qs.waitLivelinessChange(10000000ULL));
         CHECK(qp.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(qp.assertLiveliness() == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(!qs.liveliness().lost && qs.liveliness().alive == 1);
@@ -140,6 +141,40 @@ int main() {
         CHECK(wk.publish(in) != RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(st.publish(in) == RenoirErrorCode::RenoirErrorCode_Success);
         CHECK(st.isOwner() && !wk.isOwner());
+    }
+    {
+        renoir::LeanQosOptions options;
+        options.reliable = true;
+        options.depth = 8;
+        options.manualLiveliness = true;
+        options.livelinessLeaseNs = 500000000;
+        options.lifespanNs = 1000000000;
+        const std::string frameName = "frame_cpp_qos_" + std::to_string(getpid());
+        renoir::FrameChannel fp(frameName, 64, options, false);
+        renoir::FrameChannel fc(frameName, 64, options, true);
+        CHECK(fc.liveliness().lost);
+        CHECK(fp.registerPublisher() == RenoirErrorCode::RenoirErrorCode_Success);
+        CHECK(fc.liveliness().alive == 1);
+        {
+            auto loan = fp.tryLoan(64);
+            CHECK(loan.has_value());
+            loan->data()[0] = 42;
+            loan->commit();
+        }
+        auto view = fc.tryViewQos();
+        CHECK(view.has_value() && view->data()[0] == 42);
+        view.reset();
+        CHECK(!fc.tryViewQos().has_value());
+    }
+    {
+        const std::string svc = "rpc_cpp_qos_" + std::to_string(getpid());
+        renoir::RpcClient rc(svc, 16, 16);
+        CHECK(rc.serversAlive() == 0 && !rc.waitForServer(10000000ULL));
+        renoir::RpcServer rs(svc, 16, 16);
+        rs.setRequestLifespan(50000000ULL);
+        rc.setStampRequests(true);
+        CHECK(rc.waitForServer(1000000000ULL) && rc.serversAlive() == 1);
+        CHECK(rs.staleRequests() == 0);
     }
     Imu out{};
     CHECK(!sub.tryRead(out));

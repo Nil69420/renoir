@@ -170,3 +170,57 @@ pub extern "C" fn renoir_rpc_server_close(server: RenoirRpcHandle) {
         drop(unsafe { Box::from_raw(server as *mut RpcServer) });
     }
 }
+
+#[no_mangle]
+pub extern "C" fn renoir_rpc_client_set_stamp(
+    client: RenoirRpcHandle,
+    enabled: i32,
+) -> RenoirErrorCode {
+    let Some(client) = (unsafe { (client as *mut RpcClient).as_mut() }) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    client.set_stamp_requests(enabled != 0);
+    RenoirErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_rpc_client_servers_alive(client: RenoirRpcHandle) -> i32 {
+    let Some(client) = (unsafe { (client as *mut RpcClient).as_mut() }) else {
+        return -1;
+    };
+    client
+        .servers_alive()
+        .map_or(-1, |n| i32::try_from(n).unwrap_or(i32::MAX))
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_rpc_client_wait_for_server(
+    client: RenoirRpcHandle,
+    timeout_ns: u64,
+) -> RenoirErrorCode {
+    let Some(client) = (unsafe { (client as *mut RpcClient).as_mut() }) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    match client.wait_for_server(timeout_of(timeout_ns)) {
+        Ok(true) => RenoirErrorCode::Success,
+        Ok(false) => RenoirErrorCode::BufferEmpty,
+        Err(e) => e.into(),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_rpc_server_set_lifespan(
+    server: RenoirRpcHandle,
+    lifespan_ns: u64,
+) -> RenoirErrorCode {
+    let Some(server) = (unsafe { (server as *mut RpcServer).as_mut() }) else {
+        return RenoirErrorCode::InvalidParameter;
+    };
+    server.set_request_lifespan((lifespan_ns != 0).then(|| Duration::from_nanos(lifespan_ns)));
+    RenoirErrorCode::Success
+}
+
+#[no_mangle]
+pub extern "C" fn renoir_rpc_server_stale_requests(server: RenoirRpcHandle) -> u64 {
+    unsafe { (server as *mut RpcServer).as_ref() }.map_or(0, RpcServer::stale_requests)
+}

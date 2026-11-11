@@ -301,3 +301,66 @@ fn a_hostile_qos_offer_cannot_hang_or_crash_an_opener() {
         );
     }
 }
+
+#[test]
+fn a_required_offer_refuses_a_ring_that_records_none() {
+    let none = name("strict_none");
+    let _plain = LeanChannel::open(&none, 16, 8, false).unwrap();
+    let strict = LeanQos::best_effort(8).require_offer();
+    assert!(LeanChannel::open_qos(&none, 16, strict, false, true).is_err());
+    assert!(LeanChannel::open_qos(&none, 16, LeanQos::best_effort(8), false, true).is_ok());
+
+    let offered = name("strict_offer");
+    let _p = LeanChannel::open_qos(&offered, 16, LeanQos::best_effort(8), false, false).unwrap();
+    assert!(LeanChannel::open_qos(&offered, 16, strict, false, true).is_ok());
+}
+
+#[test]
+fn publishing_asserts_manual_liveliness_by_itself() {
+    let n = name("assertpub");
+    let qos = LeanQos::best_effort(8).with_manual_liveliness(ms(80));
+    let mut publisher = LeanChannel::open_qos(&n, 16, qos, false, false).unwrap();
+    let mut reader = LeanChannel::open_qos(&n, 16, qos, false, true).unwrap();
+    publisher.register_publisher().unwrap();
+    std::thread::sleep(ms(150));
+    assert!(reader.liveliness().lost);
+    publisher.publish(&[1u8; 16]).unwrap();
+    assert!(
+        !reader.liveliness().lost,
+        "a publish must count as an assertion"
+    );
+    std::thread::sleep(ms(150));
+    assert!(reader.liveliness().lost);
+}
+
+#[test]
+fn waiting_for_a_liveliness_change_returns_on_appearance_and_on_lease_expiry() {
+    let n = name("waitlive");
+    let qos = LeanQos::best_effort(8).with_manual_liveliness(ms(100));
+    let mut publisher = LeanChannel::open_qos(&n, 16, qos, false, false).unwrap();
+    let mut reader = LeanChannel::open_qos(&n, 16, qos, false, true).unwrap();
+    assert!(
+        reader.wait_liveliness_change(Some(ms(30))).is_none(),
+        "nothing changes"
+    );
+
+    let handle = std::thread::spawn(move || {
+        std::thread::sleep(ms(40));
+        publisher.register_publisher().unwrap();
+        publisher
+    });
+    let started = Instant::now();
+    let status = reader
+        .wait_liveliness_change(Some(Duration::from_secs(5)))
+        .expect("the publisher appeared");
+    assert!(status.alive == 1 && !status.lost);
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let _publisher = handle.join().unwrap();
+    let started = Instant::now();
+    let status = reader
+        .wait_liveliness_change(Some(Duration::from_secs(5)))
+        .expect("the lease must expire");
+    assert!(status.lost && status.lost_count == 1);
+    assert!(started.elapsed() < Duration::from_secs(2));
+}

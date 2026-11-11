@@ -10,8 +10,9 @@ use crate::{
 };
 
 use super::{
-    check_ring_fits, check_slots, decode, encode, message_size, request_ring_name,
-    response_ring_name, RESPONSE_SLOTS, RPC_HEADER_BYTES, RPC_MAX_SERVERS,
+    check_ring_fits, check_slots, decode, encode, message_size,
+    reap::{reap_abandoned, ResponseLease},
+    request_ring_name, response_ring_name, RESPONSE_SLOTS, RPC_HEADER_BYTES, RPC_MAX_SERVERS,
 };
 
 const SPIN_ITERATIONS: u32 = 2000;
@@ -27,8 +28,10 @@ pub struct RpcClient {
     shards: Vec<(usize, LeanChannel)>,
     current: usize,
     responses: LeanChannel,
+    _lease: ResponseLease,
     request_buf: Vec<u8>,
     scratch: Vec<u8>,
+    stamp: bool,
 }
 
 fn new_client_id() -> u32 {
@@ -51,12 +54,10 @@ impl RpcClient {
         check_slots(request_slots)?;
         let client_id = new_client_id();
         let first = open_shard(service, 0, msg, request_slots)?;
-        let responses = LeanChannel::open(
-            &response_ring_name(service, client_id),
-            msg,
-            RESPONSE_SLOTS,
-            false,
-        )?;
+        reap_abandoned(service);
+        let response_name = response_ring_name(service, client_id);
+        let responses = LeanChannel::open(&response_name, msg, RESPONSE_SLOTS, false)?;
+        let lease = ResponseLease::acquire(&response_name)?;
         let mut client = Self {
             service: service.to_owned(),
             msg_size: msg,
@@ -67,8 +68,10 @@ impl RpcClient {
             shards: vec![(0, first)],
             current: 0,
             responses,
+            _lease: lease,
             request_buf: vec![0u8; msg],
             scratch: vec![0u8; msg],
+            stamp: false,
         };
         client.reroute()?;
         Ok(client)
@@ -98,6 +101,32 @@ impl RpcClient {
         self.shards[self.current].0
     }
 
+    pub fn set_stamp_requests(&mut self, stamp: bool) {
+        self.stamp = stamp;
+    }
+
+    pub fn servers_alive(&mut self) -> Result<usize> {
+        self.reroute()?;
+        Ok(self
+            .shards
+            .iter()
+            .filter(|(_, channel)| channel.live_consumers() > 0)
+            .count())
+    }
+
+    pub fn wait_for_server(&mut self, timeout: Option<Duration>) -> Result<bool> {
+        let deadline = timeout.and_then(|t| Instant::now().checked_add(t));
+        loop {
+            if self.servers_alive()? > 0 {
+                return Ok(true);
+            }
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                return Ok(false);
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub fn client_id(&self) -> u32 {
         self.client_id
     }
@@ -117,6 +146,8 @@ impl RpcClient {
         let deadline = Instant::now().checked_add(timeout);
         self.sequence += 1;
         let sequence = self.sequence;
+        let sequence =
+            super::pack_sequence(sequence, if self.stamp { super::monotonic_ms() } else { 0 });
         encode(&mut self.request_buf, self.client_id, sequence, request);
         self.send(deadline)?;
         let mut next_check = Instant::now() + FAILOVER_SLICE;

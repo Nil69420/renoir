@@ -17,6 +17,7 @@ mod clock;
 mod cursor;
 mod frame;
 mod frame_channel;
+mod frame_qos;
 #[cfg(test)]
 mod frame_tests;
 mod gate;

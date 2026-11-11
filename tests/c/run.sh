@@ -29,3 +29,11 @@ cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize
   -I"$root/include" "$root/tests/c/lean_qos_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/lean_qos_abi"
 LD_LIBRARY_PATH="$root/target/$profile" "$out/lean_qos_abi"
 LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/lean_qos_abi"
+cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize=undefined \
+  -I"$root/include" "$root/tests/c/frame_qos_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/frame_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" "$out/frame_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/frame_qos_abi"
+cc -std=c11 -Wall -Wextra -Wpedantic -Werror -fstack-protector-strong -fsanitize=undefined \
+  -I"$root/include" "$root/tests/c/rpc_qos_abi_test.c" -L"$root/target/$profile" -lrenoir -o "$out/rpc_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" "$out/rpc_qos_abi"
+LD_LIBRARY_PATH="$root/target/$profile" valgrind --leak-check=full --error-exitcode=1 -q "$out/rpc_qos_abi"

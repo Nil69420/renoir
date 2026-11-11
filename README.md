@@ -113,7 +113,7 @@ The evidence for each claim, and the list of what is not verified, is in [docs/s
 |---|---|
 | Undefined behaviour | Miri (default and Tree Borrows), UBSan, AddressSanitizer |
 | Data races and ordering | ThreadSanitizer, loom, shuttle, herd7 litmus tests on the AArch64 model, native arm64 CI |
-| Protocols | TLA+ models of the multi-producer ring and frame ownership, Kani proofs of the sizing arithmetic |
+| Protocols | TLA+ models of the multi-producer ring, frame slot ownership, the stamped seqlock and publisher-ownership failover, Kani proofs of the sizing arithmetic |
 | Hostile or corrupt shared memory | cargo-fuzz targets for lean, broadcast and frame rings |
 | Crash recovery | Chaos tests that SIGKILL publishers, consumers, frame holders and RPC servers under load |
 | Interface stability | SONAME `librenoir.so.0`, exported-symbol baseline, libabigail comparison in CI |

@@ -13,6 +13,22 @@ pub struct PyRpcClient {
 
 #[pymethods]
 impl PyRpcClient {
+    fn set_stamp_requests(&mut self, stamp: bool) {
+        self.inner.set_stamp_requests(stamp);
+    }
+
+    fn servers_alive(&mut self) -> PyResult<usize> {
+        self.inner.servers_alive().map_err(map_err)
+    }
+
+    #[pyo3(signature = (timeout_ms=None))]
+    fn wait_for_server(&mut self, py: Python<'_>, timeout_ms: Option<u64>) -> PyResult<bool> {
+        let timeout = timeout_ms.map(std::time::Duration::from_millis);
+        let inner = &mut self.inner;
+        py.detach(|| inner.wait_for_server(timeout))
+            .map_err(map_err)
+    }
+
     #[new]
     #[pyo3(signature = (service, max_payload, request_slots=64))]
     fn new(service: &str, max_payload: usize, request_slots: usize) -> PyResult<Self> {
@@ -45,6 +61,16 @@ pub struct PyRpcServer {
 
 #[pymethods]
 impl PyRpcServer {
+    #[pyo3(signature = (lifespan_ms=None))]
+    fn set_request_lifespan(&mut self, lifespan_ms: Option<u64>) {
+        self.inner
+            .set_request_lifespan(lifespan_ms.map(std::time::Duration::from_millis));
+    }
+
+    fn stale_requests(&self) -> u64 {
+        self.inner.stale_requests()
+    }
+
     #[new]
     #[pyo3(signature = (service, max_payload, request_slots=64))]
     fn new(service: &str, max_payload: usize, request_slots: usize) -> PyResult<Self> {

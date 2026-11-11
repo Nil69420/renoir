@@ -91,7 +91,13 @@ impl LeanRing {
 
     pub(super) fn check_offer(&self, qos: &LeanQos) -> Result<()> {
         let Some(word) = self.settled_offer() else {
-            return Ok(());
+            return if qos.require_offer {
+                Err(incompatible(
+                    "The ring records no QoS offer and one is required",
+                ))
+            } else {
+                Ok(())
+            };
         };
         let h = self.hdr();
         let offered_deadline = h.offered_deadline_ns.load(Ordering::Relaxed);
