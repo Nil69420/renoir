@@ -206,3 +206,36 @@ fn replying_to_a_client_that_has_gone_is_refused_instead_of_recreating_its_ring(
     assert!(server.reply(id, req.sequence, b"late").is_err());
     assert_eq!(count_responses(&service), 0);
 }
+
+fn open_response_fds(service: &str) -> usize {
+    let needle = format!("renoir_{service}_rsp_");
+    std::fs::read_dir("/proc/self/fd")
+        .unwrap()
+        .flatten()
+        .filter_map(|e| std::fs::read_link(e.path()).ok())
+        .filter(|target| target.to_string_lossy().contains(&needle))
+        .count()
+}
+
+#[test]
+fn a_server_does_not_keep_the_rings_of_clients_that_have_gone_mapped() {
+    let service = unique("fdleak");
+    let mut server = RpcServer::open(&service, 32, 16).unwrap();
+    let mut out = [0u8; 32];
+    let mut buf = [0u8; 32];
+    for _ in 0..8 {
+        let mut client = RpcClient::open(&service, 32, 16).unwrap();
+        let id = client.client_id();
+        assert!(client
+            .call(b"hi", &mut out, Duration::from_millis(20))
+            .is_err());
+        let req = server.poll(&mut buf).unwrap().unwrap();
+        server.reply(id, req.sequence, b"ok").unwrap();
+        drop(client);
+    }
+    let held = open_response_fds(&service);
+    assert!(
+        held <= 1,
+        "the server still holds {held} response rings of departed clients"
+    );
+}

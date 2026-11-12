@@ -146,6 +146,7 @@ fn response_channel<'a>(
                 "The client's response ring is gone",
             ));
         }
+        responses.retain(|id, _| region_path(&response_ring_name(service, *id)).exists());
         if responses.len() >= MAX_CACHED_CLIENTS {
             if let Some(oldest) = responses.keys().next().copied() {
                 responses.remove(&oldest);
