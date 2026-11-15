@@ -50,7 +50,7 @@ fn single_producer_batch_round_trips_in_order() {
             break;
         }
         assert!(n <= 8);
-        for chunk in out.chunks_exact(MSG).take(n) {
+        for chunk in out.as_chunks::<MSG>().0.iter().take(n) {
             seen.push(decode(chunk).1);
         }
     }
@@ -86,7 +86,7 @@ fn gated_batch_publishes_only_what_fits() {
         if n == 0 {
             break;
         }
-        for chunk in out.chunks_exact(MSG).take(n) {
+        for chunk in out.as_chunks::<MSG>().0.iter().take(n) {
             seen.push(decode(chunk).1);
         }
     }
@@ -128,7 +128,7 @@ fn multi_run(mode: LeanMode) {
         if n == 0 {
             break;
         }
-        for chunk in out.chunks_exact(MSG).take(n) {
+        for chunk in out.as_chunks::<MSG>().0.iter().take(n) {
             let (p, v) = decode(chunk);
             assert_eq!(v, last[p as usize] + 1, "producer {p} reordered");
             last[p as usize] = v;
@@ -189,7 +189,7 @@ fn multi_producer_gated_batches_are_lossless() {
         while count < total {
             assert!(std::time::Instant::now() < deadline, "starved at {count}");
             let n = ring.read_batch_gated(&mut consumer, &mut out).unwrap();
-            for chunk in out.chunks_exact(MSG).take(n) {
+            for chunk in out.as_chunks::<MSG>().0.iter().take(n) {
                 let (p, v) = decode(chunk);
                 assert_eq!(v, last[p as usize] + 1, "producer {p} lost or reordered");
                 last[p as usize] = v;

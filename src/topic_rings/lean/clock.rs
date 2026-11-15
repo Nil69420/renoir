@@ -70,6 +70,7 @@ fn counter_hz() -> Option<u64> {
 }
 
 #[cfg(all(target_arch = "x86_64", not(miri)))]
+#[allow(unused_unsafe)]
 fn counter_hz() -> Option<u64> {
     use core::arch::x86_64::{__cpuid, __cpuid_count};
     unsafe {

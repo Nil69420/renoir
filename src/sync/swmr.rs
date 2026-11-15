@@ -146,17 +146,9 @@ impl<T: Copy> SWMRRing<T> {
 
 impl<T: Copy> Drop for SWMRRing<T> {
     fn drop(&mut self) {
-        // SAFETY: Slots were allocated in `new`; only initialized (ready) slots are dropped.
-        // Dealloc uses the same layout as the original allocation.
+        // SAFETY: Slots were allocated in `new`; `T: Copy` needs no drop, so only the
+        // allocation is released, with the same layout as the original allocation.
         unsafe {
-            // Drop all initialized slots
-            for i in 0..self.capacity {
-                let slot = &*self.slots.as_ptr().add(i);
-                if AtomicSequence::is_ready(slot.sequence.load_relaxed()) {
-                    std::ptr::drop_in_place(slot.data_ptr());
-                }
-            }
-
             if let Ok(layout) = std::alloc::Layout::array::<SWMRSlot<T>>(self.capacity) {
                 std::alloc::dealloc(self.slots.as_ptr() as *mut u8, layout);
             }
@@ -190,14 +182,6 @@ impl<'a, T: Copy> WriterHandle<'a, T> {
             return Err(SyncError::NoSlotsAvailable);
         }
 
-        // Drop the previous value on wraparound (matches force_write; a no-op
-        // for Copy types but keeps slot lifecycle consistent)
-        unsafe {
-            if AtomicSequence::is_ready(current_seq) {
-                std::ptr::drop_in_place(slot.data_ptr());
-            }
-        }
-
         // Write data to slot (slot is now in WRITING state)
         // SAFETY: Slot has been claimed for writing (WRITING state); exclusive access is guaranteed.
         unsafe {
@@ -228,16 +212,11 @@ impl<'a, T: Copy> WriterHandle<'a, T> {
         let slot = self.ring.slot(slot_index);
 
         // Force claim slot (override any existing state)
-        let current_seq = slot.sequence().load_relaxed();
         slot.sequence().store_relaxed(special::WRITING);
 
         // Write data
-        // SAFETY: Slot is force-claimed (WRITING state); old data is dropped only if it was initialized.
+        // SAFETY: Slot is force-claimed (WRITING state); `T: Copy` has no destructor to run.
         unsafe {
-            // Drop existing data if it was ready
-            if AtomicSequence::is_ready(current_seq) {
-                std::ptr::drop_in_place(slot.data_ptr());
-            }
             std::ptr::write(slot.data_ptr(), data);
         }
 

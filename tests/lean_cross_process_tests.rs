@@ -30,8 +30,8 @@ fn open(name: &str, oldest: u32) -> *mut std::ffi::c_void {
 
 fn encode(seq: u64) -> [u8; MSG] {
     let mut b = [0u8; MSG];
-    for chunk in b.chunks_exact_mut(8) {
-        chunk.copy_from_slice(&seq.to_le_bytes());
+    for chunk in b.as_chunks_mut::<8>().0.iter_mut() {
+        *chunk = seq.to_le_bytes();
     }
     b
 }
@@ -48,12 +48,8 @@ fn consumer(name: &str) {
             continue;
         }
         let first = u64::from_le_bytes(buf[0..8].try_into().unwrap());
-        for chunk in buf.chunks_exact(8) {
-            assert_eq!(
-                u64::from_le_bytes(chunk.try_into().unwrap()),
-                first,
-                "torn read"
-            );
+        for chunk in buf.as_chunks::<8>().0.iter() {
+            assert_eq!(u64::from_le_bytes(*chunk), first, "torn read");
         }
         assert!(first > last, "out of order: {first} after {last}");
         last = first;
