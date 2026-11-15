@@ -60,7 +60,11 @@ fn main() {
     {
         println!("cargo:rustc-cdylib-link-arg=-Wl,-soname,librenoir.so.0");
         if let Ok(out) = env::var("OUT_DIR") {
-            if let Some(profile_dir) = Path::new(&out).ancestors().nth(3) {
+            let profile_dir = Path::new(&out)
+                .ancestors()
+                .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+                .and_then(Path::parent);
+            if let Some(profile_dir) = profile_dir {
                 let link = profile_dir.join("librenoir.so.0");
                 let _ = std::fs::remove_file(&link);
                 let _ = std::os::unix::fs::symlink("librenoir.so", &link);
