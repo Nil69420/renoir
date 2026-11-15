@@ -126,8 +126,8 @@ impl PoolAllocator {
         // lowest-offset block ends up as the shard head.
 
         // Reset all shard heads
-        for s in 0..self.num_shards {
-            self.shard_heads[s].store(usize::MAX, Ordering::Relaxed);
+        for head in self.shard_heads.iter().take(self.num_shards) {
+            head.store(usize::MAX, Ordering::Relaxed);
         }
 
         // SAFETY: `base_ptr` is valid for `total_blocks * block_size` bytes (checked in constructor),
