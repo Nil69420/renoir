@@ -46,7 +46,7 @@ fn publish_cost(c: &mut Criterion) {
     let batch = [7u8; 32 * 8];
     group.bench_function("eight_singles", |b| {
         b.iter(|| {
-            for chunk in batch.chunks_exact(32) {
+            for chunk in batch.as_chunks::<32>().0.iter() {
                 publisher.publish(black_box(chunk)).unwrap();
             }
         })
@@ -56,7 +56,7 @@ fn publish_cost(c: &mut Criterion) {
     });
     group.bench_function("eight_singles_multi_producer", |b| {
         b.iter(|| {
-            for chunk in batch.chunks_exact(32) {
+            for chunk in batch.as_chunks::<32>().0.iter() {
                 mp_publisher.publish(black_box(chunk)).unwrap();
             }
         })

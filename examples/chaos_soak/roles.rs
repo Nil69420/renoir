@@ -20,9 +20,9 @@ fn encode(seq: u64, id: u64) -> [u8; MSG] {
     let mut b = [0u8; MSG];
     b[0..8].copy_from_slice(&seq.to_le_bytes());
     b[8..16].copy_from_slice(&id.to_le_bytes());
-    for (i, chunk) in b[16..].chunks_exact_mut(8).enumerate() {
+    for (i, chunk) in b[16..].as_chunks_mut::<8>().0.iter_mut().enumerate() {
         let word = seq.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ id ^ i as u64;
-        chunk.copy_from_slice(&word.to_le_bytes());
+        *chunk = word.to_le_bytes();
     }
     b
 }
