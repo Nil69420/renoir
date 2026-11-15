@@ -314,52 +314,6 @@ jobs:
         retention-days: 30
       if: always()
 
-  # Job 7: Rustdoc → GitHub Pages
-  docs:
-    name: Documentation (Rustdoc)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read   # needed by actions/checkout (job-level overrides workflow-level)
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Configure GitHub Pages
-      uses: actions/configure-pages@v5
-
-    - name: Cache cargo dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-docs-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-    - name: Build rustdoc
-      run: |
-        cargo doc --all-features --no-deps --document-private-items
-        echo '<meta http-equiv="refresh" content="0; url=renoir">' > target/doc/index.html
-
-    - name: Upload Pages artifact
-      uses: actions/upload-pages-artifact@v3
-      with:
-        path: target/doc
-
-    - name: Deploy to GitHub Pages
-      id: deploy
-      uses: actions/deploy-pages@v4
-
   # Job 8: Test Results Summary
   test_results:
     name: Test Results Summary

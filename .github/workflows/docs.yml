@@ -1,0 +1,80 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'include/**'
+      - 'Cargo.toml'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - '.github/workflows/docs.yml'
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  MDBOOK_VERSION: v0.5.4
+  MDBOOK_SHA256: 3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7
+
+jobs:
+  build:
+    name: Build the book and the API reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install mdBook
+        run: |
+          curl -fsSL --retry 5 -o /tmp/mdbook.tar.gz \
+            "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_VERSION}/mdbook-${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${MDBOOK_SHA256}  /tmp/mdbook.tar.gz" | sha256sum -c -
+          tar xzf /tmp/mdbook.tar.gz -C /usr/local/bin
+      - name: Build the book
+        run: mdbook build docs -d "$GITHUB_WORKSPACE/site"
+      - name: Build the API reference
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: |
+          cargo doc --all-features --no-deps
+          mkdir -p site/api
+          cp -r target/doc/. site/api/
+      - name: Link the API reference from the site root
+        run: |
+          printf '%s\n' '<!DOCTYPE html><meta charset="utf-8"><title>Renoir API reference</title><meta http-equiv="refresh" content="0; url=renoir/index.html">' > site/api/index.html
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
+        if: github.event_name != 'pull_request'
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
+        if: github.event_name != 'pull_request'
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
